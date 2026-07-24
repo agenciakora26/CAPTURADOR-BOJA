@@ -9,13 +9,13 @@ url = raw_url.replace("/rest/v1", "").rstrip("/")
 key: str = os.environ.get("SUPABASE_KEY", "")
 supabase: Client = create_client(url, key)
 
-# Función para quitar tildes y mayúsculas
+# Limpiador de texto para tildes y mayúsculas
 def limpiar_texto(texto):
     texto = texto.lower()
     texto = unicodedata.normalize('NFD', texto)
     return ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
 
-# Función para clasificar por sectores
+# Clasificador por sectores
 def obtener_categoria(titulo):
     texto = limpiar_texto(titulo)
     
@@ -34,22 +34,35 @@ def obtener_categoria(titulo):
     else:
         return "General"
 
-# Dirección del canal oficial RSS del BOJA
+# 1. Cargar el canal oficial RSS del BOJA
 url_boja = "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
 feed = feedparser.parse(url_boja)
 
-# Guardar cada anuncio en Supabase con su categoría
+# 2. Cargar perfiles de usuarios y sus sectores
+usuarios = supabase.table("perfiles_usuarios").select("*").execute().data
+
+# 3. Procesar cada anuncio
 for entry in feed.entries:
     titulo = entry.get('title', 'Sin título')
     link = entry.get('link', '')
-    
     categoria = obtener_categoria(titulo)
     
-    data = {
+    # Guardar en la tabla principal de anuncios
+    supabase.table("anuncios_boja").insert({
         "titulo": titulo,
         "url_pdf": link,
         "categoria": categoria
-    }
-    supabase.table("anuncios_boja").insert(data).execute()
+    }).execute()
+    
+    # Generar alertas para los usuarios interesados en esta categoría
+    for usr in usuarios:
+        sectores = usr.get("sectores_suscritos") or []
+        if categoria in sectores:
+            mensaje = f"Nuevo anuncio publicado en {categoria}: {titulo[:80]}..."
+            supabase.table("notificaciones_web").insert({
+                "usuario_id": usr["id"],
+                "mensaje": mensaje,
+                "leida": False
+            }).execute()
 
-print("¡Proceso completado!")
+print("¡BOJA capturado, categorizado y notificaciones generadas con éxito!")
