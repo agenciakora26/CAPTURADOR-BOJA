@@ -2,9 +2,12 @@ import os
 import feedparser
 from supabase import create_client, Client
 
-# Conexión automática con Supabase usando las claves secretas que guardaste
-url: str = os.environ.get("SUPABASE_URL")
-key: str = os.environ.get("SUPABASE_KEY")
+# Obtenemos la URL y la limpiamos automáticamente si tiene '/rest/v1/' al final
+raw_url = os.environ.get("SUPABASE_URL", "")
+url = raw_url.replace("/rest/v1", "").rstrip("/")
+key: str = os.environ.get("SUPABASE_KEY", "")
+
+# Conexión con Supabase
 supabase: Client = create_client(url, key)
 
 # Dirección del canal oficial RSS del BOJA
