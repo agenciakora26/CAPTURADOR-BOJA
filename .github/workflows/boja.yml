@@ -2,9 +2,8 @@ name: Capturador Diario BOJA
 
 on:
   schedule:
-    # Se ejecuta automáticamente de lunes a viernes a las 08:00 AM (Hora España)
     - cron: '0 6 * * 1-5'
-  workflow_dispatch: # Permite probarlo manualmente cuando quieras
+  workflow_dispatch:
 
 jobs:
   ejecutar-script:
@@ -27,4 +26,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: python main.py
