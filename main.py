@@ -48,7 +48,9 @@ usuarios = supabase.table("perfiles_usuarios").select("*").execute().data
 # Contador de alertas por usuario hoy
 alertas_hoy = {usr["id"]: 0 for usr in usuarios}
 
-# 3. Procesar anuncios y notificaciones
+# 3. Procesar anuncios y notificaciones web
+print(f"Lector BOJA iniciado. Procesando {len(feed.entries)} publicaciones...")
+
 for entry in feed.entries:
     titulo = entry.get('title', 'Sin título')
     link = entry.get('link', '')
@@ -71,13 +73,18 @@ for entry in feed.entries:
             }).execute()
             alertas_hoy[usr["id"]] += 1
 
-# 4. Enviar Email "Gancho" si el usuario tiene novedades hoy
+# 4. Enviar Email "Gancho" a usuarios con novedades
+print(f"Comprobando envíos de emails para {len(usuarios)} usuarios registrados...")
+
 for usr in usuarios:
     total = alertas_hoy.get(usr["id"], 0)
-    if total > 0 and resend.api_key:
+    print(f"Usuario {usr['email']}: {total} alertas hoy.")
+    
+    if total > 0:
+        print(f"Intentando enviar email a {usr['email']}...")
         try:
-            resend.Emails.send({
-                "from": "boletin.es <onboarding@resend.dev>",
+            respuesta = resend.Emails.send({
+                "from": "boletinhoy.es <alertas@boletinhoy.es>",
                 "to": [usr["email"]],
                 "subject": f"🔔 Tienes {total} nuevas publicaciones de tu interés",
                 "html": f"""
@@ -86,16 +93,18 @@ for usr in usuarios:
                         <p>Hoy se han publicado <strong>{total} nuevos anuncios</strong> en el BOJA que coinciden con tus sectores de interés.</p>
                         <p>Entra en tu panel privado para ver el desglose completo y los enlaces directos:</p>
                         <p style="margin-top: 25px;">
-                            <a href="https://boletin.es" style="background-color: #2563eb; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Ver novedades en boletin.es</a>
+                            <a href="https://boletinhoy.es" style="background-color: #2563eb; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Ver novedades en boletinhoy.es</a>
                         </p>
                         <br><br>
                         <hr style="border: none; border-top: 1px solid #eee;">
-                        <small style="color: #777;">Alertas automáticas enviadas por boletin.es</small>
+                        <small style="color: #777;">Alertas automáticas enviadas por boletinhoy.es</small>
                     </div>
                 """
             })
-            print(f"Email enviado a {usr['email']}")
+            print(f"✅ Email enviado con éxito a {usr['email']}. Respuesta: {respuesta}")
         except Exception as e:
-            print(f"Error al enviar email: {e}")
+            print(f"❌ ERROR al enviar email a {usr['email']}: {e}")
+    else:
+        print(f"ℹ️ No se envía email a {usr['email']} porque no hay novedades en sus sectores.")
 
-print("¡Proceso diario completado con éxito!")
+print("¡Proceso diario del BOJA completado con éxito!")
