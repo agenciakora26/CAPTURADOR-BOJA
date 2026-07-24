@@ -1,4 +1,5 @@
 import os
+import unicodedata
 import feedparser
 from supabase import create_client, Client
 
@@ -8,21 +9,27 @@ url = raw_url.replace("/rest/v1", "").rstrip("/")
 key: str = os.environ.get("SUPABASE_KEY", "")
 supabase: Client = create_client(url, key)
 
-# Función para categorizar el anuncio según palabras clave en el título
+# Función para quitar tildes y mayúsculas
+def limpiar_texto(texto):
+    texto = texto.lower()
+    texto = unicodedata.normalize('NFD', texto)
+    return ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
+
+# Función para clasificar por sectores
 def obtener_categoria(titulo):
-    texto = titulo.lower()
+    texto = limpiar_texto(titulo)
     
-    if any(palabra in texto for palabra in ["oposicion", "oposiciones", "nombramiento", "personal", "bolsa de trabajo", "plaza", "pruebas selectivas"]):
+    if any(p in texto for p in ["oposicion", "oposiciones", "nombramiento", "personal", "bolsa de trabajo", "plaza", "pruebas selectivas", "resolucion"]):
         return "Oposiciones y Empleo"
-    elif any(palabra in texto for palabra in ["subvencion", "subvenciones", "ayuda", "incentivo", "beca", "financiacion"]):
+    elif any(p in texto for p in ["subvencion", "subvenciones", "ayuda", "incentivo", "beca", "financiacion", "extracto"]):
         return "Subvenciones y Ayudas"
-    elif any(palabra in texto for palabra in ["licitacion", "contratacion", "adjudicacion", "contrato", "pliego"]):
+    elif any(p in texto for p in ["licitacion", "contratacion", "adjudicacion", "contrato", "pliego"]):
         return "Contratación Pública"
-    elif any(palabra in texto for palabra in ["medio ambiente", "forestal", "agua", "caza", "pesca", "residuos", "parque natural"]):
+    elif any(p in texto for p in ["medio ambiente", "forestal", "agua", "caza", "pesca", "residuos", "parque natural"]):
         return "Medio Ambiente"
-    elif any(palabra in texto for palabra in ["urbanismo", "vivienda", "suelo", "obras", "carreteras"]):
+    elif any(p in texto for p in ["urbanismo", "vivienda", "suelo", "obras", "carreteras"]):
         return "Urbanismo e Infraestructuras"
-    elif any(palabra in texto for palabra in ["autorización", "licencia", "concesión", "sanitaria"]):
+    elif any(p in texto for p in ["autorizacion", "licencia", "concesion", "sanitaria"]):
         return "Licencias y Autorizaciones"
     else:
         return "General"
@@ -45,4 +52,4 @@ for entry in feed.entries:
     }
     supabase.table("anuncios_boja").insert(data).execute()
 
-print("¡Lectura y categorización del BOJA completadas con éxito!")
+print("¡Proceso completado!")
