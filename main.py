@@ -70,37 +70,60 @@ def evaluar_coincidencia_estricta(texto_noticia, intereses_usuario):
                 
     return False
 
-# 1. Cargar RSS BOJA
+def descargar_y_analizar_pdf_futuro(url_pdf):
+    """
+    HOOK PARA FUTURA VERSIÓN:
+    Aquí se implementará la descarga del PDF mediante peticiones HTTP y 
+    la extracción de texto para un segundo nivel de validación más profundo.
+    """
+    # TODO: Implementar descarga de PDF y análisis avanzado de texto en v2
+    pass
+
+# 1. Cargar URLs existentes en Supabase para evitar duplicados absolutos
+print("Comprobando anuncios ya registrados en Supabase...")
+existing_records = supabase.table("anuncios_boja").select("url_pdf").execute().data
+urls_existentes = {record["url_pdf"] for record in existing_records}
+print(f"Se encontraron {len(urls_existentes)} anuncios previos en la base de datos.")
+
+# 2. Cargar RSS BOJA
 url_boja = "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
 feed = feedparser.parse(url_boja)
 
-# 2. Cargar perfiles de usuarios desde Supabase (una sola llamada)
+# 3. Cargar perfiles de usuarios desde Supabase
 usuarios = supabase.table("perfiles_usuarios").select("*").execute().data
 
-# Contador de alertas por usuario hoy
+# Contador de alertas exclusivo para la ejecución actual
 alertas_hoy = {usr["id"]: 0 for usr in usuarios}
 
-print(f"Lector BOJA optimizado iniciado. Procesando {len(feed.entries)} publicaciones...")
+print(f"Lector BOJA iniciado. Analizando {len(feed.entries)} publicaciones del feed...")
 
-# Listas temporales para inserción masiva (Batch) al final
 anuncios_a_insertar = []
 notificaciones_a_insertar = []
 
 for entry in feed.entries:
-    titulo = entry.get('title', 'Sin título')
     link = entry.get('link', '')
+    
+    # Si la URL del PDF ya existe en la base de datos, la ignoramos por completo
+    if link in urls_existentes:
+        continue
+
+    titulo = entry.get('title', 'Sin título')
     descripcion = entry.get('summary', '') or entry.get('description', '')
     
     texto_completo = f"{titulo} {descripcion}"
     
-    # Acumulamos el anuncio para insertarlo en bloque
+    # [FUTURA VERSIÓN]: Llamada preparada para el análisis de PDF si fuera necesario
+    # texto_pdf_extraido = descargar_y_analizar_pdf_futuro(link)
+    # if texto_pdf_extraido: texto_completo += " " + texto_pdf_extraido
+
+    # Acumulamos el nuevo anuncio para inserción masiva
     anuncios_a_insertar.append({
         "titulo": titulo,
         "url_pdf": link,
-        "categoria": "Filtro Estricto Rápido"
+        "categoria": "Filtro Estricto"
     })
     
-    # Cruzamos localmente en memoria
+    # Cruzamos con los intereses de los usuarios en memoria
     for usr in usuarios:
         intereses_raw = usr.get("sectores_suscritos") or []
         if not intereses_raw:
@@ -115,27 +138,29 @@ for entry in feed.entries:
             })
             alertas_hoy[usr["id"]] += 1
 
-# 3. Inserciones masivas en Supabase de golpe (Súper rápido)
+# 4. Inserciones masivas en Supabase de las nuevas publicaciones
 if anuncios_a_insertar:
     try:
         supabase.table("anuncios_boja").insert(anuncios_a_insertar).execute()
-        print(f"✅ {len(anuncios_a_insertar)} anuncios guardados en Supabase.")
+        print(f"✅ {len(anuncios_a_insertar)} nuevos anuncios guardados en Supabase.")
     except Exception as e:
         print(f"❌ Error insertando anuncios en lote: {e}")
+else:
+    print("ℹ️ No hay anuncios nuevos que añadir en esta ejecución.")
 
 if notificaciones_a_insertar:
     try:
         supabase.table("notificaciones_web").insert(notificaciones_a_insertar).execute()
-        print(f"✅ {len(notificaciones_a_insertar)} notificaciones web creadas.")
+        print(f"✅ {len(notificaciones_a_insertar)} nuevas notificaciones web creadas.")
     except Exception as e:
         print(f"❌ Error insertando notificaciones en lote: {e}")
 
-# 4. Enviar Email a usuarios con novedades detectadas
-print(f"Comprobando envíos de emails para {len(usuarios)} usuarios registrados...")
+# 5. Enviar Email exclusivamente por las novedades detectadas en esta ejecución
+print(f"Comprobando envíos de emails para {len(usuarios)} usuarios...")
 
 for usr in usuarios:
     total = alertas_hoy.get(usr["id"], 0)
-    print(f"Usuario {usr['email']}: {total} alertas relevantes hoy.")
+    print(f"Usuario {usr['email']}: {total} alertas relevantes en esta ejecución.")
     
     if total > 0:
         print(f"Intentando enviar email a {usr['email']}...")
@@ -147,7 +172,7 @@ for usr in usuarios:
                 "html": f"""
                     <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
                         <h2 style="color: #2563eb;">¡Hola!</h2>
-                        <p>Hemos filtrado estrictamente el BOJA y hay <strong>{total} nuevos anuncios</strong> que coinciden exactamente con tus sectores.</p>
+                        <p>Hemos detectado <strong>{total} nuevos anuncios</strong> en esta revisión que coinciden exactamente con tus sectores.</p>
                         <p>Entra en tu panel privado para ver los detalles:</p>
                         <p style="margin-top: 25px;">
                             <a href="https://boletinhoy.es" style="background-color: #2563eb; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Ver novedades en boletinhoy.es</a>
@@ -162,6 +187,6 @@ for usr in usuarios:
         except Exception as e:
             print(f"❌ ERROR al enviar email a {usr['email']}: {e}")
     else:
-        print(f"ℹ️ No se envía email a {usr['email']} porque no hay novedades relevantes.")
+        print(f"ℹ️ No se envía email a {usr['email']} porque no hay novedades en esta ejecución.")
 
-print("¡Proceso completado en tiempo récord sin IA!")
+print("¡Proceso completado con éxito sin duplicados!")
