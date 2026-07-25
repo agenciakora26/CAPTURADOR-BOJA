@@ -1,4 +1,5 @@
 import os
+import time
 import unicodedata
 import feedparser
 import resend
@@ -17,17 +18,17 @@ resend.api_key = os.environ.get("RESEND_API_KEY", "")
 # Conexión con Google Gemini (IA Gratuita)
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# Limpiador de texto para tildes (útil por si se necesita limpiar descriptores)
+# Limpiador de texto para tildes
 def limpiar_texto(texto):
     texto = texto.lower()
     texto = unicodedata.normalize('NFD', texto)
     return ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
 
-# Función de IA Semántica para sustituir el filtro rígido de categorías
+# Función de IA Semántica con control de pausas para la cuota gratuita
 def ia_considera_interesante(titulo_noticia, descripcion_noticia, intereses_usuario):
     """
     Usa el modelo gratuito de Gemini para decidir si una noticia del BOJA 
-    es relevante para los intereses específicos de un usuario (conceptos, palabras clave, etc.).
+    es relevante para los intereses específicos de un usuario.
     """
     prompt = f"""
     Eres un asistente legal experto en el BOJA (Boletín Oficial de la Junta de Andalucía).
@@ -42,13 +43,17 @@ def ia_considera_interesante(titulo_noticia, descripcion_noticia, intereses_usua
     
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-1.5-flash',
             contents=prompt,
         )
+        # Pausa de 4 segundos para respetar los límites de la cuota gratuita por minuto (RPM)
+        time.sleep(4)
+        
         resultado = response.text.strip().upper()
         return "SÍ" in resultado
     except Exception as e:
         print(f"Error consultando la IA para la noticia '{titulo_noticia}': {e}")
+        time.sleep(4)
         return False
 
 # 1. Cargar RSS BOJA
