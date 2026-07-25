@@ -15,7 +15,7 @@ supabase: Client = create_client(url, key)
 # Conexión con Resend (Envío de Emails)
 resend.api_key = os.environ.get("RESEND_API_KEY", "")
 
-# Conexión con Google Gemini (IA Gratuita)
+# Conexión con Google Gemini (IA)
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 # Limpiador de texto para tildes
@@ -23,38 +23,6 @@ def limpiar_texto(texto):
     texto = texto.lower()
     texto = unicodedata.normalize('NFD', texto)
     return ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
-
-# Función de IA Semántica con control de pausas para la cuota gratuita
-def ia_considera_interesante(titulo_noticia, descripcion_noticia, intereses_usuario):
-    """
-    Usa el modelo gratuito de Gemini para decidir si una noticia del BOJA 
-    es relevante para los intereses específicos de un usuario.
-    """
-    prompt = f"""
-    Eres un asistente legal experto en el BOJA (Boletín Oficial de la Junta de Andalucía).
-    Analiza la siguiente noticia y determina si es de verdadero interés para un usuario 
-    que se ha suscrito a los siguientes temas o intereses: {intereses_usuario}.
-    
-    Título de la noticia: {titulo_noticia}
-    Contenido/Resumen: {descripcion_noticia}
-    
-    Responde estrictamente con la palabra "SÍ" si tiene relación directa o temática con sus intereses, o "NO" si no guarda ninguna relación.
-    """
-    
-    try:
-        response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=prompt,
-        )
-        # Pausa de 4 segundos para respetar los límites de la cuota gratuita por minuto (RPM)
-        time.sleep(4)
-        
-        resultado = response.text.strip().upper()
-        return "SÍ" in resultado
-    except Exception as e:
-        print(f"Error consultando la IA para la noticia '{titulo_noticia}': {e}")
-        time.sleep(4)
-        return False
 
 # 1. Cargar RSS BOJA
 url_boja = "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
@@ -66,8 +34,15 @@ usuarios = supabase.table("perfiles_usuarios").select("*").execute().data
 # Contador de alertas por usuario hoy
 alertas_hoy = {usr["id"]: 0 for usr in usuarios}
 
-# 3. Procesar anuncios, evaluar con IA y registrar notificaciones web
-print(f"Lector BOJA con IA iniciado. Procesando {len(feed.entries)} publicaciones...")
+print(f"Lector BOJA optimizado iniciado. Procesando {len(feed.entries)} publicaciones...")
+
+# 3. Recopilar todos los intereses únicos del sistema para consultarlos de una sola vez
+intereses_totales = set()
+for usr in usuarios:
+    for interes in (usr.get("sectores_suscritos") or []):
+        intereses_totales.add(interes.strip())
+
+intereses_lista = list(intereses_totales)
 
 for entry in feed.entries:
     titulo = entry.get('title', 'Sin título')
@@ -81,26 +56,54 @@ for entry in feed.entries:
         "categoria": "IA Semántica"
     }).execute()
     
-    # Comparamos la noticia de forma inteligente con cada usuario usando Gemini
-    for usr in usuarios:
-        intereses = usr.get("sectores_suscritos") or []
-        
-        if not intereses:
-            continue # Si el usuario no tiene intereses definidos, saltamos
-            
-        # Llamada a la IA gratuita para validación semántica
-        es_relevante = ia_considera_interesante(titulo, descripcion, intereses)
-        
-        if es_relevante:
-            mensaje = f"Novedad de tu interés: {titulo[:80]}..."
-            supabase.table("notificaciones_web").insert({
-                "usuario_id": usr["id"],
-                "mensaje": mensaje,
-                "leida": False
-            }).execute()
-            alertas_hoy[usr["id"]] += 1
+    if not intereses_lista:
+        continue
 
-# 4. Enviar Email "Gancho" a usuarios con novedades detectadas por la IA
+    # LLAMADA ÚNICA A LA IA POR CADA NOTICIA DEL BOJA (Independiente de los usuarios)
+    prompt = f"""
+    Eres un asistente legal experto en el BOJA (Boletín Oficial de la Junta de Andalucía).
+    Analiza la siguiente noticia y selecciona de la lista EXACTA de abajo cuáles de estos temas guardan relación directa.
+    Devuelve ÚNICAMENTE los temas de la lista que apliquen, separados por comas. Si ninguno aplica, responde "NINGUNO".
+    
+    Lista de temas disponibles: {intereses_lista}
+    
+    Título de la noticia: {titulo}
+    Contenido: {descripcion}
+    """
+    
+    temas_coincidentes = []
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        time.sleep(4) # Pausa de seguridad para respetar el límite de la cuota gratuita por minuto
+        
+        texto_respuesta = response.text.strip()
+        if "NINGUNO" not in texto_respuesta.upper():
+            for interes in intereses_lista:
+                if interes.lower() in texto_respuesta.lower():
+                    temas_coincidentes.append(interes)
+                    
+    except Exception as e:
+        print(f"Error consultando la IA para la noticia '{titulo}': {e}")
+        time.sleep(4)
+        continue
+
+    # Cruzamos los temas detectados localmente con los usuarios en memoria (Cero llamadas extra a la IA)
+    if temas_coincidentes:
+        for usr in usuarios:
+            user_intereses = usr.get("sectores_suscritos") or []
+            if any(t in user_intereses for t in temas_coincidentes):
+                mensaje = f"Novedad de tu interés: {titulo[:80]}..."
+                supabase.table("notificaciones_web").insert({
+                    "usuario_id": usr["id"],
+                    "mensaje": mensaje,
+                    "leida": False
+                }).execute()
+                alertas_hoy[usr["id"]] += 1
+
+# 4. Enviar Email "Gancho" a usuarios con novedades detectadas
 print(f"Comprobando envíos de emails para {len(usuarios)} usuarios registrados...")
 
 for usr in usuarios:
@@ -134,4 +137,4 @@ for usr in usuarios:
     else:
         print(f"ℹ️ No se envía email a {usr['email']} porque no hay novedades relevantes.")
 
-print("¡Proceso diario del BOJA con IA completado con éxito!")
+print("¡Proceso diario del BOJA optimizado completado con éxito!")
