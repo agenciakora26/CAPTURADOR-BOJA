@@ -1,5 +1,3 @@
-google-genai
 feedparser
-resend
 supabase
-requests
+resend
