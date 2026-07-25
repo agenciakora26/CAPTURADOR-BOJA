@@ -20,7 +20,7 @@ def limpiar_texto(texto):
     texto = unicodedata.normalize('NFD', texto)
     return ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
 
-# DICCIONARIO DE SECTORES HIPER-ACOTADOS (Basado estrictamente en tus categorías web)
+# DICCIONARIO DE SECTORES HIPER-ACOTADOS
 DICCIONARIO_SECTORES = {
     "oposiciones y empleo público": [
         "oposicion", "oposiciones", "empleo publico", "bolsa de trabajo", "funcionario", 
@@ -50,27 +50,20 @@ DICCIONARIO_SECTORES = {
 }
 
 def evaluar_coincidencia_estricta(texto_noticia, intereses_usuario):
-    """
-    Comprueba si el texto del BOJA encaja de manera precisa con los sectores del usuario.
-    Requiere palabras clave directas y relevantes para evitar falsos positivos.
-    """
     texto_limpio = limpiar_texto(texto_noticia)
     
     for interes in intereses_usuario:
         interes_limpio = limpiar_texto(interes)
         
-        # Buscamos a qué categoría exacta corresponde del diccionario
         palabras_clave = []
         for clave_maestra, terminos in DICCIONARIO_SECTORES.items():
             if clave_maestra in interes_limpio or interes_limpio in clave_maestra:
                 palabras_clave.extend(terminos)
                 break
         
-        # Si el usuario metió un interés personalizado que no está en la lista, lo usamos tal cual
         if not palabras_clave:
             palabras_clave = [interes_limpio]
             
-        # Verificamos si alguna de las palabras clave de ese sector aparece en la noticia
         for palabra in palabras_clave:
             if palabra and palabra in texto_limpio:
                 return True
@@ -81,13 +74,17 @@ def evaluar_coincidencia_estricta(texto_noticia, intereses_usuario):
 url_boja = "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
 feed = feedparser.parse(url_boja)
 
-# 2. Cargar perfiles de usuarios desde Supabase
+# 2. Cargar perfiles de usuarios desde Supabase (una sola llamada)
 usuarios = supabase.table("perfiles_usuarios").select("*").execute().data
 
 # Contador de alertas por usuario hoy
 alertas_hoy = {usr["id"]: 0 for usr in usuarios}
 
-print(f"Lector BOJA con filtro estricto iniciado. Procesando {len(feed.entries)} publicaciones...")
+print(f"Lector BOJA optimizado iniciado. Procesando {len(feed.entries)} publicaciones...")
+
+# Listas temporales para inserción masiva (Batch) al final
+anuncios_a_insertar = []
+notificaciones_a_insertar = []
 
 for entry in feed.entries:
     titulo = entry.get('title', 'Sin título')
@@ -96,30 +93,44 @@ for entry in feed.entries:
     
     texto_completo = f"{titulo} {descripcion}"
     
-    # Guardamos el anuncio de forma general en la base de datos
-    supabase.table("anuncios_boja").insert({
+    # Acumulamos el anuncio para insertarlo en bloque
+    anuncios_a_insertar.append({
         "titulo": titulo,
         "url_pdf": link,
-        "categoria": "Filtro Estricto"
-    }).execute()
+        "categoria": "Filtro Estricto Rápido"
+    })
     
-    # Cruzamos el BOJA con los intereses de cada usuario de forma precisa
+    # Cruzamos localmente en memoria
     for usr in usuarios:
         intereses_raw = usr.get("sectores_suscritos") or []
         if not intereses_raw:
             continue
             
-        # Evaluamos con el filtro acotado
         if evaluar_coincidencia_estricta(texto_completo, intereses_raw):
             mensaje = f"Novedad de tu interés: {titulo[:80]}..."
-            supabase.table("notificaciones_web").insert({
+            notificaciones_a_insertar.append({
                 "usuario_id": usr["id"],
                 "mensaje": mensaje,
                 "leida": False
-            }).execute()
+            })
             alertas_hoy[usr["id"]] += 1
 
-# 3. Enviar Email a usuarios con novedades detectadas
+# 3. Inserciones masivas en Supabase de golpe (Súper rápido)
+if anuncios_a_insertar:
+    try:
+        supabase.table("anuncios_boja").insert(anuncios_a_insertar).execute()
+        print(f"✅ {len(anuncios_a_insertar)} anuncios guardados en Supabase.")
+    except Exception as e:
+        print(f"❌ Error insertando anuncios en lote: {e}")
+
+if notificaciones_a_insertar:
+    try:
+        supabase.table("notificaciones_web").insert(notificaciones_a_insertar).execute()
+        print(f"✅ {len(notificaciones_a_insertar)} notificaciones web creadas.")
+    except Exception as e:
+        print(f"❌ Error insertando notificaciones en lote: {e}")
+
+# 4. Enviar Email a usuarios con novedades detectadas
 print(f"Comprobando envíos de emails para {len(usuarios)} usuarios registrados...")
 
 for usr in usuarios:
@@ -153,4 +164,4 @@ for usr in usuarios:
     else:
         print(f"ℹ️ No se envía email a {usr['email']} porque no hay novedades relevantes.")
 
-print("¡Proceso de filtrado estricto completado con éxito!")
+print("¡Proceso completado en tiempo récord sin IA!")
