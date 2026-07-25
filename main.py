@@ -42,7 +42,7 @@ def ia_considera_interesante(titulo_noticia, descripcion_noticia, intereses_usua
     
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-2.0-flash',
             contents=prompt,
         )
         resultado = response.text.strip().upper()
