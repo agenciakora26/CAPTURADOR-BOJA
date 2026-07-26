@@ -1,0 +1,7 @@
+{
+  "name": "capturador-boja",
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0"
+  }
+}
