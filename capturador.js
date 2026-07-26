@@ -1,8 +1,13 @@
 const { createClient } = require('@supabase/supabase-js');
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+const supabaseKey = process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 const resendApiKey = process.env.RESEND_API_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error("Faltan las credenciales de Supabase en los Secrets de GitHub.");
+  process.exit(1);
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -40,19 +45,21 @@ async function ejecutarProceso() {
       });
       htmlContent += `</ul><p>Atentamente,<br>Equipo de BoletínHoy</p>`;
 
-      await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${resendApiKey}`
-        },
-        body: JSON.stringify({
-          from: 'BoletínHoy <alertas@boletinhoy.es>',
-          to: [usuario.email],
-          subject: 'Nuevas Alertas del BOJA',
-          html: htmlContent
-        })
-      });
+      if (resendApiKey) {
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${resendApiKey}`
+          },
+          body: JSON.stringify({
+            from: 'BoletínHoy <alertas@boletinhoy.es>',
+            to: [usuario.email],
+            subject: 'Nuevas Alertas del BOJA',
+            html: htmlContent
+          })
+        });
+      }
 
       for (const noticia of noticiasInteres) {
         await supabase.from('notificaciones_web').insert([
