@@ -6,12 +6,14 @@ const resendApiKey = process.env.RESEND_API_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   console.error("ERROR CRÍTICO: Las variables de entorno de Supabase no están llegando a Node.js.");
-  console.error("SUPABASE_URL:", supabaseUrl ? "OK" : "FALTA");
-  console.error("SUPABASE_KEY:", supabaseKey ? "OK" : "FALTA");
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Desactivamos realtime para evitar el error de WebSockets en Node.js 20
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false },
+  realtime: { autoConnect: false }
+});
 
 async function ejecutarProceso() {
   console.log("Iniciando comprobación del BOJA...");
