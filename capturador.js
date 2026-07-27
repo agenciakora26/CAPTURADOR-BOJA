@@ -246,22 +246,76 @@ async function descargar(
 }
 
 /* =========================================================
-   DESCUBRIMIENTO ROBUSTO DE PUBLICACIONES DEL BOJA
+   DESCUBRIMIENTO DE PUBLICACIONES POR FECHA
 
-   IMPORTANTE:
-   La Junta utiliza dos tipos de identificadores:
+   No depende de la portada ni del RSS.
+   Consulta el índice oficial de cada fecha reciente:
 
-   - Número normal:
-     /eboja/2026/143/
+   /eboja/20260727.html
 
-   - Identificador interno de complementarios:
-     /eboja/2026/214302/
+   Esa página contiene:
+   - boletín ordinario;
+   - complementarios;
+   - extraordinarios publicados ese día.
 
-   Ambos son válidos. El identificador se conserva exactamente
-   como aparece en la web oficial. Nunca se recorta ni se modifica.
+   Se revisan 21 días para recuperar ejecuciones perdidas.
 ========================================================= */
 
-function interpretarUrlPublicacion(enlace, base = PORTADA_BOJA) {
+const DIAS_A_REVISAR = 21;
+
+function fechaMadridDesdeDesplazamiento(diasAtras = 0) {
+  const ahora = new Date();
+
+  /*
+   * Trabajamos inicialmente con mediodía UTC para evitar
+   * cambios accidentales de fecha por horario de verano.
+   */
+  const base = new Date(
+    Date.UTC(
+      ahora.getUTCFullYear(),
+      ahora.getUTCMonth(),
+      ahora.getUTCDate(),
+      12,
+      0,
+      0
+    )
+  );
+
+  base.setUTCDate(
+    base.getUTCDate() - diasAtras
+  );
+
+  const partes =
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Madrid",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(base);
+
+  const datos = {};
+
+  for (const parte of partes) {
+    if (parte.type !== "literal") {
+      datos[parte.type] = parte.value;
+    }
+  }
+
+  return {
+    anio: datos.year,
+    mes: datos.month,
+    dia: datos.day,
+    compacta:
+      `${datos.year}${datos.month}${datos.day}`,
+    visible:
+      `${datos.day}/${datos.month}/${datos.year}`
+  };
+}
+
+function interpretarUrlPublicacion(
+  enlace,
+  base
+) {
   let url;
 
   try {
@@ -270,272 +324,282 @@ function interpretarUrlPublicacion(enlace, base = PORTADA_BOJA) {
     return null;
   }
 
+  const hostname =
+    url.hostname.toLowerCase();
+
   if (
-    url.hostname !== "www.juntadeandalucia.es" &&
-    url.hostname !== "juntadeandalucia.es"
+    hostname !==
+      "www.juntadeandalucia.es" &&
+    hostname !==
+      "juntadeandalucia.es"
   ) {
     return null;
   }
 
-  const pathname = url.pathname
-    .replace(/\/index\.html$/i, "/")
-    .replace(/\/+$/, "/");
+  const partes = url.pathname
+    .split("/")
+    .filter(Boolean);
 
-  /*
-   * Solo acepta páginas principales de boletines:
-   *
-   * /eboja/2026/143/
-   * /eboja/2026/214302/
-   *
-   * Rechaza disposiciones individuales:
-   *
-   * /eboja/2026/143/61
-   * /eboja/2026/143/61-verificacion
-   * /eboja/2026/143/s53.html
-   */
+  const posicionEboja =
+    partes.findIndex(
+      (parte) =>
+        parte.toLowerCase() ===
+          "eboja" ||
+        parte.toLowerCase() ===
+          "boja"
+    );
 
-  const coincidencia = pathname.match(
-    /^\/eboja\/(\d{4})\/(\d{1,9})\/$/i
-  );
-
-  if (!coincidencia) {
+  if (posicionEboja < 0) {
     return null;
   }
 
-  const anio = coincidencia[1];
-  const identificador = coincidencia[2];
+  const anio =
+    partes[posicionEboja + 1];
+
+  const numero =
+    partes[posicionEboja + 2];
+
+  const posibleComplemento =
+    partes[posicionEboja + 3] || "";
+
+  if (
+    !/^\d{4}$/.test(anio || "")
+  ) {
+    return null;
+  }
+
+  /*
+   * Los boletines ordinarios tienen números como 143.
+   * No aceptamos aquí identificadores de disposiciones.
+   */
+  if (
+    !/^\d{1,4}$/.test(numero || "")
+  ) {
+    return null;
+  }
+
+  /*
+   * Solo consideramos complementos con el formato oficial:
+   * c01, c02, c03...
+   */
+  const complemento =
+    /^c\d{2,3}$/i.test(
+      posibleComplemento
+    )
+      ? posibleComplemento.toLowerCase()
+      : "";
+
+  /*
+   * Rechazamos páginas de secciones o disposiciones:
+   *
+   * s52.html
+   * 44-verificacion
+   * 61
+   */
+  if (
+    posibleComplemento &&
+    !complemento &&
+    !/^index\.html$/i.test(
+      posibleComplemento
+    )
+  ) {
+    return null;
+  }
+
+  const urlCanonica = complemento
+    ? `${BASE_BOJA}/${anio}/${Number(
+        numero
+      )}/${complemento}/`
+    : `${BASE_BOJA}/${anio}/${Number(
+        numero
+      )}/`;
 
   return {
     anio,
-    identificador,
-    url: `${BASE_BOJA}/${anio}/${identificador}/`
+    numero: Number(numero),
+    complemento,
+    url: urlCanonica
   };
 }
 
-function registrarPublicacion(
-  mapa,
-  enlace,
-  base = PORTADA_BOJA
-) {
-  const publicacion = interpretarUrlPublicacion(
-    enlace,
-    base
-  );
-
-  if (!publicacion) {
-    return;
-  }
-
-  mapa.set(
-    publicacion.url,
-    publicacion
-  );
-}
-
 function ordenarPublicaciones(a, b) {
-  if (Number(a.anio) !== Number(b.anio)) {
-    return Number(b.anio) - Number(a.anio);
+  if (
+    Number(a.anio) !==
+    Number(b.anio)
+  ) {
+    return (
+      Number(b.anio) -
+      Number(a.anio)
+    );
   }
 
-  return (
-    Number(b.identificador) -
-    Number(a.identificador)
-  );
+  if (a.numero !== b.numero) {
+    return b.numero - a.numero;
+  }
+
+  if (
+    !a.complemento &&
+    b.complemento
+  ) {
+    return -1;
+  }
+
+  if (
+    a.complemento &&
+    !b.complemento
+  ) {
+    return 1;
+  }
+
+  return String(a.complemento)
+    .localeCompare(
+      String(b.complemento),
+      "es",
+      {
+        numeric: true
+      }
+    );
 }
 
-async function candidatosDesdePortada() {
+async function obtenerPublicacionesDeFecha(
+  fecha
+) {
+  const urlFecha =
+    `${BASE_BOJA}/${fecha.compacta}.html`;
+
   console.log(
-    "🔎 Consultando la portada oficial del BOJA..."
+    `🔎 Revisando publicaciones del ${fecha.visible}...`
   );
 
-  const respuesta = await descargar(
-    PORTADA_BOJA,
-    "text/html"
-  );
+  let respuesta;
 
-  const html = await respuesta.text();
-  const $ = cheerio.load(html);
-  const mapa = new Map();
-
-  /*
-   * Primero utilizamos los enlaces reales de la portada.
-   */
-
-  $("a[href]").each((_, elemento) => {
-    const enlace = $(elemento);
-    const href = enlace.attr("href");
-
-    const textoContexto = normalizar(
-      [
-        enlace.text(),
-        enlace.parent().text(),
-        enlace.closest("article").text(),
-        enlace.closest("li").text(),
-        enlace.closest("div").text()
-      ].join(" ")
+  try {
+    respuesta = await descargar(
+      urlFecha,
+      "text/html"
     );
-
+  } catch (error) {
     /*
-     * Para evitar enlaces irrelevantes, damos prioridad
-     * a los que aparecen cerca de las palabras BOJA o boletín.
+     * Algunos días sin publicación pueden devolver 404.
+     * No constituye un error del capturador.
      */
-
     if (
-      textoContexto.includes("boja") ||
-      textoContexto.includes("boletin") ||
-      /\/eboja\/\d{4}\/\d+\/?(?:index\.html)?$/i.test(
-        href || ""
+      String(error.message).includes(
+        "HTTP 404"
       )
     ) {
-      registrarPublicacion(
-        mapa,
-        href,
-        respuesta.url
+      console.log(
+        "   Sin página de publicaciones para esta fecha."
       );
+
+      return [];
     }
-  });
 
-  /*
-   * Como respaldo, localizamos rutas completas dentro del HTML.
-   * El identificador puede tener más de cuatro cifras.
-   */
-
-  const expresiones = [
-    /https?:\/\/(?:www\.)?juntadeandalucia\.es\/eboja\/\d{4}\/\d{1,9}\/(?:index\.html)?/gi,
-    /\/eboja\/\d{4}\/\d{1,9}\/(?:index\.html)?/gi
-  ];
-
-  for (const expresion of expresiones) {
-    const coincidencias = html.match(expresion) || [];
-
-    for (const coincidencia of coincidencias) {
-      registrarPublicacion(
-        mapa,
-        coincidencia,
-        respuesta.url
-      );
-    }
+    throw error;
   }
 
-  const resultado = [...mapa.values()].sort(
-    ordenarPublicaciones
-  );
+  const html =
+    await respuesta.text();
 
-  console.log(
-    `   Candidatos obtenidos de portada: ${resultado.length}`
-  );
+  const $ =
+    cheerio.load(html);
 
-  return resultado;
-}
+  const mapa =
+    new Map();
 
-async function candidatosDesdeRss() {
-  console.log(
-    "🔎 Consultando el RSS oficial como respaldo..."
-  );
+  /*
+   * Fuente principal: enlaces reales de la página oficial.
+   */
 
-  const respuesta = await descargar(
-    RSS_BOJA,
-    "application/xml,text/xml"
-  );
+  $("a[href]").each(
+    (_, elemento) => {
+      const href =
+        $(elemento).attr("href");
 
-  const xml = await respuesta.text();
-  const $ = cheerio.load(xml, {
-    xmlMode: true
-  });
+      const publicacion =
+        interpretarUrlPublicacion(
+          href,
+          respuesta.url
+        );
 
-  const mapa = new Map();
-
-  $("entry,item").each((_, elemento) => {
-    const entrada = $(elemento);
-
-    const contenido = [
-      entrada
-        .find("link[href]")
-        .first()
-        .attr("href"),
-
-      entrada
-        .find("link")
-        .first()
-        .text(),
-
-      entrada
-        .find("guid")
-        .first()
-        .text(),
-
-      entrada.text()
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    /*
-     * Extraemos primero cualquier URL del BOJA.
-     */
-
-    const urls = contenido.match(
-      /https?:\/\/(?:www\.)?juntadeandalucia\.es\/eboja\/\d{4}\/\d{1,9}(?:\/[^\s<>"']*)?/gi
-    ) || [];
-
-    for (const enlace of urls) {
-      let url;
-
-      try {
-        url = new URL(enlace);
-      } catch {
-        continue;
+      if (!publicacion) {
+        return;
       }
-
-      const partes = url.pathname
-        .split("/")
-        .filter(Boolean);
-
-      const posicionEboja = partes.findIndex(
-        (parte) =>
-          parte.toLowerCase() === "eboja"
-      );
-
-      if (posicionEboja < 0) {
-        continue;
-      }
-
-      const anio = partes[posicionEboja + 1];
-      const identificador =
-        partes[posicionEboja + 2];
 
       if (
-        !/^\d{4}$/.test(anio || "") ||
-        !/^\d{1,9}$/.test(
-          identificador || ""
-        )
+        publicacion.anio !==
+        fecha.anio
       ) {
-        continue;
+        return;
       }
 
-      /*
-       * Aunque el RSS enlace una disposición individual,
-       * construimos únicamente la raíz de esa publicación.
-       */
-
-      registrarPublicacion(
-        mapa,
-        `${BASE_BOJA}/${anio}/${identificador}/`
+      mapa.set(
+        publicacion.url,
+        publicacion
       );
     }
-  });
-
-  const resultado = [...mapa.values()].sort(
-    ordenarPublicaciones
   );
+
+  /*
+   * Respaldo por si los enlaces aparecen dentro de atributos
+   * o fragmentos HTML no seleccionados por Cheerio.
+   *
+   * No se inventa ningún número: solo se utilizan rutas que
+   * están presentes literalmente en la página oficial.
+   */
+
+  const rutas =
+    html.match(
+      /\/(?:eboja|boja)\/\d{4}\/\d{1,4}(?:\/c\d{2,3})?(?:\/index\.html)?\/?/gi
+    ) || [];
+
+  for (const ruta of rutas) {
+    const publicacion =
+      interpretarUrlPublicacion(
+        ruta,
+        respuesta.url
+      );
+
+    if (!publicacion) {
+      continue;
+    }
+
+    if (
+      publicacion.anio !==
+      fecha.anio
+    ) {
+      continue;
+    }
+
+    mapa.set(
+      publicacion.url,
+      publicacion
+    );
+  }
+
+  const publicaciones = [
+    ...mapa.values()
+  ].sort(ordenarPublicaciones);
 
   console.log(
-    `   Candidatos obtenidos del RSS: ${resultado.length}`
+    `   Publicaciones encontradas: ${publicaciones.length}`
   );
 
-  return resultado;
+  for (
+    const publicacion
+    of publicaciones
+  ) {
+    console.log(
+      `   • ${publicacion.url}`
+    );
+  }
+
+  return publicaciones;
 }
 
-async function validarPublicacion(publicacion) {
+async function validarPublicacion(
+  publicacion
+) {
   const urlsPrueba = [
     publicacion.url,
     `${publicacion.url}index.html`
@@ -543,25 +607,24 @@ async function validarPublicacion(publicacion) {
 
   for (const url of urlsPrueba) {
     try {
-      const respuesta = await descargar(
-        url,
-        "text/html"
-      );
+      const respuesta =
+        await descargar(
+          url,
+          "text/html"
+        );
 
-      const html = await respuesta.text();
-      const $ = cheerio.load(html);
+      const html =
+        await respuesta.text();
 
-      const texto = normalizar(
-        $("body").text()
-      );
+      const $ =
+        cheerio.load(html);
 
-      /*
-       * Una publicación válida debe tener contenido BOJA
-       * y alguna estructura propia de un boletín:
-       * PDF, secciones o sumario.
-       */
+      const texto =
+        normalizar(
+          $("body").text()
+        );
 
-      const tieneIdentidadBoja =
+      const tieneCabeceraBoja =
         texto.includes(
           "boletin oficial de la junta de andalucia"
         ) ||
@@ -569,282 +632,149 @@ async function validarPublicacion(publicacion) {
           "sede electronica del boja"
         ) ||
         texto.includes(
-          "boletin numero"
-        ) ||
-        texto.includes("boja num");
-
-      const tieneContenidoBoja =
-        $("a[href*='.pdf']").length > 0 ||
-        $("a[href*='/s']").length > 0 ||
-        texto.includes(
-          "pdf oficial autentico"
+          `boletin numero ${publicacion.numero}`
         ) ||
         texto.includes(
-          "sumario boletin"
+          `boletin ${publicacion.numero} complementario`
         );
+
+      const tieneContenido =
+        $("a[href]").filter(
+          (_, elemento) => {
+            const href =
+              $(elemento).attr(
+                "href"
+              ) || "";
+
+            const textoEnlace =
+              normalizar(
+                $(elemento).text()
+              );
+
+            return (
+              /\.pdf(?:$|[?#])/i.test(
+                href
+              ) ||
+              textoEnlace.includes(
+                "pdf oficial autentico"
+              )
+            );
+          }
+        ).length > 0 ||
+        $("a[href*='/s']").length >
+          0;
 
       if (
-        !tieneIdentidadBoja ||
-        !tieneContenidoBoja
+        !tieneCabeceraBoja ||
+        !tieneContenido
       ) {
-        console.log(
-          `   Rechazada ${url}: no parece una publicación completa del BOJA`
-        );
-
         continue;
       }
 
-      /*
-       * Intentamos obtener el número público real.
-       *
-       * Ejemplo:
-       * Identificador interno: 214302
-       * Número público: 143 Complementario 2
-       */
-
-      const numeroPublicoMatch =
-        texto.match(
-          /boletin numero\s+(\d+)/i
-        ) ||
-        texto.match(
-          /boja num\.?\s*(\d+)/i
-        ) ||
-        texto.match(
-          /boja numero\s+(\d+)/i
-        );
-
-      const complementoMatch =
-        texto.match(
-          /complementario(?:\s+num\.?|\s+numero)?\s*(\d+)/i
-        );
-
       return {
         ...publicacion,
-
-        url:
-          publicacion.url,
-
         html,
-
-        numeroPublico:
-          numeroPublicoMatch
-            ? Number(
-                numeroPublicoMatch[1]
-              )
-            : null,
-
-        complemento:
-          complementoMatch
-            ? Number(
-                complementoMatch[1]
-              )
-            : null
+        url: publicacion.url
       };
     } catch (error) {
-      console.log(
-        `   No válida ${url}: ${error.message}`
-      );
+      if (
+        !String(
+          error.message
+        ).includes("HTTP 404")
+      ) {
+        console.log(
+          `   Error validando ${url}: ${error.message}`
+        );
+      }
     }
   }
 
   return null;
 }
 
-async function descubrirEnlacesRelacionados(
-  publicacion
-) {
-  const mapa = new Map();
-
-  mapa.set(
-    publicacion.url,
-    publicacion
-  );
-
-  const $ = cheerio.load(
-    publicacion.html || ""
-  );
-
-  /*
-   * Conservamos exactamente los enlaces que ofrece
-   * la página oficial. No intentamos inventar el ID
-   * de los complementarios.
-   */
-
-  $("a[href]").each((_, elemento) => {
-    const href = $(elemento).attr("href");
-
-    const descubierta =
-      interpretarUrlPublicacion(
-        href,
-        publicacion.url
-      );
-
-    if (!descubierta) {
-      return;
-    }
-
-    if (
-      descubierta.anio !==
-      publicacion.anio
-    ) {
-      return;
-    }
-
-    mapa.set(
-      descubierta.url,
-      descubierta
-    );
-  });
-
-  /*
-   * Si conocemos el número público real, añadimos también
-   * la ruta normal. Esto permite que, cuando la portada
-   * muestre un complementario, también se revise el boletín
-   * ordinario correspondiente.
-   */
-
-  if (
-    publicacion.numeroPublico &&
-    Number.isInteger(
-      publicacion.numeroPublico
-    )
-  ) {
-    registrarPublicacion(
-      mapa,
-      `${BASE_BOJA}/${publicacion.anio}/${publicacion.numeroPublico}/`
-    );
-  }
-
-  return [...mapa.values()];
-}
-
 async function descubrirPublicaciones() {
-  const candidatos = new Map();
+  console.log(
+    `📅 Revisando los últimos ${DIAS_A_REVISAR} días...`
+  );
 
-  try {
-    const portada =
-      await candidatosDesdePortada();
-
-    for (const publicacion of portada) {
-      candidatos.set(
-        publicacion.url,
-        publicacion
-      );
-    }
-  } catch (error) {
-    console.log(
-      `⚠️ No se pudo consultar la portada: ${error.message}`
-    );
-  }
-
-  try {
-    const rss =
-      await candidatosDesdeRss();
-
-    for (const publicacion of rss) {
-      candidatos.set(
-        publicacion.url,
-        publicacion
-      );
-    }
-  } catch (error) {
-    console.log(
-      `⚠️ No se pudo consultar el RSS: ${error.message}`
-    );
-  }
+  const candidatos =
+    new Map();
 
   /*
-   * Revisamos un máximo razonable para evitar recorrer
-   * accidentalmente todo el histórico.
+   * Recorremos días naturales recientes.
+   * Por tanto:
+   *
+   * - funciona aunque hoy no haya BOJA;
+   * - recupera publicaciones perdidas;
+   * - incluye complementarios;
+   * - no obliga a conocer previamente el número.
    */
+
+  for (
+    let diasAtras = 0;
+    diasAtras < DIAS_A_REVISAR;
+    diasAtras++
+  ) {
+    const fecha =
+      fechaMadridDesdeDesplazamiento(
+        diasAtras
+      );
+
+    try {
+      const publicaciones =
+        await obtenerPublicacionesDeFecha(
+          fecha
+        );
+
+      for (
+        const publicacion
+        of publicaciones
+      ) {
+        candidatos.set(
+          publicacion.url,
+          publicacion
+        );
+      }
+    } catch (error) {
+      console.log(
+        `⚠️ No se pudo revisar ${fecha.visible}: ${error.message}`
+      );
+    }
+  }
 
   const candidatosOrdenados = [
     ...candidatos.values()
-  ]
-    .sort(ordenarPublicaciones)
-    .slice(0, 30);
+  ].sort(ordenarPublicaciones);
 
   console.log(
-    `📚 Candidatos encontrados: ${candidatosOrdenados.length}`
+    `📚 Candidatos únicos encontrados: ${candidatosOrdenados.length}`
   );
 
-  const validadas = new Map();
+  const resultado = [];
 
-  for (const candidato of candidatosOrdenados) {
+  for (
+    const candidato
+    of candidatosOrdenados
+  ) {
     const validada =
       await validarPublicacion(
         candidato
       );
 
-    if (!validada) {
-      continue;
-    }
-
-    validadas.set(
-      validada.url,
-      validada
-    );
-
-    const relacionadas =
-      await descubrirEnlacesRelacionados(
-        validada
-      );
-
-    for (const relacionada of relacionadas) {
-      if (
-        !validadas.has(
-          relacionada.url
-        )
-      ) {
-        validadas.set(
-          relacionada.url,
-          relacionada
-        );
-      }
-    }
-  }
-
-  /*
-   * Validamos también las publicaciones descubiertas
-   * desde otras páginas.
-   */
-
-  const resultado = [];
-
-  for (
-    const publicacion of [
-      ...validadas.values()
-    ].sort(ordenarPublicaciones)
-  ) {
-    if (publicacion.html) {
-      resultado.push(publicacion);
-      continue;
-    }
-
-    const validada =
-      await validarPublicacion(
-        publicacion
-      );
-
     if (validada) {
       resultado.push(validada);
+    } else {
+      console.log(
+        `   Publicación descartada: ${candidato.url}`
+      );
     }
   }
 
-  /*
-   * Eliminación final de duplicados.
-   */
+  console.log(
+    `📚 Publicaciones válidas: ${resultado.length}`
+  );
 
-  return [
-    ...new Map(
-      resultado.map(
-        (publicacion) => [
-          publicacion.url,
-          publicacion
-        ]
-      )
-    ).values()
-  ];
+  return resultado;
 }
 /* =========================================================
    EXTRAER PDF DE CADA PUBLICACIÓN
