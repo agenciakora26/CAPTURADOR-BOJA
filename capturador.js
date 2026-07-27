@@ -44,10 +44,47 @@ async function ejecutarProceso() {
     const noticiasInteres = noticiasBojaHoy.filter(n => usuario.sectores_suscritos.includes(n.sector));
 
     if (noticiasInteres.length > 0) {
-      let htmlContent = `<p>Hola <strong>${usuario.nombre}</strong>, hay nuevas publicaciones en el BOJA para tus sectores:</p><ul>`;
+      let htmlContent = `<p>Hola <strong>Estimado/a suscriptor/a</strong>, tenemos novedades importantes en el BOJA para tus sectores:</p><ul>`;
+      
       noticiasInteres.forEach(n => {
-        htmlContent += `<li><a href="${n.enlace}" target="_blank">${n.titulo}</a></li>`;
+        let mensajeSector = "hay una nueva publicación:";
+        
+        switch (n.sector) {
+          case 'oposiciones':
+            mensajeSector = "Se ha publicado una nueva convocatoria u oferta de empleo público que te interesa:";
+            break;
+          case 'agricultura':
+            mensajeSector = "Hay novedades oficiales sobre el sector agrario, PAC o ayudas al campo:";
+            break;
+          case 'licitaciones':
+            mensajeSector = "Se ha abierto un nuevo concurso público u oportunidad de contratación:";
+            break;
+          case 'hosteleria':
+            mensajeSector = "Hay nuevas normativas, ayudas o resoluciones para el sector turístico y comercial:";
+            break;
+          case 'subvenciones':
+            mensajeSector = "Ya están disponibles nuevas líneas de ayudas y subvenciones para negocios:";
+            break;
+          case 'medioambiente':
+            mensajeSector = "Se han registrado nuevas declaraciones o normativas medioambientales:";
+            break;
+          case 'sanidad':
+            mensajeSector = "Hay resoluciones recientes en materia de sanidad y servicios sociales:";
+            break;
+          case 'educacion':
+            mensajeSector = "Se ha publicado una nueva convocatoria, beca o disposición educativa:";
+            break;
+          default:
+            mensajeSector = `Hay una actualización oficial en el sector de <strong>${n.sector}</strong>:`;
+            break;
+        }
+
+        htmlContent += `<li>
+          <p>${mensajeSector}</p>
+          <p><a href="${n.enlace}" target="_blank" style="color: #0056b3; font-weight: bold; text-decoration: underline;">👉 ${n.titulo}</a></p>
+        </li><br>`;
       });
+
       htmlContent += `</ul><p>Atentamente,<br>Equipo de BoletínHoy</p>`;
 
       if (resendApiKey) {
@@ -60,7 +97,7 @@ async function ejecutarProceso() {
           body: JSON.stringify({
             from: 'BoletínHoy <alertas@boletinhoy.es>',
             to: [usuario.email],
-            subject: 'Nuevas Alertas del BOJA',
+            subject: '🔔 Nuevas Alertas Personalizadas del BOJA',
             html: htmlContent
           })
         });
