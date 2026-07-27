@@ -1,6 +1,10 @@
 const cheerio = require("cheerio");
 const pdfParse = require("pdf-parse");
 
+/* =========================================================
+   CONFIGURACIÓN
+========================================================= */
+
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
   .replace(/\/rest\/v1\/?$/i, "")
   .replace(/\/+$/, "");
@@ -8,37 +12,54 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 
-const PORTADA = "https://www.juntadeandalucia.es/eboja.html";
-const RSS = "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
-const BASE = "https://www.juntadeandalucia.es/eboja";
+const PORTADA_BOJA =
+  "https://www.juntadeandalucia.es/eboja.html";
+
+const RSS_BOJA =
+  "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
+
+const BASE_BOJA =
+  "https://www.juntadeandalucia.es/eboja";
 
 const USER_AGENT =
   "Mozilla/5.0 (compatible; BoletinHoy/1.0; +https://boletinhoy.es)";
 
-if (!SUPABASE_URL || !SUPABASE_KEY || !RESEND_API_KEY) {
+if (
+  !SUPABASE_URL ||
+  !SUPABASE_KEY ||
+  !RESEND_API_KEY
+) {
   console.error(
-    "Faltan SUPABASE_URL, SUPABASE_KEY o RESEND_API_KEY."
+    "❌ Faltan SUPABASE_URL, SUPABASE_KEY o RESEND_API_KEY."
   );
 
   process.exit(1);
 }
+
+/* =========================================================
+   PALABRAS CLAVE
+========================================================= */
 
 const SECTORES = {
   "oposiciones y empleo público": [
     "oposición",
     "oposiciones",
     "concurso-oposición",
+    "concurso oposición",
     "proceso selectivo",
+    "procesos selectivos",
     "pruebas selectivas",
     "empleo público",
     "oferta de empleo público",
     "bolsa de empleo",
     "bolsa de trabajo",
     "turno libre",
+    "acceso libre",
     "plazas vacantes",
     "personal funcionario",
     "personal laboral",
     "personal estatutario",
+    "funcionario de carrera",
     "nombramiento",
     "toma de posesión"
   ],
@@ -50,11 +71,16 @@ const SECTORES = {
     "ayudas",
     "bases reguladoras",
     "concesión de subvenciones",
+    "ayudas directas",
     "incentivo",
     "incentivos",
     "beneficiarios",
+    "beneficiarias",
     "concurrencia competitiva",
+    "concurrencia no competitiva",
+    "extracto de la resolución",
     "plazo de solicitud",
+    "personas trabajadoras autónomas",
     "autónomos",
     "autónomas"
   ],
@@ -70,9 +96,12 @@ const SECTORES = {
     "ganadera",
     "política agraria común",
     "explotación agraria",
+    "explotaciones agrarias",
     "desarrollo rural",
     "sector agrario",
     "sector pesquero",
+    "producción agrícola",
+    "sanidad animal",
     "acuicultura"
   ],
 
@@ -83,12 +112,15 @@ const SECTORES = {
     "comercio",
     "turismo",
     "turístico",
+    "turística",
     "restauración",
     "establecimientos turísticos",
     "alojamientos turísticos",
     "hoteles",
     "agencias de viajes",
-    "artesanía"
+    "comercio interior",
+    "artesanía",
+    "mercados de abastos"
   ],
 
   "licitaciones y contratación": [
@@ -98,18 +130,23 @@ const SECTORES = {
     "contrato público",
     "contrato menor",
     "mesa de contratación",
+    "pliego de cláusulas administrativas",
     "adjudicación",
     "adjudicaciones",
     "formalización de contrato",
     "procedimiento abierto",
-    "acuerdo marco"
+    "acuerdo marco",
+    "obras públicas",
+    "concurso público"
   ],
 
   "sanidad y servicios sociales": [
     "servicio andaluz de salud",
+    "personal estatutario",
     "sanidad",
     "salud",
     "hospital",
+    "hospitalario",
     "enfermería",
     "enfermero",
     "enfermera",
@@ -150,6 +187,10 @@ const SECTORES = {
   ]
 };
 
+/* =========================================================
+   UTILIDADES
+========================================================= */
+
 function normalizar(valor = "") {
   return String(valor)
     .normalize("NFD")
@@ -158,14 +199,6 @@ function normalizar(valor = "") {
     .replace(/\s+/g, " ")
     .toLowerCase()
     .trim();
-}
-
-function urlAbsoluta(href, base) {
-  try {
-    return new URL(href, base).href;
-  } catch {
-    return null;
-  }
 }
 
 function escaparHtml(valor = "") {
@@ -177,14 +210,29 @@ function escaparHtml(valor = "") {
     .replace(/'/g, "&#039;");
 }
 
-async function descargar(url, accept = "*/*") {
+function urlAbsoluta(href, base) {
+  try {
+    return new URL(href, base).href;
+  } catch {
+    return null;
+  }
+}
+
+async function descargar(
+  url,
+  accept = "*/*"
+) {
   const respuesta = await fetch(url, {
     redirect: "follow",
-    signal: AbortSignal.timeout(45000),
+
+    signal:
+      AbortSignal.timeout(45000),
+
     headers: {
       "User-Agent": USER_AGENT,
       Accept: accept,
-      "Accept-Language": "es-ES,es;q=0.9"
+      "Accept-Language":
+        "es-ES,es;q=0.9"
     }
   });
 
@@ -197,205 +245,369 @@ async function descargar(url, accept = "*/*") {
   return respuesta;
 }
 
-function extraerPublicacion(url = "") {
-  const coincidencia = String(url).match(
-  /\/(?:eboja|boja)\/(\d{4})\/(\d+)(?:\/(c\d+))?(?:\/index\.html)?\/?(?:[?#].*)?$/i
-);
+/* =========================================================
+   INTERPRETAR URL DEL BOJA
+========================================================= */
 
-  if (!coincidencia) {
+/*
+ * Esta función separa correctamente:
+ *
+ * /eboja/2026/143/
+ * /eboja/2026/143/index.html
+ * /eboja/2026/143/c01/
+ * /eboja/2026/143/c02/index.html
+ * /eboja/2026/143/s52.html
+ * /eboja/2026/143/c01/s52.html
+ *
+ * Nunca convierte 143/c02 en 14302.
+ */
+
+function extraerPublicacion(url = "") {
+  let pathname;
+
+  try {
+    pathname =
+      new URL(url, BASE_BOJA).pathname;
+  } catch {
     return null;
   }
 
-  const anio = coincidencia[1];
-  const numero = Number(coincidencia[2]);
-  const complemento = (
-    coincidencia[3] || ""
-  ).toLowerCase();
+  const partes = pathname
+    .split("/")
+    .filter(Boolean);
+
+  const posicionBoja =
+    partes.findIndex((parte) => {
+      const valor =
+        parte.toLowerCase();
+
+      return (
+        valor === "eboja" ||
+        valor === "boja"
+      );
+    });
+
+  if (posicionBoja < 0) {
+    return null;
+  }
+
+  const anio =
+    partes[posicionBoja + 1];
+
+  const numeroTexto =
+    partes[posicionBoja + 2];
+
+  const siguienteParte =
+    partes[posicionBoja + 3] || "";
+
+  if (
+    !/^\d{4}$/.test(anio || "")
+  ) {
+    return null;
+  }
+
+  /*
+   * Limitamos el número a un máximo de 4 cifras.
+   * Evita interpretar cadenas como 214302.
+   */
+
+  if (
+    !/^\d{1,4}$/.test(
+      numeroTexto || ""
+    )
+  ) {
+    return null;
+  }
+
+  const numero =
+    Number(numeroTexto);
+
+  if (
+    !Number.isInteger(numero) ||
+    numero < 1 ||
+    numero > 9999
+  ) {
+    return null;
+  }
+
+  /*
+   * Admite complementos o ediciones como:
+   * c01, c02, e01...
+   *
+   * No confunde s52.html con un complemento.
+   */
+
+  const edicion =
+    /^[a-z]\d{1,3}$/i.test(
+      siguienteParte
+    )
+      ? siguienteParte.toLowerCase()
+      : "";
+
+  const urlCanonica = edicion
+    ? `${BASE_BOJA}/${anio}/${numero}/${edicion}/`
+    : `${BASE_BOJA}/${anio}/${numero}/`;
 
   return {
     anio,
     numero,
-    complemento,
-    url:
-      `${BASE}/${anio}/${numero}/` +
-      `${complemento ? `${complemento}/` : ""}`
+    edicion,
+    url: urlCanonica
   };
 }
 
 function ordenarPublicaciones(a, b) {
-  if (Number(a.anio) !== Number(b.anio)) {
-    return Number(b.anio) - Number(a.anio);
+  if (
+    Number(a.anio) !==
+    Number(b.anio)
+  ) {
+    return (
+      Number(b.anio) -
+      Number(a.anio)
+    );
   }
 
-  if (a.numero !== b.numero) {
+  if (
+    a.numero !== b.numero
+  ) {
     return b.numero - a.numero;
   }
 
-  if (!a.complemento && b.complemento) {
+  if (
+    !a.edicion &&
+    b.edicion
+  ) {
     return -1;
   }
 
-  if (a.complemento && !b.complemento) {
+  if (
+    a.edicion &&
+    !b.edicion
+  ) {
     return 1;
   }
 
-  return b.complemento.localeCompare(
-    a.complemento,
-    "es",
-    {
-      numeric: true
-    }
-  );
+  return String(b.edicion)
+    .localeCompare(
+      String(a.edicion),
+      "es",
+      {
+        numeric: true
+      }
+    );
 }
 
 function registrarCandidato(
   mapa,
   enlace,
-  base = PORTADA
+  base = PORTADA_BOJA
 ) {
-  const absoluta = urlAbsoluta(enlace, base);
+  const absoluta =
+    urlAbsoluta(enlace, base);
 
   if (!absoluta) {
     return;
   }
 
-  const publicacion = extraerPublicacion(absoluta);
+  const publicacion =
+    extraerPublicacion(absoluta);
 
   if (!publicacion) {
     return;
   }
 
-  mapa.set(publicacion.url, publicacion);
+  mapa.set(
+    publicacion.url,
+    publicacion
+  );
 }
 
-async function obtenerCandidatosPortada() {
+/* =========================================================
+   DESCUBRIR PUBLICACIONES
+========================================================= */
+
+async function candidatosDesdePortada() {
   console.log(
-    "Consultando la portada oficial del BOJA..."
+    "🔎 Consultando la portada oficial del BOJA..."
   );
 
-  const respuesta = await descargar(
-    PORTADA,
-    "text/html"
-  );
-
-  const html = await respuesta.text();
-  const $ = cheerio.load(html);
-  const mapa = new Map();
-
-  $("a[href]").each((_, elemento) => {
-    registrarCandidato(
-      mapa,
-      $(elemento).attr("href"),
-      respuesta.url
+  const respuesta =
+    await descargar(
+      PORTADA_BOJA,
+      "text/html"
     );
-  });
+
+  const html =
+    await respuesta.text();
+
+  const $ =
+    cheerio.load(html);
+
+  const mapa =
+    new Map();
+
+  /*
+   * Revisamos los enlaces reales.
+   */
+
+  $("a[href]").each(
+    (_, elemento) => {
+      registrarCandidato(
+        mapa,
+        $(elemento).attr("href"),
+        respuesta.url
+      );
+    }
+  );
+
+  /*
+   * Revisamos también las rutas escritas
+   * dentro del HTML o scripts.
+   */
 
   const expresion =
-    /\/(?:e?boja|boja)\/(\d{4})\/(\d+)(?:\/(c\d+))?(?:\/index\.html|\/)?/gi;
+    /\/(?:eboja|boja)\/\d{4}\/\d{1,4}(?:\/[a-z]\d{1,3})?(?:\/index\.html)?\/?/gi;
 
   let coincidencia;
 
   while (
-    (coincidencia = expresion.exec(html))
+    (coincidencia =
+      expresion.exec(html)) !== null
   ) {
     registrarCandidato(
       mapa,
-      `${BASE}/${coincidencia[1]}/` +
-        `${coincidencia[2]}/` +
-        `${
-          coincidencia[3]
-            ? `${coincidencia[3]}/`
-            : ""
-        }`
+      coincidencia[0],
+      PORTADA_BOJA
     );
   }
 
-  return [...mapa.values()].sort(
-    ordenarPublicaciones
-  );
+  return [
+    ...mapa.values()
+  ].sort(ordenarPublicaciones);
 }
 
-async function obtenerCandidatosRss() {
+async function candidatosDesdeRss() {
   console.log(
-    "Consultando el RSS oficial como respaldo..."
+    "🔎 Consultando el RSS oficial como respaldo..."
   );
 
-  const respuesta = await descargar(
-    RSS,
-    "application/xml,text/xml"
-  );
+  const respuesta =
+    await descargar(
+      RSS_BOJA,
+      "application/xml,text/xml"
+    );
 
-  const xml = await respuesta.text();
+  const xml =
+    await respuesta.text();
 
-  const $ = cheerio.load(xml, {
-    xmlMode: true
-  });
+  const $ =
+    cheerio.load(xml, {
+      xmlMode: true
+    });
 
-  const mapa = new Map();
+  const mapa =
+    new Map();
 
-  $("entry,item").each((_, elemento) => {
-    const entrada = $(elemento);
+  $("entry,item").each(
+    (_, elemento) => {
+      const entrada =
+        $(elemento);
 
-    const enlaces = [
-      entrada
-        .find("link[href]")
-        .first()
-        .attr("href"),
+      const valores = [
+        entrada
+          .find("link[href]")
+          .first()
+          .attr("href"),
 
-      entrada
-        .find("link")
-        .first()
-        .text(),
+        entrada
+          .find("link")
+          .first()
+          .text()
+          .trim(),
 
-      entrada
-        .find("guid")
-        .first()
-        .text()
-    ].filter(Boolean);
+        entrada
+          .find("guid")
+          .first()
+          .text()
+          .trim(),
 
-    for (const enlace of enlaces) {
-      const coincidencia = String(enlace).match(
-        /\/(?:e?boja|boja)\/(\d{4})\/(\d+)/i
-      );
+        entrada.text()
+      ].filter(Boolean);
 
-      if (!coincidencia) {
-        continue;
+      for (
+        const valor of valores
+      ) {
+        const urls =
+          String(valor).match(
+            /https?:\/\/[^\s<>"']+\/(?:eboja|boja)\/\d{4}\/\d{1,4}(?:\/[a-z]\d{1,3})?/gi
+          ) || [];
+
+        for (
+          const enlace of urls
+        ) {
+          registrarCandidato(
+            mapa,
+            enlace
+          );
+        }
+
+        /*
+         * También permite rutas relativas.
+         */
+
+        const rutas =
+          String(valor).match(
+            /\/(?:eboja|boja)\/\d{4}\/\d{1,4}(?:\/[a-z]\d{1,3})?/gi
+          ) || [];
+
+        for (
+          const ruta of rutas
+        ) {
+          registrarCandidato(
+            mapa,
+            ruta,
+            RSS_BOJA
+          );
+        }
       }
-
-      registrarCandidato(
-        mapa,
-        `${BASE}/${coincidencia[1]}/` +
-          `${coincidencia[2]}/`
-      );
     }
-  });
-
-  return [...mapa.values()].sort(
-    ordenarPublicaciones
   );
+
+  return [
+    ...mapa.values()
+  ].sort(ordenarPublicaciones);
 }
 
-async function validarPublicacion(publicacion) {
-  const urls = [
+async function validarPublicacion(
+  publicacion
+) {
+  const urlsPrueba = [
     publicacion.url,
     `${publicacion.url}index.html`
   ];
 
-  for (const url of urls) {
+  for (
+    const url of urlsPrueba
+  ) {
     try {
-      const respuesta = await descargar(
-        url,
-        "text/html"
-      );
+      const respuesta =
+        await descargar(
+          url,
+          "text/html"
+        );
 
-      const html = await respuesta.text();
-      const $ = cheerio.load(html);
+      const html =
+        await respuesta.text();
 
-      const texto = normalizar(
-        $("body").text()
-      );
+      const $ =
+        cheerio.load(html);
 
-      const pareceBoja =
+      const texto =
+        normalizar(
+          $("body").text()
+        );
+
+      const esPaginaBoja =
         texto.length > 100 &&
         (
           texto.includes(
@@ -404,15 +616,19 @@ async function validarPublicacion(publicacion) {
           texto.includes("boja")
         );
 
-      if (pareceBoja) {
-        return {
-          ...publicacion,
-          html
-        };
+      if (!esPaginaBoja) {
+        continue;
       }
+
+      return {
+        ...publicacion,
+        url:
+          publicacion.url,
+        html
+      };
     } catch (error) {
       console.log(
-        `No válido ${url}: ${error.message}`
+        `   No válida ${url}: ${error.message}`
       );
     }
   }
@@ -420,261 +636,501 @@ async function validarPublicacion(publicacion) {
   return null;
 }
 
+async function descubrirEdiciones(
+  publicacion
+) {
+  const mapa =
+    new Map();
+
+  mapa.set(
+    publicacion.url,
+    publicacion
+  );
+
+  const $ =
+    cheerio.load(
+      publicacion.html || ""
+    );
+
+  $("a[href]").each(
+    (_, elemento) => {
+      const absoluta =
+        urlAbsoluta(
+          $(elemento).attr("href"),
+          publicacion.url
+        );
+
+      const descubierta =
+        extraerPublicacion(absoluta);
+
+      if (!descubierta) {
+        return;
+      }
+
+      if (
+        descubierta.anio !==
+          publicacion.anio ||
+        descubierta.numero !==
+          publicacion.numero
+      ) {
+        return;
+      }
+
+      mapa.set(
+        descubierta.url,
+        descubierta
+      );
+    }
+  );
+
+  /*
+   * También busca complementos dentro del HTML.
+   */
+
+  const regex =
+    new RegExp(
+      `/(?:eboja|boja)/${publicacion.anio}/${publicacion.numero}/([a-z]\\d{1,3})(?:/|")`,
+      "gi"
+    );
+
+  let coincidencia;
+
+  while (
+    (coincidencia =
+      regex.exec(
+        publicacion.html || ""
+      )) !== null
+  ) {
+    registrarCandidato(
+      mapa,
+      `${BASE_BOJA}/${publicacion.anio}/${publicacion.numero}/${coincidencia[1]}/`
+    );
+  }
+
+  return [
+    ...mapa.values()
+  ];
+}
+
 async function descubrirPublicaciones() {
-  const mapa = new Map();
+  const mapaInicial =
+    new Map();
 
   try {
     const portada =
-      await obtenerCandidatosPortada();
+      await candidatosDesdePortada();
 
-    for (const publicacion of portada) {
-      mapa.set(
+    for (
+      const publicacion
+      of portada
+    ) {
+      mapaInicial.set(
         publicacion.url,
         publicacion
       );
     }
   } catch (error) {
     console.log(
-      `Error consultando portada: ${error.message}`
+      `⚠️ Error en portada: ${error.message}`
     );
   }
 
   try {
     const rss =
-      await obtenerCandidatosRss();
+      await candidatosDesdeRss();
 
-    for (const publicacion of rss) {
-      mapa.set(
+    for (
+      const publicacion
+      of rss
+    ) {
+      mapaInicial.set(
         publicacion.url,
         publicacion
       );
     }
   } catch (error) {
     console.log(
-      `Error consultando RSS: ${error.message}`
+      `⚠️ Error en RSS: ${error.message}`
     );
   }
 
+  /*
+   * Revisamos las publicaciones más recientes.
+   * No obliga a que sean del día actual.
+   */
+
   const candidatos = [
-    ...mapa.values()
+    ...mapaInicial.values()
   ]
     .sort(ordenarPublicaciones)
-    .slice(0, 20);
+    .slice(0, 40);
 
-  const resultado = new Map();
+  console.log(
+    `📚 Candidatos encontrados: ${candidatos.length}`
+  );
 
-  for (const publicacion of candidatos) {
+  const validadas =
+    new Map();
+
+  for (
+    const candidato
+    of candidatos
+  ) {
     const validada =
-      await validarPublicacion(publicacion);
+      await validarPublicacion(
+        candidato
+      );
 
     if (!validada) {
       continue;
     }
 
-    resultado.set(
+    validadas.set(
       validada.url,
       validada
     );
 
-    if (!validada.complemento) {
-      const $ = cheerio.load(
-        validada.html
-      );
+    /*
+     * Si es el boletín principal,
+     * buscamos complementos o ediciones.
+     */
 
-      $("a[href]").each((_, elemento) => {
-        const absoluta = urlAbsoluta(
-          $(elemento).attr("href"),
-          validada.url
+    if (!validada.edicion) {
+      const ediciones =
+        await descubrirEdiciones(
+          validada
         );
 
-        const complemento =
-          extraerPublicacion(absoluta);
-
-        if (
-          complemento &&
-          complemento.anio ===
-            validada.anio &&
-          complemento.numero ===
-            validada.numero &&
-          complemento.complemento
-        ) {
-          resultado.set(
-            complemento.url,
-            complemento
-          );
-        }
-      });
+      for (
+        const edicion
+        of ediciones
+      ) {
+        validadas.set(
+          edicion.url,
+          edicion
+        );
+      }
     }
   }
 
-  const publicacionesFinales = [];
+  const resultado = [];
 
   for (
-    const publicacion of [
-      ...resultado.values()
+    const publicacion
+    of [
+      ...validadas.values()
     ].sort(ordenarPublicaciones)
   ) {
+    if (publicacion.html) {
+      resultado.push(
+        publicacion
+      );
+
+      continue;
+    }
+
     const validada =
-      publicacion.html
-        ? publicacion
-        : await validarPublicacion(
-            publicacion
-          );
+      await validarPublicacion(
+        publicacion
+      );
 
     if (validada) {
-      publicacionesFinales.push(
+      resultado.push(
         validada
       );
     }
   }
 
-  return publicacionesFinales;
+  return resultado;
+}
+
+/* =========================================================
+   EXTRAER PDF DE CADA PUBLICACIÓN
+========================================================= */
+
+async function obtenerPaginasSecciones(
+  publicacion
+) {
+  const respuesta =
+    await descargar(
+      publicacion.url,
+      "text/html"
+    );
+
+  const html =
+    await respuesta.text();
+
+  const $ =
+    cheerio.load(html);
+
+  const paginas =
+    new Set([
+      publicacion.url
+    ]);
+
+  $("a[href]").each(
+    (_, elemento) => {
+      const absoluta =
+        urlAbsoluta(
+          $(elemento).attr("href"),
+          respuesta.url
+        );
+
+      if (!absoluta) {
+        return;
+      }
+
+      if (
+        !absoluta.startsWith(
+          publicacion.url
+        )
+      ) {
+        return;
+      }
+
+      const limpia =
+        absoluta
+          .split("#")[0]
+          .split("?")[0];
+
+      if (
+        /\/s\d+(?:\.html)?$/i.test(
+          limpia
+        )
+      ) {
+        paginas.add(limpia);
+      }
+    }
+  );
+
+  return [
+    ...paginas
+  ];
+}
+
+function obtenerTituloCercano(
+  $,
+  elemento
+) {
+  const enlace =
+    $(elemento);
+
+  const candidatos = [
+    enlace
+      .closest("li")
+      .text(),
+
+    enlace
+      .closest("article")
+      .text(),
+
+    enlace
+      .closest(".item")
+      .text(),
+
+    enlace
+      .closest("div")
+      .text(),
+
+    enlace
+      .parent()
+      .text()
+  ];
+
+  for (
+    const candidato
+    of candidatos
+  ) {
+    const limpio =
+      String(candidato || "")
+        .replace(
+          /PDF oficial auténtico/gi,
+          ""
+        )
+        .replace(
+          /Otros formatos/gi,
+          ""
+        )
+        .replace(
+          /Verificar autenticidad/gi,
+          ""
+        )
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (
+      limpio.length >= 25
+    ) {
+      return limpio.substring(
+        0,
+        1000
+      );
+    }
+  }
+
+  return (
+    "Documento publicado en el BOJA"
+  );
+}
+
+async function obtenerDocumentosPagina(
+  urlPagina
+) {
+  const respuesta =
+    await descargar(
+      urlPagina,
+      "text/html"
+    );
+
+  const html =
+    await respuesta.text();
+
+  const $ =
+    cheerio.load(html);
+
+  const documentos =
+    new Map();
+
+  $("a[href]").each(
+    (_, elemento) => {
+      const enlace =
+        $(elemento);
+
+      const href =
+        enlace.attr("href") || "";
+
+      const textoEnlace =
+        normalizar(
+          enlace.text()
+        );
+
+      const parecePdf =
+        /\.pdf(?:$|[?#])/i.test(
+          href
+        ) ||
+        textoEnlace.includes(
+          "pdf oficial autentico"
+        );
+
+      if (!parecePdf) {
+        return;
+      }
+
+      const urlPdf =
+        urlAbsoluta(
+          href,
+          respuesta.url
+        );
+
+      if (!urlPdf) {
+        return;
+      }
+
+      const contexto =
+        normalizar(
+          enlace
+            .closest(
+              "li,article,div"
+            )
+            .text()
+        );
+
+      if (
+        contexto.includes(
+          "boletin completo"
+        ) ||
+        contexto.includes(
+          "sumario boletin"
+        )
+      ) {
+        return;
+      }
+
+      documentos.set(
+        urlPdf,
+        {
+          urlPdf,
+
+          tituloPagina:
+            obtenerTituloCercano(
+              $,
+              elemento
+            ),
+
+          urlSeccion:
+            respuesta.url
+        }
+      );
+    }
+  );
+
+  return [
+    ...documentos.values()
+  ];
 }
 
 async function obtenerDocumentosPublicacion(
   publicacion
 ) {
-  const paginas = new Set([
-    publicacion.url
-  ]);
-
-  const respuesta = await descargar(
-    publicacion.url,
-    "text/html"
-  );
-
-  const html = await respuesta.text();
-  const $ = cheerio.load(html);
-
-  $("a[href]").each((_, elemento) => {
-    const url = urlAbsoluta(
-      $(elemento).attr("href"),
-      respuesta.url
+  const paginas =
+    await obtenerPaginasSecciones(
+      publicacion
     );
 
-    if (!url) {
-      return;
-    }
+  console.log(
+    `   Secciones de ${publicacion.url}: ${paginas.length}`
+  );
 
-    if (!url.startsWith(publicacion.url)) {
-      return;
-    }
+  const mapa =
+    new Map();
 
-    if (
-      /\/s\d+(?:\.html)?(?:[?#].*)?$/i.test(
-        url
-      )
-    ) {
-      paginas.add(
-        url.split(/[?#]/)[0]
-      );
-    }
-  });
-
-  const documentos = new Map();
-
-  for (const pagina of paginas) {
+  for (
+    const pagina of paginas
+  ) {
     try {
-      const respuestaPagina =
-        await descargar(
-          pagina,
-          "text/html"
+      const documentos =
+        await obtenerDocumentosPagina(
+          pagina
         );
 
-      const htmlPagina =
-        await respuestaPagina.text();
-
-      const $pagina =
-        cheerio.load(htmlPagina);
-
-      $pagina("a[href]").each(
-        (_, elemento) => {
-          const enlace =
-            $pagina(elemento);
-
-          const href =
-            enlace.attr("href") || "";
-
-          const textoEnlace =
-            normalizar(enlace.text());
-
-          const parecePdf =
-            /\.pdf(?:$|[?#])/i.test(href) ||
-            textoEnlace.includes(
-              "pdf oficial autentico"
-            );
-
-          if (!parecePdf) {
-            return;
-          }
-
-          const urlPdf = urlAbsoluta(
-            href,
-            respuestaPagina.url
-          );
-
-          if (!urlPdf) {
-            return;
-          }
-
-          const contexto = normalizar(
-            enlace
-              .closest(
-                "li,article,div"
-              )
-              .text()
-          );
-
-          if (
-            contexto.includes(
-              "boletin completo"
-            ) ||
-            contexto.includes(
-              "sumario boletin"
-            )
-          ) {
-            return;
-          }
-
-          const titulo =
-            enlace
-              .closest(
-                "li,article,div"
-              )
-              .text()
-              .replace(/\s+/g, " ")
-              .trim()
-              .substring(0, 1000) ||
-            "Documento publicado en el BOJA";
-
-          documentos.set(
-            urlPdf,
-            {
-              urlPdf,
-              tituloPagina: titulo
-            }
-          );
-        }
-      );
+      for (
+        const documento
+        of documentos
+      ) {
+        mapa.set(
+          documento.urlPdf,
+          documento
+        );
+      }
     } catch (error) {
       console.log(
-        `Página omitida ${pagina}: ${error.message}`
+        `⚠️ Página omitida ${pagina}: ${error.message}`
       );
     }
   }
 
-  return [...documentos.values()];
+  return [
+    ...mapa.values()
+  ];
 }
 
-async function extraerTextoPdf(url) {
-  const respuesta = await descargar(
-    url,
-    "application/pdf"
-  );
+/* =========================================================
+   ANALIZAR PDF
+========================================================= */
 
-  const buffer = Buffer.from(
-    await respuesta.arrayBuffer()
-  );
+async function extraerTextoPdf(
+  urlPdf
+) {
+  const respuesta =
+    await descargar(
+      urlPdf,
+      "application/pdf"
+    );
+
+  const buffer =
+    Buffer.from(
+      await respuesta.arrayBuffer()
+    );
 
   if (
     buffer.length >
@@ -693,70 +1149,91 @@ async function extraerTextoPdf(url) {
   ).replace(/\u0000/g, " ");
 }
 
-function detectarSectores(texto) {
+function detectarSectores(
+  texto
+) {
   const textoNormalizado =
     normalizar(texto);
 
-  const resultados = [];
+  const coincidencias = [];
 
   for (
-    const [sector, palabras]
+    const [
+      sector,
+      palabras
+    ]
     of Object.entries(SECTORES)
   ) {
     const encontradas =
-      palabras.filter((palabra) =>
-        textoNormalizado.includes(
-          normalizar(palabra)
-        )
+      palabras.filter(
+        (palabra) =>
+          textoNormalizado.includes(
+            normalizar(palabra)
+          )
       );
 
-    if (encontradas.length > 0) {
-      resultados.push({
+    if (
+      encontradas.length > 0
+    ) {
+      coincidencias.push({
         sector,
+
         palabrasEncontradas: [
-          ...new Set(encontradas)
+          ...new Set(
+            encontradas
+          )
         ]
       });
     }
   }
 
-  return resultados;
+  return coincidencias;
 }
+
+/* =========================================================
+   SUPABASE
+========================================================= */
 
 async function supabaseRequest(
   ruta,
   opciones = {}
 ) {
-  const respuesta = await fetch(
-    `${SUPABASE_URL}/rest/v1/${ruta}`,
-    {
-      ...opciones,
+  const respuesta =
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/${ruta}`,
+      {
+        ...opciones,
 
-      signal:
-        AbortSignal.timeout(45000),
+        signal:
+          AbortSignal.timeout(
+            45000
+          ),
 
-      headers: {
-        apikey: SUPABASE_KEY,
+        headers: {
+          apikey:
+            SUPABASE_KEY,
 
-        Authorization:
-          `Bearer ${SUPABASE_KEY}`,
+          Authorization:
+            `Bearer ${SUPABASE_KEY}`,
 
-        "Content-Type":
-          "application/json",
+          "Content-Type":
+            "application/json",
 
-        ...(opciones.headers || {})
+          ...(opciones.headers ||
+            {})
+        }
       }
-    }
-  );
+    );
 
   if (!respuesta.ok) {
     throw new Error(
-      `Supabase ${respuesta.status}: ` +
-      `${await respuesta.text()}`
+      `Supabase ${respuesta.status}: ${await respuesta.text()}`
     );
   }
 
-  if (respuesta.status === 204) {
+  if (
+    respuesta.status === 204
+  ) {
     return null;
   }
 
@@ -770,32 +1247,123 @@ async function supabaseRequest(
 
 async function obtenerUrlsGuardadas() {
   const filas =
-    await supabaseRequest(
-      "anuncios_boja?select=url_pdf"
+    (
+      await supabaseRequest(
+        "anuncios_boja?select=url_pdf"
+      )
     ) || [];
 
   return new Set(
     filas
-      .map((fila) => fila.url_pdf)
+      .map(
+        (fila) =>
+          fila.url_pdf
+      )
       .filter(Boolean)
   );
 }
 
 async function obtenerUsuarios() {
   return (
-    await supabaseRequest(
-      "perfiles_usuarios" +
-      "?select=id,email,sectores_suscritos"
-    )
-  ) || [];
+    (
+      await supabaseRequest(
+        "perfiles_usuarios?select=id,email,sectores_suscritos"
+      )
+    ) || []
+  );
 }
+
+async function guardarAnuncios(
+  documentos
+) {
+  if (
+    documentos.length === 0
+  ) {
+    return;
+  }
+
+  const filas =
+    documentos.map(
+      (documento) => ({
+        titulo:
+          documento.titulo
+            .substring(
+              0,
+              1000
+            ),
+
+        url_pdf:
+          documento.urlPdf,
+
+        categoria:
+          documento.sectores.length
+            ? documento.sectores
+                .map(
+                  (sector) =>
+                    sector.sector
+                )
+                .join(", ")
+            : "Sin coincidencias"
+      })
+    );
+
+  await supabaseRequest(
+    "anuncios_boja",
+    {
+      method: "POST",
+
+      headers: {
+        Prefer:
+          "return=minimal"
+      },
+
+      body:
+        JSON.stringify(filas)
+    }
+  );
+}
+
+async function guardarNotificaciones(
+  notificaciones
+) {
+  if (
+    notificaciones.length === 0
+  ) {
+    return;
+  }
+
+  await supabaseRequest(
+    "notificaciones_web",
+    {
+      method: "POST",
+
+      headers: {
+        Prefer:
+          "return=minimal"
+      },
+
+      body:
+        JSON.stringify(
+          notificaciones
+        )
+    }
+  );
+}
+
+/* =========================================================
+   USUARIOS Y SECTORES
+========================================================= */
 
 function resolverSectoresUsuario(
   intereses = []
 ) {
-  const resultado = new Set();
+  const resultado =
+    new Set();
 
-  for (const interes of intereses) {
+  for (
+    const interes
+    of intereses
+  ) {
     const interesNormalizado =
       normalizar(interes);
 
@@ -824,7 +1392,9 @@ function resolverSectoresUsuario(
           );
 
       if (coincide) {
-        resultado.add(sector);
+        resultado.add(
+          sector
+        );
       }
     }
   }
@@ -832,76 +1402,106 @@ function resolverSectoresUsuario(
   return resultado;
 }
 
-function crearHtmlCorreo(documentos) {
-  const bloques = documentos
-    .map((documento) => {
-      const palabras = [
-        ...new Set(
+/* =========================================================
+   CORREO
+========================================================= */
+
+function crearHtmlCorreo(
+  documentos
+) {
+  const bloques =
+    documentos
+      .map((documento) => {
+        const palabras = [
+          ...new Set(
+            documento.coincidencias
+              .flatMap(
+                (coincidencia) =>
+                  coincidencia
+                    .palabrasEncontradas
+              )
+          )
+        ];
+
+        const sectores =
           documento.coincidencias
-            .flatMap(
+            .map(
               (coincidencia) =>
-                coincidencia
-                  .palabrasEncontradas
+                coincidencia.sector
             )
-        )
-      ];
+            .join(", ");
 
-      return `
-        <div style="
-          margin:18px 0;
-          padding:16px;
-          background:#f8fafc;
-          border-left:4px solid #008f6a;
-          border-radius:7px;
-        ">
-          <h2 style="
-            font-size:17px;
-            color:#172033;
+        return `
+          <div style="
+            margin:18px 0;
+            padding:18px;
+            background:#f8fafc;
+            border-left:4px solid #008f6a;
+            border-radius:7px;
           ">
-            ${escaparHtml(
-              documento.titulo
-            )}
-          </h2>
+            <div style="
+              color:#006b4f;
+              font-size:13px;
+              font-weight:bold;
+              margin-bottom:8px;
+            ">
+              ${escaparHtml(sectores)}
+            </div>
 
-          <p style="
-            font-size:13px;
-            color:#64748b;
-          ">
-            <strong>
-              Coincidencias:
-            </strong>
+            <h2 style="
+              font-size:17px;
+              line-height:1.4;
+              color:#172033;
+              margin:0 0 10px;
+            ">
+              ${escaparHtml(
+                documento.titulo
+              )}
+            </h2>
 
-            ${escaparHtml(
-              palabras
-                .slice(0, 12)
-                .join(", ")
-            )}
-          </p>
+            <p style="
+              font-size:13px;
+              color:#64748b;
+              line-height:1.5;
+            ">
+              <strong>
+                Coincidencias:
+              </strong>
 
-          <a
-            href="${escaparHtml(
-              documento.urlPdf
-            )}"
-            style="
-              display:inline-block;
-              background:#008f6a;
-              color:white;
-              text-decoration:none;
-              padding:11px 16px;
-              border-radius:6px;
-              font-weight:700;
-            "
-          >
-            Abrir PDF oficial exacto
-          </a>
-        </div>
-      `;
-    })
-    .join("");
+              ${escaparHtml(
+                palabras
+                  .slice(0, 12)
+                  .join(", ")
+              )}
+            </p>
+
+            <a
+              href="${escaparHtml(
+                documento.urlPdf
+              )}"
+              target="_blank"
+              rel="noopener noreferrer"
+              style="
+                display:inline-block;
+                background:#008f6a;
+                color:white;
+                text-decoration:none;
+                padding:11px 16px;
+                border-radius:6px;
+                font-size:13px;
+                font-weight:bold;
+              "
+            >
+              📄 Abrir PDF oficial exacto
+            </a>
+          </div>
+        `;
+      })
+      .join("");
 
   return `
     <div style="
-      font-family:Arial;
+      font-family:Arial,sans-serif;
       background:#f1f5f9;
       padding:24px;
     ">
@@ -914,17 +1514,30 @@ function crearHtmlCorreo(documentos) {
       ">
         <h1 style="
           color:#006b4f;
+          margin:0;
         ">
           BoletínHoy
         </h1>
 
-        <p>
+        <p style="
+          color:#64748b;
+          margin-top:6px;
+        ">
+          Alertas personalizadas del BOJA
+        </p>
+
+        <p style="
+          color:#334155;
+          line-height:1.6;
+        ">
           Hemos encontrado
-          ${documentos.length}
-          publicación${
+          <strong>
+            ${documentos.length}
+          </strong>
+          ${
             documentos.length === 1
-              ? ""
-              : "es"
+              ? "publicación nueva"
+              : "publicaciones nuevas"
           }
           relacionada${
             documentos.length === 1
@@ -935,6 +1548,22 @@ function crearHtmlCorreo(documentos) {
         </p>
 
         ${bloques}
+
+        <p style="
+          text-align:center;
+          margin-top:24px;
+        ">
+          <a
+            href="https://boletinhoy.es"
+            style="
+              color:#006b4f;
+              font-weight:bold;
+              text-decoration:none;
+            "
+          >
+            Entrar en boletinhoy.es
+          </a>
+        </p>
       </div>
     </div>
   `;
@@ -944,81 +1573,105 @@ async function enviarCorreo(
   email,
   documentos
 ) {
-  const respuesta = await fetch(
-    "https://api.resend.com/emails",
-    {
-      method: "POST",
+  const respuesta =
+    await fetch(
+      "https://api.resend.com/emails",
+      {
+        method: "POST",
 
-      signal:
-        AbortSignal.timeout(45000),
+        signal:
+          AbortSignal.timeout(
+            45000
+          ),
 
-      headers: {
-        Authorization:
-          `Bearer ${RESEND_API_KEY}`,
+        headers: {
+          Authorization:
+            `Bearer ${RESEND_API_KEY}`,
 
-        "Content-Type":
-          "application/json"
-      },
+          "Content-Type":
+            "application/json"
+        },
 
-      body: JSON.stringify({
-        from:
-          "BoletínHoy " +
-          "<alertas@boletinhoy.es>",
+        body: JSON.stringify({
+          from:
+            "BoletínHoy <alertas@boletinhoy.es>",
 
-        to: [email],
+          to: [email],
 
-        subject:
-          `${documentos.length} ` +
-          `nueva${
-            documentos.length === 1
-              ? ""
-              : "s"
-          } publicación${
-            documentos.length === 1
-              ? ""
-              : "es"
-          } del BOJA`,
+          subject:
+            `🔔 ${documentos.length} ${
+              documentos.length === 1
+                ? "nueva publicación"
+                : "nuevas publicaciones"
+            } del BOJA`,
 
-        html:
-          crearHtmlCorreo(
-            documentos
-          )
-      })
-    }
-  );
+          html:
+            crearHtmlCorreo(
+              documentos
+            )
+        })
+      }
+    );
 
   if (!respuesta.ok) {
     throw new Error(
-      `Resend ${respuesta.status}: ` +
-      `${await respuesta.text()}`
+      `Resend ${respuesta.status}: ${await respuesta.text()}`
     );
   }
+
+  return respuesta.json();
 }
+
+/* =========================================================
+   PROCESO PRINCIPAL
+========================================================= */
 
 async function ejecutar() {
   console.log(
-    "INICIANDO CAPTURADOR BOJA"
+    "=================================================="
   );
+
+  console.log(
+    "🚀 INICIANDO CAPTURADOR BOJA"
+  );
+
+  console.log(
+    "=================================================="
+  );
+
+  /*
+   * No busca obligatoriamente el BOJA de hoy.
+   * Descubre las publicaciones recientes visibles
+   * en portada y RSS.
+   */
 
   const publicaciones =
     await descubrirPublicaciones();
 
   console.log(
-    `Publicaciones recientes: ` +
-    `${publicaciones.length}`
+    `📚 Publicaciones recientes: ${publicaciones.length}`
   );
+
+  for (
+    const publicacion
+    of publicaciones
+  ) {
+    console.log(
+      `   • ${publicacion.url}`
+    );
+  }
 
   if (
     publicaciones.length === 0
   ) {
     console.log(
-      "No se encontraron publicaciones."
+      "ℹ️ No se encontraron publicaciones."
     );
 
     return;
   }
 
-  const mapaDocumentos =
+  const documentosTotales =
     new Map();
 
   for (
@@ -1026,7 +1679,7 @@ async function ejecutar() {
     of publicaciones
   ) {
     console.log(
-      `Revisando ${publicacion.url}`
+      `🔍 Revisando ${publicacion.url}`
     );
 
     try {
@@ -1035,43 +1688,47 @@ async function ejecutar() {
           publicacion
         );
 
+      console.log(
+        `   PDF localizados: ${documentos.length}`
+      );
+
       for (
         const documento
         of documentos
       ) {
-        mapaDocumentos.set(
+        documentosTotales.set(
           documento.urlPdf,
           documento
         );
       }
     } catch (error) {
       console.log(
-        `No se pudo revisar ` +
-        `${publicacion.url}: ` +
-        `${error.message}`
+        `⚠️ No se pudo revisar ${publicacion.url}: ${error.message}`
       );
     }
   }
 
-  const guardadas =
+  const urlsGuardadas =
     await obtenerUrlsGuardadas();
 
-  const nuevos = [
-    ...mapaDocumentos.values()
+  const documentosNuevos = [
+    ...documentosTotales.values()
   ].filter(
     (documento) =>
-      !guardadas.has(
+      !urlsGuardadas.has(
         documento.urlPdf
       )
   );
 
   console.log(
-    `PDF nuevos: ${nuevos.length}`
+    `🆕 PDF nuevos: ${documentosNuevos.length}`
   );
 
-  if (nuevos.length === 0) {
+  if (
+    documentosNuevos.length === 0
+  ) {
     console.log(
-      "No hay documentos nuevos."
+      "✅ No hay documentos nuevos."
     );
 
     return;
@@ -1081,23 +1738,25 @@ async function ejecutar() {
 
   for (
     let indice = 0;
-    indice < nuevos.length;
+    indice <
+    documentosNuevos.length;
     indice++
   ) {
     const documento =
-      nuevos[indice];
+      documentosNuevos[indice];
+
+    console.log(
+      `📄 Analizando ${indice + 1}/${documentosNuevos.length}`
+    );
 
     try {
-      console.log(
-        `Analizando ` +
-        `${indice + 1}/` +
-        `${nuevos.length}`
-      );
-
       const texto =
         await extraerTextoPdf(
           documento.urlPdf
         );
+
+      const sectores =
+        detectarSectores(texto);
 
       analizados.push({
         ...documento,
@@ -1105,14 +1764,14 @@ async function ejecutar() {
         texto,
 
         titulo:
-          documento.tituloPagina,
+          documento.tituloPagina ||
+          "Documento publicado en el BOJA",
 
-        sectores:
-          detectarSectores(texto)
+        sectores
       });
     } catch (error) {
       console.log(
-        `PDF omitido: ${error.message}`
+        `⚠️ PDF omitido ${documento.urlPdf}: ${error.message}`
       );
     }
   }
@@ -1120,58 +1779,37 @@ async function ejecutar() {
   if (
     analizados.length === 0
   ) {
+    console.log(
+      "ℹ️ No se pudo analizar ningún PDF."
+    );
+
     return;
   }
 
-  await supabaseRequest(
-    "anuncios_boja",
-    {
-      method: "POST",
+  await guardarAnuncios(
+    analizados
+  );
 
-      headers: {
-        Prefer:
-          "return=minimal"
-      },
-
-      body: JSON.stringify(
-        analizados.map(
-          (documento) => ({
-            titulo:
-              documento.titulo
-                .substring(
-                  0,
-                  1000
-                ),
-
-            url_pdf:
-              documento.urlPdf,
-
-            categoria:
-              documento.sectores.length
-                ? documento.sectores
-                    .map(
-                      (sector) =>
-                        sector.sector
-                    )
-                    .join(", ")
-                : "Sin coincidencias"
-          })
-        )
-      )
-    }
+  console.log(
+    `✅ Anuncios guardados: ${analizados.length}`
   );
 
   const conCoincidencias =
     analizados.filter(
       (documento) =>
-        documento.sectores.length
+        documento.sectores.length >
+        0
     );
+
+  console.log(
+    `🎯 Documentos con coincidencias: ${conCoincidencias.length}`
+  );
 
   if (
     conCoincidencias.length === 0
   ) {
     console.log(
-      "No hay coincidencias."
+      "ℹ️ No hay coincidencias para notificar."
     );
 
     return;
@@ -1179,6 +1817,10 @@ async function ejecutar() {
 
   const usuarios =
     await obtenerUsuarios();
+
+  console.log(
+    `👥 Usuarios cargados: ${usuarios.length}`
+  );
 
   const notificaciones = [];
 
@@ -1190,14 +1832,18 @@ async function ejecutar() {
       !usuario.email ||
       !Array.isArray(
         usuario.sectores_suscritos
-      )
+      ) ||
+      usuario
+        .sectores_suscritos
+        .length === 0
     ) {
       continue;
     }
 
-    const permitidos =
+    const sectoresPermitidos =
       resolverSectoresUsuario(
-        usuario.sectores_suscritos
+        usuario
+          .sectores_suscritos
       );
 
     const documentosUsuario =
@@ -1208,9 +1854,9 @@ async function ejecutar() {
           coincidencias:
             documento.sectores
               .filter(
-                (sector) =>
-                  permitidos.has(
-                    sector.sector
+                (coincidencia) =>
+                  sectoresPermitidos.has(
+                    coincidencia.sector
                   )
               )
         }))
@@ -1218,12 +1864,17 @@ async function ejecutar() {
           (documento) =>
             documento
               .coincidencias
-              .length
+              .length > 0
         );
 
     if (
-      documentosUsuario.length === 0
+      documentosUsuario.length ===
+      0
     ) {
+      console.log(
+        `   Sin alertas para ${usuario.email}`
+      );
+
       continue;
     }
 
@@ -1234,8 +1885,7 @@ async function ejecutar() {
       );
 
       console.log(
-        `Email enviado a ` +
-        `${usuario.email}`
+        `✅ Email enviado a ${usuario.email}`
       );
 
       for (
@@ -1247,56 +1897,49 @@ async function ejecutar() {
             usuario.id,
 
           mensaje:
-            `Novedad BOJA: ` +
-            documento.titulo
-              .substring(
-                0,
-                180
-              ),
+            `Novedad BOJA: ${documento.titulo.substring(
+              0,
+              180
+            )}`,
 
           leida: false
         });
       }
     } catch (error) {
       console.log(
-        `Error enviando a ` +
-        `${usuario.email}: ` +
-        `${error.message}`
+        `❌ Error enviando a ${usuario.email}: ${error.message}`
       );
     }
   }
 
-  if (
-    notificaciones.length > 0
-  ) {
-    await supabaseRequest(
-      "notificaciones_web",
-      {
-        method: "POST",
-
-        headers: {
-          Prefer:
-            "return=minimal"
-        },
-
-        body:
-          JSON.stringify(
-            notificaciones
-          )
-      }
-    );
-  }
+  await guardarNotificaciones(
+    notificaciones
+  );
 
   console.log(
-    "PROCESO COMPLETADO"
+    `✅ Notificaciones creadas: ${notificaciones.length}`
+  );
+
+  console.log(
+    "=================================================="
+  );
+
+  console.log(
+    "✅ PROCESO COMPLETADO"
+  );
+
+  console.log(
+    "=================================================="
   );
 }
 
-ejecutar().catch((error) => {
-  console.error(
-    "ERROR GENERAL:",
-    error
-  );
+ejecutar().catch(
+  (error) => {
+    console.error(
+      "❌ ERROR GENERAL:",
+      error
+    );
 
-  process.exitCode = 1;
-});
+    process.exitCode = 1;
+  }
+);
