@@ -1,72 +1,115 @@
 const cheerio = require("cheerio");
 const pdfParse = require("pdf-parse");
 
-/* =========================================================
-   CONFIGURACIÓN
-========================================================= */
+const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
+  .replace(/\/rest\/v1\/?$/i, "")
+  .replace(/\/+$/, "");
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 
-const PORTADA_BOJA = "https://www.juntadeandalucia.es/eboja.html";
+const PORTADA = "https://www.juntadeandalucia.es/eboja.html";
+const RSS = "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
+const BASE = "https://www.juntadeandalucia.es/eboja";
+
+const USER_AGENT =
+  "Mozilla/5.0 (compatible; BoletinHoy/1.0; +https://boletinhoy.es)";
 
 if (!SUPABASE_URL || !SUPABASE_KEY || !RESEND_API_KEY) {
   console.error(
     "Faltan SUPABASE_URL, SUPABASE_KEY o RESEND_API_KEY."
   );
+
   process.exit(1);
 }
 
-/*
- * Puedes añadir o quitar palabras.
- *
- * El nombre del sector debe coincidir exactamente con lo que
- * guardas en sectores_suscritos de Supabase.
- */
-
-const PALABRAS_CLAVE = {
-  oposiciones: [
+const SECTORES = {
+  "oposiciones y empleo público": [
     "oposición",
     "oposiciones",
     "concurso-oposición",
-    "concurso oposición",
     "proceso selectivo",
-    "procesos selectivos",
     "pruebas selectivas",
     "empleo público",
     "oferta de empleo público",
     "bolsa de empleo",
     "bolsa de trabajo",
-    "acceso libre",
     "turno libre",
     "plazas vacantes",
     "personal funcionario",
-    "personal laboral"
+    "personal laboral",
+    "personal estatutario",
+    "nombramiento",
+    "toma de posesión"
   ],
 
-  subvenciones: [
+  "subvenciones y ayudas": [
     "subvención",
     "subvenciones",
     "ayuda",
     "ayudas",
+    "bases reguladoras",
+    "concesión de subvenciones",
     "incentivo",
     "incentivos",
     "beneficiarios",
-    "beneficiarias",
     "concurrencia competitiva",
+    "plazo de solicitud",
     "autónomos",
-    "autónomas",
-    "personas trabajadoras autónomas"
+    "autónomas"
   ],
 
-  sanidad: [
+  "agricultura y pesca": [
+    "agricultura",
+    "agrícola",
+    "pesca",
+    "pesquero",
+    "pesquera",
+    "ganadería",
+    "ganadero",
+    "ganadera",
+    "política agraria común",
+    "explotación agraria",
+    "desarrollo rural",
+    "sector agrario",
+    "sector pesquero",
+    "acuicultura"
+  ],
+
+  "hostelería y comercio": [
+    "hostelería",
+    "hostelero",
+    "hostelera",
+    "comercio",
+    "turismo",
+    "turístico",
+    "restauración",
+    "establecimientos turísticos",
+    "alojamientos turísticos",
+    "hoteles",
+    "agencias de viajes",
+    "artesanía"
+  ],
+
+  "licitaciones y contratación": [
+    "licitación",
+    "licitaciones",
+    "contratación pública",
+    "contrato público",
+    "contrato menor",
+    "mesa de contratación",
+    "adjudicación",
+    "adjudicaciones",
+    "formalización de contrato",
+    "procedimiento abierto",
+    "acuerdo marco"
+  ],
+
+  "sanidad y servicios sociales": [
     "servicio andaluz de salud",
-    "personal estatutario",
     "sanidad",
     "salud",
     "hospital",
-    "hospitalario",
     "enfermería",
     "enfermero",
     "enfermera",
@@ -74,10 +117,11 @@ const PALABRAS_CLAVE = {
     "médico",
     "médica",
     "atención primaria",
-    "servicios sociales"
+    "servicios sociales",
+    "dependencia"
   ],
 
-  educacion: [
+  "educación y universidades": [
     "educación",
     "universidad",
     "universidades",
@@ -88,48 +132,11 @@ const PALABRAS_CLAVE = {
     "beca",
     "becas",
     "centros educativos",
-    "formación profesional"
+    "formación profesional",
+    "cuerpos docentes universitarios"
   ],
 
-  agricultura: [
-    "agricultura",
-    "agrícola",
-    "ganadería",
-    "ganadero",
-    "ganadera",
-    "pesca",
-    "explotación agraria",
-    "explotaciones agrarias",
-    "desarrollo rural",
-    "sector agrario"
-  ],
-
-  licitaciones: [
-    "licitación",
-    "licitaciones",
-    "contratación pública",
-    "contrato público",
-    "contratos públicos",
-    "adjudicación",
-    "adjudicaciones",
-    "obras públicas",
-    "concurso público"
-  ],
-
-  hosteleria: [
-    "hostelería",
-    "hostelero",
-    "hostelera",
-    "turismo",
-    "turístico",
-    "turística",
-    "comercio",
-    "establecimientos turísticos",
-    "alojamientos turísticos",
-    "agencias de viajes"
-  ],
-
-  medioambiente: [
+  "medio ambiente y sostenibilidad": [
     "medio ambiente",
     "medioambiental",
     "sostenibilidad",
@@ -138,30 +145,19 @@ const PALABRAS_CLAVE = {
     "residuos",
     "energías renovables",
     "energía solar",
-    "protección ambiental"
+    "protección ambiental",
+    "calidad ambiental"
   ]
 };
 
-/* =========================================================
-   FUNCIONES AUXILIARES
-========================================================= */
-
-function normalizar(texto = "") {
-  return String(texto)
+function normalizar(valor = "") {
+  return String(valor)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[“”«»"'’]/g, "")
     .replace(/\s+/g, " ")
     .toLowerCase()
     .trim();
-}
-
-function escaparHtml(texto = "") {
-  return String(texto)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }
 
 function urlAbsoluta(href, base) {
@@ -172,58 +168,554 @@ function urlAbsoluta(href, base) {
   }
 }
 
-function fechaMadrid() {
-  return new Intl.DateTimeFormat("es-ES", {
-    timeZone: "Europe/Madrid",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric"
-  }).format(new Date());
+function escaparHtml(valor = "") {
+  return String(valor)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
-function nombreSector(sector) {
-  const nombres = {
-    oposiciones: "Oposiciones y Empleo Público",
-    subvenciones: "Subvenciones y Autónomos",
-    sanidad: "Sanidad y Servicios Sociales",
-    educacion: "Educación y Universidades",
-    agricultura: "Agricultura, Ganadería y Pesca",
-    licitaciones: "Licitaciones y Obras Públicas",
-    hosteleria: "Hostelería, Comercio y Turismo",
-    medioambiente: "Medio Ambiente y Sostenibilidad"
-  };
+async function descargar(url, accept = "*/*") {
+  const respuesta = await fetch(url, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(45000),
+    headers: {
+      "User-Agent": USER_AGENT,
+      Accept: accept,
+      "Accept-Language": "es-ES,es;q=0.9"
+    }
+  });
 
-  return nombres[sector] || sector;
+  if (!respuesta.ok) {
+    throw new Error(
+      `HTTP ${respuesta.status} al consultar ${url}`
+    );
+  }
+
+  return respuesta;
 }
 
-function iconoSector(sector) {
-  const iconos = {
-    oposiciones: "📢",
-    subvenciones: "💶",
-    sanidad: "🏥",
-    educacion: "🎓",
-    agricultura: "🚜",
-    licitaciones: "🏗️",
-    hosteleria: "🍽️",
-    medioambiente: "🌿"
-  };
+function extraerPublicacion(url = "") {
+  const coincidencia = String(url).match(
+    /\/(?:e?boja|boja)\/(\d{4})\/(\d+)(?:\/(c\d+))?(?:\/index\.html|\/)?(?:[?#].*)?$/i
+  );
 
-  return iconos[sector] || "📌";
+  if (!coincidencia) {
+    return null;
+  }
+
+  const anio = coincidencia[1];
+  const numero = Number(coincidencia[2]);
+  const complemento = (
+    coincidencia[3] || ""
+  ).toLowerCase();
+
+  return {
+    anio,
+    numero,
+    complemento,
+    url:
+      `${BASE}/${anio}/${numero}/` +
+      `${complemento ? `${complemento}/` : ""}`
+  };
+}
+
+function ordenarPublicaciones(a, b) {
+  if (Number(a.anio) !== Number(b.anio)) {
+    return Number(b.anio) - Number(a.anio);
+  }
+
+  if (a.numero !== b.numero) {
+    return b.numero - a.numero;
+  }
+
+  if (!a.complemento && b.complemento) {
+    return -1;
+  }
+
+  if (a.complemento && !b.complemento) {
+    return 1;
+  }
+
+  return b.complemento.localeCompare(
+    a.complemento,
+    "es",
+    {
+      numeric: true
+    }
+  );
+}
+
+function registrarCandidato(
+  mapa,
+  enlace,
+  base = PORTADA
+) {
+  const absoluta = urlAbsoluta(enlace, base);
+
+  if (!absoluta) {
+    return;
+  }
+
+  const publicacion = extraerPublicacion(absoluta);
+
+  if (!publicacion) {
+    return;
+  }
+
+  mapa.set(publicacion.url, publicacion);
+}
+
+async function obtenerCandidatosPortada() {
+  console.log(
+    "Consultando la portada oficial del BOJA..."
+  );
+
+  const respuesta = await descargar(
+    PORTADA,
+    "text/html"
+  );
+
+  const html = await respuesta.text();
+  const $ = cheerio.load(html);
+  const mapa = new Map();
+
+  $("a[href]").each((_, elemento) => {
+    registrarCandidato(
+      mapa,
+      $(elemento).attr("href"),
+      respuesta.url
+    );
+  });
+
+  const expresion =
+    /\/(?:e?boja|boja)\/(\d{4})\/(\d+)(?:\/(c\d+))?(?:\/index\.html|\/)?/gi;
+
+  let coincidencia;
+
+  while (
+    (coincidencia = expresion.exec(html))
+  ) {
+    registrarCandidato(
+      mapa,
+      `${BASE}/${coincidencia[1]}/` +
+        `${coincidencia[2]}/` +
+        `${
+          coincidencia[3]
+            ? `${coincidencia[3]}/`
+            : ""
+        }`
+    );
+  }
+
+  return [...mapa.values()].sort(
+    ordenarPublicaciones
+  );
+}
+
+async function obtenerCandidatosRss() {
+  console.log(
+    "Consultando el RSS oficial como respaldo..."
+  );
+
+  const respuesta = await descargar(
+    RSS,
+    "application/xml,text/xml"
+  );
+
+  const xml = await respuesta.text();
+
+  const $ = cheerio.load(xml, {
+    xmlMode: true
+  });
+
+  const mapa = new Map();
+
+  $("entry,item").each((_, elemento) => {
+    const entrada = $(elemento);
+
+    const enlaces = [
+      entrada
+        .find("link[href]")
+        .first()
+        .attr("href"),
+
+      entrada
+        .find("link")
+        .first()
+        .text(),
+
+      entrada
+        .find("guid")
+        .first()
+        .text()
+    ].filter(Boolean);
+
+    for (const enlace of enlaces) {
+      const coincidencia = String(enlace).match(
+        /\/(?:e?boja|boja)\/(\d{4})\/(\d+)/i
+      );
+
+      if (!coincidencia) {
+        continue;
+      }
+
+      registrarCandidato(
+        mapa,
+        `${BASE}/${coincidencia[1]}/` +
+          `${coincidencia[2]}/`
+      );
+    }
+  });
+
+  return [...mapa.values()].sort(
+    ordenarPublicaciones
+  );
+}
+
+async function validarPublicacion(publicacion) {
+  const urls = [
+    publicacion.url,
+    `${publicacion.url}index.html`
+  ];
+
+  for (const url of urls) {
+    try {
+      const respuesta = await descargar(
+        url,
+        "text/html"
+      );
+
+      const html = await respuesta.text();
+      const $ = cheerio.load(html);
+
+      const texto = normalizar(
+        $("body").text()
+      );
+
+      const pareceBoja =
+        texto.length > 100 &&
+        (
+          texto.includes(
+            "boletin oficial"
+          ) ||
+          texto.includes("boja")
+        );
+
+      if (pareceBoja) {
+        return {
+          ...publicacion,
+          html
+        };
+      }
+    } catch (error) {
+      console.log(
+        `No válido ${url}: ${error.message}`
+      );
+    }
+  }
+
+  return null;
+}
+
+async function descubrirPublicaciones() {
+  const mapa = new Map();
+
+  try {
+    const portada =
+      await obtenerCandidatosPortada();
+
+    for (const publicacion of portada) {
+      mapa.set(
+        publicacion.url,
+        publicacion
+      );
+    }
+  } catch (error) {
+    console.log(
+      `Error consultando portada: ${error.message}`
+    );
+  }
+
+  try {
+    const rss =
+      await obtenerCandidatosRss();
+
+    for (const publicacion of rss) {
+      mapa.set(
+        publicacion.url,
+        publicacion
+      );
+    }
+  } catch (error) {
+    console.log(
+      `Error consultando RSS: ${error.message}`
+    );
+  }
+
+  const candidatos = [
+    ...mapa.values()
+  ]
+    .sort(ordenarPublicaciones)
+    .slice(0, 20);
+
+  const resultado = new Map();
+
+  for (const publicacion of candidatos) {
+    const validada =
+      await validarPublicacion(publicacion);
+
+    if (!validada) {
+      continue;
+    }
+
+    resultado.set(
+      validada.url,
+      validada
+    );
+
+    if (!validada.complemento) {
+      const $ = cheerio.load(
+        validada.html
+      );
+
+      $("a[href]").each((_, elemento) => {
+        const absoluta = urlAbsoluta(
+          $(elemento).attr("href"),
+          validada.url
+        );
+
+        const complemento =
+          extraerPublicacion(absoluta);
+
+        if (
+          complemento &&
+          complemento.anio ===
+            validada.anio &&
+          complemento.numero ===
+            validada.numero &&
+          complemento.complemento
+        ) {
+          resultado.set(
+            complemento.url,
+            complemento
+          );
+        }
+      });
+    }
+  }
+
+  const publicacionesFinales = [];
+
+  for (
+    const publicacion of [
+      ...resultado.values()
+    ].sort(ordenarPublicaciones)
+  ) {
+    const validada =
+      publicacion.html
+        ? publicacion
+        : await validarPublicacion(
+            publicacion
+          );
+
+    if (validada) {
+      publicacionesFinales.push(
+        validada
+      );
+    }
+  }
+
+  return publicacionesFinales;
+}
+
+async function obtenerDocumentosPublicacion(
+  publicacion
+) {
+  const paginas = new Set([
+    publicacion.url
+  ]);
+
+  const respuesta = await descargar(
+    publicacion.url,
+    "text/html"
+  );
+
+  const html = await respuesta.text();
+  const $ = cheerio.load(html);
+
+  $("a[href]").each((_, elemento) => {
+    const url = urlAbsoluta(
+      $(elemento).attr("href"),
+      respuesta.url
+    );
+
+    if (!url) {
+      return;
+    }
+
+    if (!url.startsWith(publicacion.url)) {
+      return;
+    }
+
+    if (
+      /\/s\d+(?:\.html)?(?:[?#].*)?$/i.test(
+        url
+      )
+    ) {
+      paginas.add(
+        url.split(/[?#]/)[0]
+      );
+    }
+  });
+
+  const documentos = new Map();
+
+  for (const pagina of paginas) {
+    try {
+      const respuestaPagina =
+        await descargar(
+          pagina,
+          "text/html"
+        );
+
+      const htmlPagina =
+        await respuestaPagina.text();
+
+      const $pagina =
+        cheerio.load(htmlPagina);
+
+      $pagina("a[href]").each(
+        (_, elemento) => {
+          const enlace =
+            $pagina(elemento);
+
+          const href =
+            enlace.attr("href") || "";
+
+          const textoEnlace =
+            normalizar(enlace.text());
+
+          const parecePdf =
+            /\.pdf(?:$|[?#])/i.test(href) ||
+            textoEnlace.includes(
+              "pdf oficial autentico"
+            );
+
+          if (!parecePdf) {
+            return;
+          }
+
+          const urlPdf = urlAbsoluta(
+            href,
+            respuestaPagina.url
+          );
+
+          if (!urlPdf) {
+            return;
+          }
+
+          const contexto = normalizar(
+            enlace
+              .closest(
+                "li,article,div"
+              )
+              .text()
+          );
+
+          if (
+            contexto.includes(
+              "boletin completo"
+            ) ||
+            contexto.includes(
+              "sumario boletin"
+            )
+          ) {
+            return;
+          }
+
+          const titulo =
+            enlace
+              .closest(
+                "li,article,div"
+              )
+              .text()
+              .replace(/\s+/g, " ")
+              .trim()
+              .substring(0, 1000) ||
+            "Documento publicado en el BOJA";
+
+          documentos.set(
+            urlPdf,
+            {
+              urlPdf,
+              tituloPagina: titulo
+            }
+          );
+        }
+      );
+    } catch (error) {
+      console.log(
+        `Página omitida ${pagina}: ${error.message}`
+      );
+    }
+  }
+
+  return [...documentos.values()];
+}
+
+async function extraerTextoPdf(url) {
+  const respuesta = await descargar(
+    url,
+    "application/pdf"
+  );
+
+  const buffer = Buffer.from(
+    await respuesta.arrayBuffer()
+  );
+
+  if (
+    buffer.length >
+    35 * 1024 * 1024
+  ) {
+    throw new Error(
+      "El PDF supera los 35 MB."
+    );
+  }
+
+  const resultado =
+    await pdfParse(buffer);
+
+  return String(
+    resultado.text || ""
+  ).replace(/\u0000/g, " ");
 }
 
 function detectarSectores(texto) {
-  const textoNormalizado = normalizar(texto);
+  const textoNormalizado =
+    normalizar(texto);
+
   const resultados = [];
 
-  for (const [sector, palabras] of Object.entries(PALABRAS_CLAVE)) {
-    const encontradas = palabras.filter((palabra) =>
-      textoNormalizado.includes(normalizar(palabra))
-    );
+  for (
+    const [sector, palabras]
+    of Object.entries(SECTORES)
+  ) {
+    const encontradas =
+      palabras.filter((palabra) =>
+        textoNormalizado.includes(
+          normalizar(palabra)
+        )
+      );
 
     if (encontradas.length > 0) {
       resultados.push({
         sector,
-        palabrasEncontradas: [...new Set(encontradas)]
+        palabrasEncontradas: [
+          ...new Set(encontradas)
+        ]
       });
     }
   }
@@ -231,719 +723,580 @@ function detectarSectores(texto) {
   return resultados;
 }
 
-function obtenerExtracto(texto, palabras, longitud = 350) {
-  const textoLimpio = String(texto || "")
-    .replace(/\s+/g, " ")
-    .trim();
+async function supabaseRequest(
+  ruta,
+  opciones = {}
+) {
+  const respuesta = await fetch(
+    `${SUPABASE_URL}/rest/v1/${ruta}`,
+    {
+      ...opciones,
 
-  if (!textoLimpio) {
-    return "Publicación oficial relacionada con sus intereses.";
-  }
+      signal:
+        AbortSignal.timeout(45000),
 
-  const textoNormalizado = normalizar(textoLimpio);
+      headers: {
+        apikey: SUPABASE_KEY,
 
-  let posicion = -1;
+        Authorization:
+          `Bearer ${SUPABASE_KEY}`,
 
-  for (const palabra of palabras) {
-    posicion = textoNormalizado.indexOf(normalizar(palabra));
+        "Content-Type":
+          "application/json",
 
-    if (posicion !== -1) break;
-  }
-
-  if (posicion === -1) {
-    return textoLimpio.substring(0, longitud) + "...";
-  }
-
-  const inicio = Math.max(0, posicion - 100);
-  const final = Math.min(
-    textoLimpio.length,
-    posicion + longitud
-  );
-
-  return `${inicio > 0 ? "..." : ""}${textoLimpio.substring(
-    inicio,
-    final
-  )}${final < textoLimpio.length ? "..." : ""}`;
-}
-
-function obtenerTituloDesdePdf(texto) {
-  const lineas = String(texto || "")
-    .split("\n")
-    .map((linea) => linea.replace(/\s+/g, " ").trim())
-    .filter((linea) => linea.length > 25);
-
-  const ignorar = [
-    "boletín oficial de la junta de andalucía",
-    "boja",
-    "página",
-    "depósito legal"
-  ];
-
-  const titulo = lineas.find((linea) => {
-    const normalizada = normalizar(linea);
-
-    return !ignorar.some((textoIgnorado) =>
-      normalizada.startsWith(normalizar(textoIgnorado))
-    );
-  });
-
-  return titulo
-    ? titulo.substring(0, 500)
-    : "Documento publicado en el BOJA";
-}
-
-/* =========================================================
-   LOCALIZAR EL BOJA DEL DÍA
-========================================================= */
-
-async function obtenerBojaDeHoy() {
-  console.log("Buscando el último BOJA publicado...");
-
-  const respuesta = await fetch(PORTADA_BOJA, {
-    headers: {
-      "User-Agent": "BoletinHoy/1.0",
-      Accept: "text/html"
+        ...(opciones.headers || {})
+      }
     }
-  });
+  );
 
   if (!respuesta.ok) {
     throw new Error(
-      `No se pudo abrir la portada del BOJA: ${respuesta.status}`
+      `Supabase ${respuesta.status}: ` +
+      `${await respuesta.text()}`
     );
   }
 
-  const html = await respuesta.text();
-  const $ = cheerio.load(html);
-
-  const anio = new Intl.DateTimeFormat("es-ES", {
-    timeZone: "Europe/Madrid",
-    year: "numeric"
-  }).format(new Date());
-
-  const candidatos = new Map();
-
-  $("a[href]").each((_, elemento) => {
-    const href = $(elemento).attr("href");
-    const url = urlAbsoluta(href, PORTADA_BOJA);
-
-    if (!url) return;
-
-    const coincidencia = url.match(
-      new RegExp(
-        `/eboja/${anio}/(\\d+)(?:/c\\d+)?(?:/index\\.html)?/?$`,
-        "i"
-      )
-    );
-
-    if (!coincidencia) return;
-
-    const numero = Number(coincidencia[1]);
-
-    candidatos.set(url, {
-      url,
-      numero
-    });
-  });
-
-  const boletines = [...candidatos.values()].sort(
-    (a, b) => b.numero - a.numero
-  );
-
-  if (boletines.length === 0) {
-    console.log("No se encontró ningún boletín en la portada.");
+  if (respuesta.status === 204) {
     return null;
   }
 
-  /*
-   * Revisamos los primeros candidatos por si hay un boletín
-   * extraordinario o más de una edición.
-   */
+  const texto =
+    await respuesta.text();
 
-  for (const candidato of boletines.slice(0, 5)) {
-    const respuestaBoletin = await fetch(candidato.url, {
-      headers: {
-        "User-Agent": "BoletinHoy/1.0",
-        Accept: "text/html"
-      }
-    });
+  return texto
+    ? JSON.parse(texto)
+    : null;
+}
 
-    if (!respuestaBoletin.ok) continue;
+async function obtenerUrlsGuardadas() {
+  const filas =
+    await supabaseRequest(
+      "anuncios_boja?select=url_pdf"
+    ) || [];
 
-    const contenido = await respuestaBoletin.text();
-
-    if (contenido.includes(fechaMadrid())) {
-      console.log(`BOJA de hoy encontrado: ${candidato.url}`);
-      return candidato.url;
-    }
-  }
-
-  console.log(
-    `No se encontró un BOJA publicado hoy, ${fechaMadrid()}.`
+  return new Set(
+    filas
+      .map((fila) => fila.url_pdf)
+      .filter(Boolean)
   );
-
-  return null;
 }
-
-/* =========================================================
-   OBTENER SECCIONES Y PDF
-========================================================= */
-
-async function obtenerHtml(url) {
-  const respuesta = await fetch(url, {
-    headers: {
-      "User-Agent": "BoletinHoy/1.0",
-      Accept: "text/html"
-    }
-  });
-
-  if (!respuesta.ok) {
-    throw new Error(
-      `No se pudo abrir ${url}: ${respuesta.status}`
-    );
-  }
-
-  return respuesta.text();
-}
-
-async function obtenerPaginasBoletin(urlBoletin) {
-  const html = await obtenerHtml(urlBoletin);
-  const $ = cheerio.load(html);
-
-  const base = urlBoletin.endsWith("/")
-    ? urlBoletin
-    : `${urlBoletin}/`;
-
-  const paginas = new Set([urlBoletin]);
-
-  $("a[href]").each((_, elemento) => {
-    const href = $(elemento).attr("href");
-    const url = urlAbsoluta(href, urlBoletin);
-
-    if (!url || !url.startsWith(base)) return;
-
-    if (/\/s\d+(?:\.html)?\/?$/i.test(url)) {
-      paginas.add(url);
-    }
-  });
-
-  return [...paginas];
-}
-
-async function obtenerPdfsPagina(urlPagina) {
-  const html = await obtenerHtml(urlPagina);
-  const $ = cheerio.load(html);
-
-  const documentos = [];
-
-  $("a[href]").each((_, elemento) => {
-    const enlace = $(elemento);
-    const textoEnlace = normalizar(enlace.text());
-    const href = enlace.attr("href") || "";
-
-    const esPdfOficial =
-      textoEnlace.includes("pdf oficial autentico") ||
-      /\.pdf(?:$|\?)/i.test(href);
-
-    if (!esPdfOficial) return;
-
-    const urlPdf = urlAbsoluta(href, urlPagina);
-
-    if (!urlPdf) return;
-
-    const textoPadre = normalizar(enlace.parent().text());
-
-    if (
-      textoPadre.includes("sumario boletin") ||
-      textoPadre.includes("boletin completo")
-    ) {
-      return;
-    }
-
-    documentos.push({
-      urlPdf
-    });
-  });
-
-  return documentos;
-}
-
-async function obtenerTodosLosPdfs(urlBoletin) {
-  const paginas = await obtenerPaginasBoletin(urlBoletin);
-
-  console.log(`Secciones encontradas: ${paginas.length}`);
-
-  const urls = new Set();
-
-  for (const pagina of paginas) {
-    try {
-      const documentos = await obtenerPdfsPagina(pagina);
-
-      for (const documento of documentos) {
-        urls.add(documento.urlPdf);
-      }
-    } catch (error) {
-      console.error(
-        `Error leyendo la sección ${pagina}: ${error.message}`
-      );
-    }
-  }
-
-  console.log(`PDF oficiales encontrados: ${urls.size}`);
-
-  return [...urls];
-}
-
-/* =========================================================
-   DESCARGAR Y ANALIZAR PDF
-========================================================= */
-
-async function leerPdf(urlPdf) {
-  const respuesta = await fetch(urlPdf, {
-    headers: {
-      "User-Agent": "BoletinHoy/1.0",
-      Accept: "application/pdf"
-    }
-  });
-
-  if (!respuesta.ok) {
-    throw new Error(
-      `No se pudo descargar el PDF: ${respuesta.status}`
-    );
-  }
-
-  const buffer = Buffer.from(await respuesta.arrayBuffer());
-  const resultado = await pdfParse(buffer);
-
-  return resultado.text || "";
-}
-
-async function analizarPdfs(urlsPdf) {
-  const resultados = [];
-
-  for (let indice = 0; indice < urlsPdf.length; indice++) {
-    const urlPdf = urlsPdf[indice];
-
-    console.log(
-      `Analizando PDF ${indice + 1} de ${urlsPdf.length}`
-    );
-
-    try {
-      const textoCompleto = await leerPdf(urlPdf);
-      const coincidencias = detectarSectores(textoCompleto);
-
-      if (coincidencias.length === 0) continue;
-
-      const titulo = obtenerTituloDesdePdf(textoCompleto);
-
-      for (const coincidencia of coincidencias) {
-        resultados.push({
-          titulo,
-          sector: coincidencia.sector,
-          palabrasEncontradas:
-            coincidencia.palabrasEncontradas,
-          textoCompleto,
-          urlRealExtraida: urlPdf
-        });
-      }
-
-      console.log(
-        `Coincidencia encontrada: ${titulo.substring(0, 80)}`
-      );
-    } catch (error) {
-      console.error(
-        `No se pudo analizar ${urlPdf}: ${error.message}`
-      );
-    }
-  }
-
-  return resultados;
-}
-
-/* =========================================================
-   SUPABASE
-========================================================= */
 
 async function obtenerUsuarios() {
-  const respuesta = await fetch(
-    `${SUPABASE_URL}/rest/v1/perfiles_usuarios` +
-      "?select=id,email,sectores_suscritos",
-    {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`
+  return (
+    await supabaseRequest(
+      "perfiles_usuarios" +
+      "?select=id,email,sectores_suscritos"
+    )
+  ) || [];
+}
+
+function resolverSectoresUsuario(
+  intereses = []
+) {
+  const resultado = new Set();
+
+  for (const interes of intereses) {
+    const interesNormalizado =
+      normalizar(interes);
+
+    for (
+      const sector
+      of Object.keys(SECTORES)
+    ) {
+      const sectorNormalizado =
+        normalizar(sector);
+
+      const coincide =
+        sectorNormalizado.includes(
+          interesNormalizado
+        ) ||
+        interesNormalizado.includes(
+          sectorNormalizado
+        ) ||
+        sectorNormalizado
+          .split(" ")
+          .some(
+            (palabra) =>
+              palabra.length > 4 &&
+              interesNormalizado.includes(
+                palabra
+              )
+          );
+
+      if (coincide) {
+        resultado.add(sector);
       }
     }
-  );
-
-  if (!respuesta.ok) {
-    throw new Error(
-      `Error obteniendo usuarios: ${await respuesta.text()}`
-    );
   }
 
-  return respuesta.json();
+  return resultado;
 }
 
-function mensajeNotificacion(documento) {
-  return (
-    `Nuevo documento en ${documento.sector.toUpperCase()}: ` +
-    documento.titulo.substring(0, 300)
-  );
-}
+function crearHtmlCorreo(documentos) {
+  const bloques = documentos
+    .map((documento) => {
+      const palabras = [
+        ...new Set(
+          documento.coincidencias
+            .flatMap(
+              (coincidencia) =>
+                coincidencia
+                  .palabrasEncontradas
+            )
+        )
+      ];
 
-/*
- * Comprueba si esta notificación ya existe.
- * Así no manda el mismo correo cada 15 minutos.
- */
+      return `
+        <div style="
+          margin:18px 0;
+          padding:16px;
+          background:#f8fafc;
+          border-left:4px solid #008f6a;
+          border-radius:7px;
+        ">
+          <h2 style="
+            font-size:17px;
+            color:#172033;
+          ">
+            ${escaparHtml(
+              documento.titulo
+            )}
+          </h2>
 
-async function notificacionYaExiste(usuarioId, documento) {
-  const url = new URL(
-    `${SUPABASE_URL}/rest/v1/notificaciones_web`
-  );
+          <p style="
+            font-size:13px;
+            color:#64748b;
+          ">
+            <strong>
+              Coincidencias:
+            </strong>
 
-  url.searchParams.set("select", "id");
-  url.searchParams.set("usuario_id", `eq.${usuarioId}`);
-  url.searchParams.set(
-    "mensaje",
-    `eq.${mensajeNotificacion(documento)}`
-  );
-  url.searchParams.set("limit", "1");
+            ${escaparHtml(
+              palabras
+                .slice(0, 12)
+                .join(", ")
+            )}
+          </p>
 
-  const respuesta = await fetch(url, {
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`
-    }
-  });
+          <a
+            href="${escaparHtml(
+              documento.urlPdf
+            )}"
+            style="
+              display:inline-block;
+              background:#008f6a;
+              color:white;
+              text-decoration:none;
+              padding:11px 16px;
+              border-radius:6px;
+              font-weight:700;
+            "
+          >
+            Abrir PDF oficial exacto
+          </a>
+        </div>
+      `;
+    })
+    .join("");
 
-  if (!respuesta.ok) {
-    console.error(
-      "No se pudo comprobar si la notificación existía:",
-      await respuesta.text()
-    );
-
-    return false;
-  }
-
-  const resultados = await respuesta.json();
-
-  return resultados.length > 0;
-}
-
-async function crearNotificacion(usuarioId, documento) {
-  const respuesta = await fetch(
-    `${SUPABASE_URL}/rest/v1/notificaciones_web`,
-    {
-      method: "POST",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal"
-      },
-      body: JSON.stringify({
-        usuario_id: usuarioId,
-        mensaje: mensajeNotificacion(documento),
-        leida: false
-      })
-    }
-  );
-
-  if (!respuesta.ok) {
-    throw new Error(
-      `Error creando notificación: ${await respuesta.text()}`
-    );
-  }
-}
-
-/* =========================================================
-   CORREO
-========================================================= */
-
-function crearCorreo(documentos) {
-  let html = `
+  return `
     <div style="
-      max-width:620px;
-      margin:auto;
+      font-family:Arial;
+      background:#f1f5f9;
       padding:24px;
-      background:#f4f7f6;
-      font-family:Arial,sans-serif;
     ">
       <div style="
-        background:#ffffff;
-        padding:25px;
+        max-width:680px;
+        margin:auto;
+        background:white;
+        padding:26px;
         border-radius:10px;
       ">
         <h1 style="
-          margin:0;
           color:#006b4f;
-          font-size:25px;
         ">
           BoletínHoy
         </h1>
 
-        <p style="
-          color:#64748b;
-          margin-top:6px;
-          font-size:14px;
-        ">
-          Alertas personalizadas del BOJA
+        <p>
+          Hemos encontrado
+          ${documentos.length}
+          publicación${
+            documentos.length === 1
+              ? ""
+              : "es"
+          }
+          relacionada${
+            documentos.length === 1
+              ? ""
+              : "s"
+          }
+          con tus sectores.
         </p>
 
-        <hr style="
-          border:0;
-          border-top:1px solid #e2e8f0;
-          margin:20px 0;
-        ">
-
-        <p style="
-          color:#334155;
-          font-size:15px;
-          line-height:1.5;
-        ">
-          Hemos encontrado nuevas publicaciones oficiales
-          relacionadas con tus áreas de interés.
-        </p>
-  `;
-
-  for (const documento of documentos) {
-    const titulo = escaparHtml(documento.titulo);
-    const sector = escaparHtml(
-      nombreSector(documento.sector)
-    );
-
-    const palabras = documento.palabrasEncontradas
-      .map(escaparHtml)
-      .join(", ");
-
-    const extracto = escaparHtml(
-      obtenerExtracto(
-        documento.textoCompleto,
-        documento.palabrasEncontradas
-      )
-    );
-
-    const urlPdf = escaparHtml(
-      documento.urlRealExtraida
-    );
-
-    html += `
-      <div style="
-        margin-top:22px;
-        padding:17px;
-        background:#f8fafc;
-        border-left:4px solid #008f6a;
-        border-radius:5px;
-      ">
-        <p style="
-          margin:0 0 8px;
-          color:#0f172a;
-          font-size:14px;
-        ">
-          ${iconoSector(documento.sector)}
-          <strong>${sector}</strong>
-        </p>
-
-        <h2 style="
-          margin:0 0 10px;
-          color:#172033;
-          font-size:16px;
-          line-height:1.4;
-        ">
-          ${titulo}
-        </h2>
-
-        <p style="
-          margin:0 0 10px;
-          color:#475569;
-          font-size:13px;
-        ">
-          Palabras encontradas:
-          <strong>${palabras}</strong>
-        </p>
-
-        <p style="
-          margin:0 0 15px;
-          color:#64748b;
-          font-size:13px;
-          line-height:1.5;
-        ">
-          ${extracto}
-        </p>
-
-        <a
-          href="${urlPdf}"
-          target="_blank"
-          rel="noopener noreferrer"
-          style="
-            display:inline-block;
-            padding:10px 15px;
-            background:#008f6a;
-            color:#ffffff;
-            border-radius:5px;
-            text-decoration:none;
-            font-size:13px;
-            font-weight:bold;
-          "
-        >
-          📄 Abrir PDF oficial exacto
-        </a>
-      </div>
-    `;
-  }
-
-  html += `
-        <p style="
-          margin-top:25px;
-          color:#94a3b8;
-          font-size:11px;
-          text-align:center;
-        ">
-          Mensaje automático de BoletínHoy.
-        </p>
+        ${bloques}
       </div>
     </div>
   `;
-
-  return html;
 }
 
-async function enviarCorreo(email, documentos) {
+async function enviarCorreo(
+  email,
+  documentos
+) {
   const respuesta = await fetch(
     "https://api.resend.com/emails",
     {
       method: "POST",
+
+      signal:
+        AbortSignal.timeout(45000),
+
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json"
+        Authorization:
+          `Bearer ${RESEND_API_KEY}`,
+
+        "Content-Type":
+          "application/json"
       },
+
       body: JSON.stringify({
-        from: "BoletínHoy <alertas@boletinhoy.es>",
+        from:
+          "BoletínHoy " +
+          "<alertas@boletinhoy.es>",
+
         to: [email],
+
         subject:
-          "🔔 Nuevas publicaciones del BOJA para ti",
-        html: crearCorreo(documentos)
+          `${documentos.length} ` +
+          `nueva${
+            documentos.length === 1
+              ? ""
+              : "s"
+          } publicación${
+            documentos.length === 1
+              ? ""
+              : "es"
+          } del BOJA`,
+
+        html:
+          crearHtmlCorreo(
+            documentos
+          )
       })
     }
   );
 
   if (!respuesta.ok) {
     throw new Error(
-      `Error enviando correo: ${await respuesta.text()}`
+      `Resend ${respuesta.status}: ` +
+      `${await respuesta.text()}`
     );
   }
 }
-
-/* =========================================================
-   PROCESO PRINCIPAL
-========================================================= */
 
 async function ejecutar() {
-  try {
-    console.log("====================================");
-    console.log("INICIANDO CAPTURADOR BOJA");
-    console.log(`Fecha: ${fechaMadrid()}`);
-    console.log("====================================");
+  console.log(
+    "INICIANDO CAPTURADOR BOJA"
+  );
 
-    const urlBoja = await obtenerBojaDeHoy();
+  const publicaciones =
+    await descubrirPublicaciones();
 
-    if (!urlBoja) {
-      console.log("No hay un BOJA nuevo publicado hoy.");
-      return;
-    }
+  console.log(
+    `Publicaciones recientes: ` +
+    `${publicaciones.length}`
+  );
 
-    const urlsPdf = await obtenerTodosLosPdfs(urlBoja);
-
-    if (urlsPdf.length === 0) {
-      console.log("No se encontraron PDF oficiales.");
-      return;
-    }
-
-    const documentos = await analizarPdfs(urlsPdf);
-
+  if (
+    publicaciones.length === 0
+  ) {
     console.log(
-      `Documentos relacionados encontrados: ${documentos.length}`
+      "No se encontraron publicaciones."
     );
 
-    if (documentos.length === 0) {
-      console.log("No se encontraron palabras clave.");
-      return;
-    }
+    return;
+  }
 
-    const usuarios = await obtenerUsuarios();
+  const mapaDocumentos =
+    new Map();
 
-    console.log(`Usuarios encontrados: ${usuarios.length}`);
+  for (
+    const publicacion
+    of publicaciones
+  ) {
+    console.log(
+      `Revisando ${publicacion.url}`
+    );
 
-    for (const usuario of usuarios) {
-      if (
-        !usuario.email ||
-        !Array.isArray(usuario.sectores_suscritos) ||
-        usuario.sectores_suscritos.length === 0
+    try {
+      const documentos =
+        await obtenerDocumentosPublicacion(
+          publicacion
+        );
+
+      for (
+        const documento
+        of documentos
       ) {
-        continue;
-      }
-
-      const sectoresUsuario =
-        usuario.sectores_suscritos.map(normalizar);
-
-      const documentosDelUsuario = documentos.filter(
-        (documento) =>
-          sectoresUsuario.includes(
-            normalizar(documento.sector)
-          )
-      );
-
-      const documentosNuevos = [];
-
-      for (const documento of documentosDelUsuario) {
-        const yaExiste = await notificacionYaExiste(
-          usuario.id,
+        mapaDocumentos.set(
+          documento.urlPdf,
           documento
         );
-
-        if (!yaExiste) {
-          documentosNuevos.push(documento);
-        }
       }
+    } catch (error) {
+      console.log(
+        `No se pudo revisar ` +
+        `${publicacion.url}: ` +
+        `${error.message}`
+      );
+    }
+  }
 
-      if (documentosNuevos.length === 0) {
-        console.log(
-          `Sin documentos nuevos para ${usuario.email}`
-        );
-        continue;
-      }
+  const guardadas =
+    await obtenerUrlsGuardadas();
 
-      try {
-        await enviarCorreo(
-          usuario.email,
-          documentosNuevos
+  const nuevos = [
+    ...mapaDocumentos.values()
+  ].filter(
+    (documento) =>
+      !guardadas.has(
+        documento.urlPdf
+      )
+  );
+
+  console.log(
+    `PDF nuevos: ${nuevos.length}`
+  );
+
+  if (nuevos.length === 0) {
+    console.log(
+      "No hay documentos nuevos."
+    );
+
+    return;
+  }
+
+  const analizados = [];
+
+  for (
+    let indice = 0;
+    indice < nuevos.length;
+    indice++
+  ) {
+    const documento =
+      nuevos[indice];
+
+    try {
+      console.log(
+        `Analizando ` +
+        `${indice + 1}/` +
+        `${nuevos.length}`
+      );
+
+      const texto =
+        await extraerTextoPdf(
+          documento.urlPdf
         );
 
-        console.log(
-          `Correo enviado a ${usuario.email}`
-        );
+      analizados.push({
+        ...documento,
 
-        for (const documento of documentosNuevos) {
-          await crearNotificacion(
-            usuario.id,
-            documento
-          );
-        }
-      } catch (error) {
-        console.error(
-          `Error procesando a ${usuario.email}:`,
-          error.message
-        );
-      }
+        texto,
+
+        titulo:
+          documento.tituloPagina,
+
+        sectores:
+          detectarSectores(texto)
+      });
+    } catch (error) {
+      console.log(
+        `PDF omitido: ${error.message}`
+      );
+    }
+  }
+
+  if (
+    analizados.length === 0
+  ) {
+    return;
+  }
+
+  await supabaseRequest(
+    "anuncios_boja",
+    {
+      method: "POST",
+
+      headers: {
+        Prefer:
+          "return=minimal"
+      },
+
+      body: JSON.stringify(
+        analizados.map(
+          (documento) => ({
+            titulo:
+              documento.titulo
+                .substring(
+                  0,
+                  1000
+                ),
+
+            url_pdf:
+              documento.urlPdf,
+
+            categoria:
+              documento.sectores.length
+                ? documento.sectores
+                    .map(
+                      (sector) =>
+                        sector.sector
+                    )
+                    .join(", ")
+                : "Sin coincidencias"
+          })
+        )
+      )
+    }
+  );
+
+  const conCoincidencias =
+    analizados.filter(
+      (documento) =>
+        documento.sectores.length
+    );
+
+  if (
+    conCoincidencias.length === 0
+  ) {
+    console.log(
+      "No hay coincidencias."
+    );
+
+    return;
+  }
+
+  const usuarios =
+    await obtenerUsuarios();
+
+  const notificaciones = [];
+
+  for (
+    const usuario
+    of usuarios
+  ) {
+    if (
+      !usuario.email ||
+      !Array.isArray(
+        usuario.sectores_suscritos
+      )
+    ) {
+      continue;
     }
 
-    console.log("====================================");
-    console.log("PROCESO FINALIZADO");
-    console.log("====================================");
-  } catch (error) {
-    console.error("ERROR GENERAL:", error);
-    process.exitCode = 1;
+    const permitidos =
+      resolverSectoresUsuario(
+        usuario.sectores_suscritos
+      );
+
+    const documentosUsuario =
+      conCoincidencias
+        .map((documento) => ({
+          ...documento,
+
+          coincidencias:
+            documento.sectores
+              .filter(
+                (sector) =>
+                  permitidos.has(
+                    sector.sector
+                  )
+              )
+        }))
+        .filter(
+          (documento) =>
+            documento
+              .coincidencias
+              .length
+        );
+
+    if (
+      documentosUsuario.length === 0
+    ) {
+      continue;
+    }
+
+    try {
+      await enviarCorreo(
+        usuario.email,
+        documentosUsuario
+      );
+
+      console.log(
+        `Email enviado a ` +
+        `${usuario.email}`
+      );
+
+      for (
+        const documento
+        of documentosUsuario
+      ) {
+        notificaciones.push({
+          usuario_id:
+            usuario.id,
+
+          mensaje:
+            `Novedad BOJA: ` +
+            documento.titulo
+              .substring(
+                0,
+                180
+              ),
+
+          leida: false
+        });
+      }
+    } catch (error) {
+      console.log(
+        `Error enviando a ` +
+        `${usuario.email}: ` +
+        `${error.message}`
+      );
+    }
   }
+
+  if (
+    notificaciones.length > 0
+  ) {
+    await supabaseRequest(
+      "notificaciones_web",
+      {
+        method: "POST",
+
+        headers: {
+          Prefer:
+            "return=minimal"
+        },
+
+        body:
+          JSON.stringify(
+            notificaciones
+          )
+      }
+    );
+  }
+
+  console.log(
+    "PROCESO COMPLETADO"
+  );
 }
 
-ejecutar();
+ejecutar().catch((error) => {
+  console.error(
+    "ERROR GENERAL:",
+    error
+  );
+
+  process.exitCode = 1;
+});
