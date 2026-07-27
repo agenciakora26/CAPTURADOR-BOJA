@@ -199,8 +199,8 @@ async function descargar(url, accept = "*/*") {
 
 function extraerPublicacion(url = "") {
   const coincidencia = String(url).match(
-    /\/(?:e?boja|boja)\/(\d{4})\/(\d+)(?:\/(c\d+))?(?:\/index\.html|\/)?(?:[?#].*)?$/i
-  );
+  /\/(?:eboja|boja)\/(\d{4})\/(\d+)(?:\/(c\d+))?(?:\/index\.html)?\/?(?:[?#].*)?$/i
+);
 
   if (!coincidencia) {
     return null;
