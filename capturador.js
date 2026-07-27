@@ -246,171 +246,81 @@ async function descargar(
 }
 
 /* =========================================================
-   INTERPRETAR URL DEL BOJA
+   DESCUBRIMIENTO ROBUSTO DE PUBLICACIONES DEL BOJA
+
+   IMPORTANTE:
+   La Junta utiliza dos tipos de identificadores:
+
+   - Número normal:
+     /eboja/2026/143/
+
+   - Identificador interno de complementarios:
+     /eboja/2026/214302/
+
+   Ambos son válidos. El identificador se conserva exactamente
+   como aparece en la web oficial. Nunca se recorta ni se modifica.
 ========================================================= */
 
-/*
- * Esta función separa correctamente:
- *
- * /eboja/2026/143/
- * /eboja/2026/143/index.html
- * /eboja/2026/143/c01/
- * /eboja/2026/143/c02/index.html
- * /eboja/2026/143/s52.html
- * /eboja/2026/143/c01/s52.html
- *
- * Nunca convierte 143/c02 en 14302.
- */
-
-function extraerPublicacion(url = "") {
-  let pathname;
+function interpretarUrlPublicacion(enlace, base = PORTADA_BOJA) {
+  let url;
 
   try {
-    pathname =
-      new URL(url, BASE_BOJA).pathname;
+    url = new URL(enlace, base);
   } catch {
     return null;
   }
 
-  const partes = pathname
-    .split("/")
-    .filter(Boolean);
-
-  const posicionBoja =
-    partes.findIndex((parte) => {
-      const valor =
-        parte.toLowerCase();
-
-      return (
-        valor === "eboja" ||
-        valor === "boja"
-      );
-    });
-
-  if (posicionBoja < 0) {
-    return null;
-  }
-
-  const anio =
-    partes[posicionBoja + 1];
-
-  const numeroTexto =
-    partes[posicionBoja + 2];
-
-  const siguienteParte =
-    partes[posicionBoja + 3] || "";
-
   if (
-    !/^\d{4}$/.test(anio || "")
+    url.hostname !== "www.juntadeandalucia.es" &&
+    url.hostname !== "juntadeandalucia.es"
   ) {
     return null;
   }
+
+  const pathname = url.pathname
+    .replace(/\/index\.html$/i, "/")
+    .replace(/\/+$/, "/");
 
   /*
-   * Limitamos el número a un máximo de 4 cifras.
-   * Evita interpretar cadenas como 214302.
-   */
-
-  if (
-    !/^\d{1,4}$/.test(
-      numeroTexto || ""
-    )
-  ) {
-    return null;
-  }
-
-  const numero =
-    Number(numeroTexto);
-
-  if (
-    !Number.isInteger(numero) ||
-    numero < 1 ||
-    numero > 9999
-  ) {
-    return null;
-  }
-
-  /*
-   * Admite complementos o ediciones como:
-   * c01, c02, e01...
+   * Solo acepta páginas principales de boletines:
    *
-   * No confunde s52.html con un complemento.
+   * /eboja/2026/143/
+   * /eboja/2026/214302/
+   *
+   * Rechaza disposiciones individuales:
+   *
+   * /eboja/2026/143/61
+   * /eboja/2026/143/61-verificacion
+   * /eboja/2026/143/s53.html
    */
 
-  const edicion =
-    /^[a-z]\d{1,3}$/i.test(
-      siguienteParte
-    )
-      ? siguienteParte.toLowerCase()
-      : "";
+  const coincidencia = pathname.match(
+    /^\/eboja\/(\d{4})\/(\d{1,9})\/$/i
+  );
 
-  const urlCanonica = edicion
-    ? `${BASE_BOJA}/${anio}/${numero}/${edicion}/`
-    : `${BASE_BOJA}/${anio}/${numero}/`;
+  if (!coincidencia) {
+    return null;
+  }
+
+  const anio = coincidencia[1];
+  const identificador = coincidencia[2];
 
   return {
     anio,
-    numero,
-    edicion,
-    url: urlCanonica
+    identificador,
+    url: `${BASE_BOJA}/${anio}/${identificador}/`
   };
 }
 
-function ordenarPublicaciones(a, b) {
-  if (
-    Number(a.anio) !==
-    Number(b.anio)
-  ) {
-    return (
-      Number(b.anio) -
-      Number(a.anio)
-    );
-  }
-
-  if (
-    a.numero !== b.numero
-  ) {
-    return b.numero - a.numero;
-  }
-
-  if (
-    !a.edicion &&
-    b.edicion
-  ) {
-    return -1;
-  }
-
-  if (
-    a.edicion &&
-    !b.edicion
-  ) {
-    return 1;
-  }
-
-  return String(b.edicion)
-    .localeCompare(
-      String(a.edicion),
-      "es",
-      {
-        numeric: true
-      }
-    );
-}
-
-function registrarCandidato(
+function registrarPublicacion(
   mapa,
   enlace,
   base = PORTADA_BOJA
 ) {
-  const absoluta =
-    urlAbsoluta(enlace, base);
-
-  if (!absoluta) {
-    return;
-  }
-
-  const publicacion =
-    extraerPublicacion(absoluta);
+  const publicacion = interpretarUrlPublicacion(
+    enlace,
+    base
+  );
 
   if (!publicacion) {
     return;
@@ -422,68 +332,100 @@ function registrarCandidato(
   );
 }
 
-/* =========================================================
-   DESCUBRIR PUBLICACIONES
-========================================================= */
+function ordenarPublicaciones(a, b) {
+  if (Number(a.anio) !== Number(b.anio)) {
+    return Number(b.anio) - Number(a.anio);
+  }
+
+  return (
+    Number(b.identificador) -
+    Number(a.identificador)
+  );
+}
 
 async function candidatosDesdePortada() {
   console.log(
     "🔎 Consultando la portada oficial del BOJA..."
   );
 
-  const respuesta =
-    await descargar(
-      PORTADA_BOJA,
-      "text/html"
-    );
+  const respuesta = await descargar(
+    PORTADA_BOJA,
+    "text/html"
+  );
 
-  const html =
-    await respuesta.text();
-
-  const $ =
-    cheerio.load(html);
-
-  const mapa =
-    new Map();
+  const html = await respuesta.text();
+  const $ = cheerio.load(html);
+  const mapa = new Map();
 
   /*
-   * Revisamos los enlaces reales.
+   * Primero utilizamos los enlaces reales de la portada.
    */
 
-  $("a[href]").each(
-    (_, elemento) => {
-      registrarCandidato(
+  $("a[href]").each((_, elemento) => {
+    const enlace = $(elemento);
+    const href = enlace.attr("href");
+
+    const textoContexto = normalizar(
+      [
+        enlace.text(),
+        enlace.parent().text(),
+        enlace.closest("article").text(),
+        enlace.closest("li").text(),
+        enlace.closest("div").text()
+      ].join(" ")
+    );
+
+    /*
+     * Para evitar enlaces irrelevantes, damos prioridad
+     * a los que aparecen cerca de las palabras BOJA o boletín.
+     */
+
+    if (
+      textoContexto.includes("boja") ||
+      textoContexto.includes("boletin") ||
+      /\/eboja\/\d{4}\/\d+\/?(?:index\.html)?$/i.test(
+        href || ""
+      )
+    ) {
+      registrarPublicacion(
         mapa,
-        $(elemento).attr("href"),
+        href,
         respuesta.url
       );
     }
-  );
+  });
 
   /*
-   * Revisamos también las rutas escritas
-   * dentro del HTML o scripts.
+   * Como respaldo, localizamos rutas completas dentro del HTML.
+   * El identificador puede tener más de cuatro cifras.
    */
 
-  const expresion =
-    /\/(?:eboja|boja)\/\d{4}\/\d{1,4}(?:\/[a-z]\d{1,3})?(?:\/index\.html)?\/?/gi;
+  const expresiones = [
+    /https?:\/\/(?:www\.)?juntadeandalucia\.es\/eboja\/\d{4}\/\d{1,9}\/(?:index\.html)?/gi,
+    /\/eboja\/\d{4}\/\d{1,9}\/(?:index\.html)?/gi
+  ];
 
-  let coincidencia;
+  for (const expresion of expresiones) {
+    const coincidencias = html.match(expresion) || [];
 
-  while (
-    (coincidencia =
-      expresion.exec(html)) !== null
-  ) {
-    registrarCandidato(
-      mapa,
-      coincidencia[0],
-      PORTADA_BOJA
-    );
+    for (const coincidencia of coincidencias) {
+      registrarPublicacion(
+        mapa,
+        coincidencia,
+        respuesta.url
+      );
+    }
   }
 
-  return [
-    ...mapa.values()
-  ].sort(ordenarPublicaciones);
+  const resultado = [...mapa.values()].sort(
+    ordenarPublicaciones
+  );
+
+  console.log(
+    `   Candidatos obtenidos de portada: ${resultado.length}`
+  );
+
+  return resultado;
 }
 
 async function candidatosDesdeRss() {
@@ -491,140 +433,212 @@ async function candidatosDesdeRss() {
     "🔎 Consultando el RSS oficial como respaldo..."
   );
 
-  const respuesta =
-    await descargar(
-      RSS_BOJA,
-      "application/xml,text/xml"
-    );
-
-  const xml =
-    await respuesta.text();
-
-  const $ =
-    cheerio.load(xml, {
-      xmlMode: true
-    });
-
-  const mapa =
-    new Map();
-
-  $("entry,item").each(
-    (_, elemento) => {
-      const entrada =
-        $(elemento);
-
-      const valores = [
-        entrada
-          .find("link[href]")
-          .first()
-          .attr("href"),
-
-        entrada
-          .find("link")
-          .first()
-          .text()
-          .trim(),
-
-        entrada
-          .find("guid")
-          .first()
-          .text()
-          .trim(),
-
-        entrada.text()
-      ].filter(Boolean);
-
-      for (
-        const valor of valores
-      ) {
-        const urls =
-          String(valor).match(
-            /https?:\/\/[^\s<>"']+\/(?:eboja|boja)\/\d{4}\/\d{1,4}(?:\/[a-z]\d{1,3})?/gi
-          ) || [];
-
-        for (
-          const enlace of urls
-        ) {
-          registrarCandidato(
-            mapa,
-            enlace
-          );
-        }
-
-        /*
-         * También permite rutas relativas.
-         */
-
-        const rutas =
-          String(valor).match(
-            /\/(?:eboja|boja)\/\d{4}\/\d{1,4}(?:\/[a-z]\d{1,3})?/gi
-          ) || [];
-
-        for (
-          const ruta of rutas
-        ) {
-          registrarCandidato(
-            mapa,
-            ruta,
-            RSS_BOJA
-          );
-        }
-      }
-    }
+  const respuesta = await descargar(
+    RSS_BOJA,
+    "application/xml,text/xml"
   );
 
-  return [
-    ...mapa.values()
-  ].sort(ordenarPublicaciones);
+  const xml = await respuesta.text();
+  const $ = cheerio.load(xml, {
+    xmlMode: true
+  });
+
+  const mapa = new Map();
+
+  $("entry,item").each((_, elemento) => {
+    const entrada = $(elemento);
+
+    const contenido = [
+      entrada
+        .find("link[href]")
+        .first()
+        .attr("href"),
+
+      entrada
+        .find("link")
+        .first()
+        .text(),
+
+      entrada
+        .find("guid")
+        .first()
+        .text(),
+
+      entrada.text()
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    /*
+     * Extraemos primero cualquier URL del BOJA.
+     */
+
+    const urls = contenido.match(
+      /https?:\/\/(?:www\.)?juntadeandalucia\.es\/eboja\/\d{4}\/\d{1,9}(?:\/[^\s<>"']*)?/gi
+    ) || [];
+
+    for (const enlace of urls) {
+      let url;
+
+      try {
+        url = new URL(enlace);
+      } catch {
+        continue;
+      }
+
+      const partes = url.pathname
+        .split("/")
+        .filter(Boolean);
+
+      const posicionEboja = partes.findIndex(
+        (parte) =>
+          parte.toLowerCase() === "eboja"
+      );
+
+      if (posicionEboja < 0) {
+        continue;
+      }
+
+      const anio = partes[posicionEboja + 1];
+      const identificador =
+        partes[posicionEboja + 2];
+
+      if (
+        !/^\d{4}$/.test(anio || "") ||
+        !/^\d{1,9}$/.test(
+          identificador || ""
+        )
+      ) {
+        continue;
+      }
+
+      /*
+       * Aunque el RSS enlace una disposición individual,
+       * construimos únicamente la raíz de esa publicación.
+       */
+
+      registrarPublicacion(
+        mapa,
+        `${BASE_BOJA}/${anio}/${identificador}/`
+      );
+    }
+  });
+
+  const resultado = [...mapa.values()].sort(
+    ordenarPublicaciones
+  );
+
+  console.log(
+    `   Candidatos obtenidos del RSS: ${resultado.length}`
+  );
+
+  return resultado;
 }
 
-async function validarPublicacion(
-  publicacion
-) {
+async function validarPublicacion(publicacion) {
   const urlsPrueba = [
     publicacion.url,
     `${publicacion.url}index.html`
   ];
 
-  for (
-    const url of urlsPrueba
-  ) {
+  for (const url of urlsPrueba) {
     try {
-      const respuesta =
-        await descargar(
-          url,
-          "text/html"
+      const respuesta = await descargar(
+        url,
+        "text/html"
+      );
+
+      const html = await respuesta.text();
+      const $ = cheerio.load(html);
+
+      const texto = normalizar(
+        $("body").text()
+      );
+
+      /*
+       * Una publicación válida debe tener contenido BOJA
+       * y alguna estructura propia de un boletín:
+       * PDF, secciones o sumario.
+       */
+
+      const tieneIdentidadBoja =
+        texto.includes(
+          "boletin oficial de la junta de andalucia"
+        ) ||
+        texto.includes(
+          "sede electronica del boja"
+        ) ||
+        texto.includes(
+          "boletin numero"
+        ) ||
+        texto.includes("boja num");
+
+      const tieneContenidoBoja =
+        $("a[href*='.pdf']").length > 0 ||
+        $("a[href*='/s']").length > 0 ||
+        texto.includes(
+          "pdf oficial autentico"
+        ) ||
+        texto.includes(
+          "sumario boletin"
         );
 
-      const html =
-        await respuesta.text();
-
-      const $ =
-        cheerio.load(html);
-
-      const texto =
-        normalizar(
-          $("body").text()
+      if (
+        !tieneIdentidadBoja ||
+        !tieneContenidoBoja
+      ) {
+        console.log(
+          `   Rechazada ${url}: no parece una publicación completa del BOJA`
         );
 
-      const esPaginaBoja =
-        texto.length > 100 &&
-        (
-          texto.includes(
-            "boletin oficial"
-          ) ||
-          texto.includes("boja")
-        );
-
-      if (!esPaginaBoja) {
         continue;
       }
 
+      /*
+       * Intentamos obtener el número público real.
+       *
+       * Ejemplo:
+       * Identificador interno: 214302
+       * Número público: 143 Complementario 2
+       */
+
+      const numeroPublicoMatch =
+        texto.match(
+          /boletin numero\s+(\d+)/i
+        ) ||
+        texto.match(
+          /boja num\.?\s*(\d+)/i
+        ) ||
+        texto.match(
+          /boja numero\s+(\d+)/i
+        );
+
+      const complementoMatch =
+        texto.match(
+          /complementario(?:\s+num\.?|\s+numero)?\s*(\d+)/i
+        );
+
       return {
         ...publicacion,
+
         url:
           publicacion.url,
-        html
+
+        html,
+
+        numeroPublico:
+          numeroPublicoMatch
+            ? Number(
+                numeroPublicoMatch[1]
+              )
+            : null,
+
+        complemento:
+          complementoMatch
+            ? Number(
+                complementoMatch[1]
+              )
+            : null
       };
     } catch (error) {
       console.log(
@@ -636,102 +650,90 @@ async function validarPublicacion(
   return null;
 }
 
-async function descubrirEdiciones(
+async function descubrirEnlacesRelacionados(
   publicacion
 ) {
-  const mapa =
-    new Map();
+  const mapa = new Map();
 
   mapa.set(
     publicacion.url,
     publicacion
   );
 
-  const $ =
-    cheerio.load(
-      publicacion.html || ""
-    );
-
-  $("a[href]").each(
-    (_, elemento) => {
-      const absoluta =
-        urlAbsoluta(
-          $(elemento).attr("href"),
-          publicacion.url
-        );
-
-      const descubierta =
-        extraerPublicacion(absoluta);
-
-      if (!descubierta) {
-        return;
-      }
-
-      if (
-        descubierta.anio !==
-          publicacion.anio ||
-        descubierta.numero !==
-          publicacion.numero
-      ) {
-        return;
-      }
-
-      mapa.set(
-        descubierta.url,
-        descubierta
-      );
-    }
+  const $ = cheerio.load(
+    publicacion.html || ""
   );
 
   /*
-   * También busca complementos dentro del HTML.
+   * Conservamos exactamente los enlaces que ofrece
+   * la página oficial. No intentamos inventar el ID
+   * de los complementarios.
    */
 
-  const regex =
-    new RegExp(
-      `/(?:eboja|boja)/${publicacion.anio}/${publicacion.numero}/([a-z]\\d{1,3})(?:/|")`,
-      "gi"
+  $("a[href]").each((_, elemento) => {
+    const href = $(elemento).attr("href");
+
+    const descubierta =
+      interpretarUrlPublicacion(
+        href,
+        publicacion.url
+      );
+
+    if (!descubierta) {
+      return;
+    }
+
+    if (
+      descubierta.anio !==
+      publicacion.anio
+    ) {
+      return;
+    }
+
+    mapa.set(
+      descubierta.url,
+      descubierta
     );
+  });
 
-  let coincidencia;
+  /*
+   * Si conocemos el número público real, añadimos también
+   * la ruta normal. Esto permite que, cuando la portada
+   * muestre un complementario, también se revise el boletín
+   * ordinario correspondiente.
+   */
 
-  while (
-    (coincidencia =
-      regex.exec(
-        publicacion.html || ""
-      )) !== null
+  if (
+    publicacion.numeroPublico &&
+    Number.isInteger(
+      publicacion.numeroPublico
+    )
   ) {
-    registrarCandidato(
+    registrarPublicacion(
       mapa,
-      `${BASE_BOJA}/${publicacion.anio}/${publicacion.numero}/${coincidencia[1]}/`
+      `${BASE_BOJA}/${publicacion.anio}/${publicacion.numeroPublico}/`
     );
   }
 
-  return [
-    ...mapa.values()
-  ];
+  return [...mapa.values()];
 }
 
 async function descubrirPublicaciones() {
-  const mapaInicial =
-    new Map();
+  const candidatos = new Map();
 
   try {
     const portada =
       await candidatosDesdePortada();
 
-    for (
-      const publicacion
-      of portada
-    ) {
-      mapaInicial.set(
+    for (const publicacion of portada) {
+      candidatos.set(
         publicacion.url,
         publicacion
       );
     }
   } catch (error) {
     console.log(
-      `⚠️ Error en portada: ${error.message}`
+      `⚠️ No se pudo consultar la portada: ${error.message}`
     );
   }
 
@@ -739,43 +741,36 @@ async function descubrirPublicaciones() {
     const rss =
       await candidatosDesdeRss();
 
-    for (
-      const publicacion
-      of rss
-    ) {
-      mapaInicial.set(
+    for (const publicacion of rss) {
+      candidatos.set(
         publicacion.url,
         publicacion
       );
     }
   } catch (error) {
     console.log(
-      `⚠️ Error en RSS: ${error.message}`
+      `⚠️ No se pudo consultar el RSS: ${error.message}`
     );
   }
 
   /*
-   * Revisamos las publicaciones más recientes.
-   * No obliga a que sean del día actual.
+   * Revisamos un máximo razonable para evitar recorrer
+   * accidentalmente todo el histórico.
    */
 
-  const candidatos = [
-    ...mapaInicial.values()
+  const candidatosOrdenados = [
+    ...candidatos.values()
   ]
     .sort(ordenarPublicaciones)
-    .slice(0, 40);
+    .slice(0, 30);
 
   console.log(
-    `📚 Candidatos encontrados: ${candidatos.length}`
+    `📚 Candidatos encontrados: ${candidatosOrdenados.length}`
   );
 
-  const validadas =
-    new Map();
+  const validadas = new Map();
 
-  for (
-    const candidato
-    of candidatos
-  ) {
+  for (const candidato of candidatosOrdenados) {
     const validada =
       await validarPublicacion(
         candidato
@@ -790,42 +785,39 @@ async function descubrirPublicaciones() {
       validada
     );
 
-    /*
-     * Si es el boletín principal,
-     * buscamos complementos o ediciones.
-     */
+    const relacionadas =
+      await descubrirEnlacesRelacionados(
+        validada
+      );
 
-    if (!validada.edicion) {
-      const ediciones =
-        await descubrirEdiciones(
-          validada
-        );
-
-      for (
-        const edicion
-        of ediciones
+    for (const relacionada of relacionadas) {
+      if (
+        !validadas.has(
+          relacionada.url
+        )
       ) {
         validadas.set(
-          edicion.url,
-          edicion
+          relacionada.url,
+          relacionada
         );
       }
     }
   }
 
+  /*
+   * Validamos también las publicaciones descubiertas
+   * desde otras páginas.
+   */
+
   const resultado = [];
 
   for (
-    const publicacion
-    of [
+    const publicacion of [
       ...validadas.values()
     ].sort(ordenarPublicaciones)
   ) {
     if (publicacion.html) {
-      resultado.push(
-        publicacion
-      );
-
+      resultado.push(publicacion);
       continue;
     }
 
@@ -835,15 +827,25 @@ async function descubrirPublicaciones() {
       );
 
     if (validada) {
-      resultado.push(
-        validada
-      );
+      resultado.push(validada);
     }
   }
 
-  return resultado;
-}
+  /*
+   * Eliminación final de duplicados.
+   */
 
+  return [
+    ...new Map(
+      resultado.map(
+        (publicacion) => [
+          publicacion.url,
+          publicacion
+        ]
+      )
+    ).values()
+  ];
+}
 /* =========================================================
    EXTRAER PDF DE CADA PUBLICACIÓN
 ========================================================= */
