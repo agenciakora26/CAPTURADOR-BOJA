@@ -8,6 +8,7 @@
     "start": "node capturador.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.56.0",
     "cheerio": "^1.0.0",
     "pdf-parse": "1.1.1"
   }
