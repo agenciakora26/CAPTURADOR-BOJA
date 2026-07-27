@@ -1,0 +1,14 @@
+{
+  "name": "capturador-boja",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Capturador automático de documentos del BOJA",
+  "main": "capturador.js",
+  "scripts": {
+    "start": "node capturador.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "pdf-parse": "1.1.1"
+  }
+}
