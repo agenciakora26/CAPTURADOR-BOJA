@@ -261,7 +261,7 @@ async function descargar(
    Se revisan 21 días para recuperar ejecuciones perdidas.
 ========================================================= */
 
-const DIAS_A_REVISAR = 21;
+const DIAS_A_REVISAR = 2;
 
 function fechaMadridDesdeDesplazamiento(diasAtras = 0) {
   const ahora = new Date();
