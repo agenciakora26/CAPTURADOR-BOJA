@@ -7,7 +7,7 @@ if (!supabaseUrl || !supabaseKey) {
   process.exit(1);
 }
 
-// Función auxiliar para extraer un fragmento de texto alrededor de la palabra clave
+// Función para extraer un fragmento limpio alrededor de la palabra clave (contexto visual)
 function obtenerExtracto(texto, palabraClave, longitudMax = 120) {
   if (!texto) return "Nueva publicación oficial disponible en el boletín.";
   const index = texto.toLowerCase().indexOf(palabraClave.toLowerCase());
@@ -21,20 +21,47 @@ function obtenerExtracto(texto, palabraClave, longitudMax = 120) {
   return fragmento;
 }
 
-async function ejecutarProceso() {
-  console.log("Iniciando comprobación del BOJA...");
+// Genera un enlace inteligente que actúa como un buscador focalizado con la palabra clave exacta
+function obtenerEnlaceControlF(sector, palabraClaveEspecifica) {
+  // Términos clave oficiales asociados a cada sector para el filtrado directo
+  const terminosPorSector = {
+    oposiciones: "oposiciones",
+    agricultura: "agricultura",
+    licitaciones: "licitaciones",
+    hosteleria: "turismo",
+    subvenciones: "subvenciones",
+    medioambiente: "medio ambiente",
+    sanidad: "sanidad",
+    educacion: "educacion"
+  };
 
+  const terminoBusqueda = palabraClaveEspecifica || terminosPorSector[sector] || sector;
+  
+  // Enlace directo al buscador oficial del BOJA con el parámetro de consulta precargado
+  return `https://www.juntadeandalucia.es/eboja/buscador/search.do?eboja=on&q=${encodeURIComponent(terminoBusqueda)}`;
+}
+
+async function ejecutarProceso() {
+  console.log("Iniciando comprobación y escaneo de palabras clave...");
+
+  // Ejemplo de noticias analizadas con sus textos donde el sistema detecta la coincidencia
   const noticiasBojaHoy = [
     {
-      titulo: "Convocatoria de ayudas y subvenciones para pymes",
+      titulo: "Convocatoria de ayudas y subvenciones para autónomos",
       sector: "subvenciones",
-      enlace: "https://www.juntadeandalucia.es/eboja/...",
-      textoCompleto: "Se ha aprobado una nueva línea de subvenciones destinadas a impulsar la digitalización de pymes y autónomos en Andalucía..."
+      palabraDetectada: "subvenciones",
+      textoCompleto: "Se ha aprobado de forma oficial una nueva línea de subvenciones destinadas a impulsar la digitalización y el mantenimiento de pymes y autónomos..."
+    },
+    {
+      titulo: "Oferta de empleo público para la administración",
+      sector: "oposiciones",
+      palabraDetectada: "oposiciones",
+      textoCompleto: "Se publica la convocatoria oficial de pruebas selectivas y oposiciones para el acceso a distintos cuerpos de funcionarios..."
     }
   ];
 
   if (!noticiasBojaHoy || noticiasBojaHoy.length === 0) {
-    console.log("El BOJA aún no está disponible.");
+    console.log("El BOJA de hoy aún no está disponible.");
     process.exit(0);
   }
 
@@ -58,7 +85,6 @@ async function ejecutarProceso() {
     const noticiasInteres = noticiasBojaHoy.filter(n => usuario.sectores_suscritos.includes(n.sector));
 
     if (noticiasInteres.length > 0) {
-      // Diseño HTML visual tipo tarjeta con contenedor limpio
       let htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8fafc; padding: 20px; border-radius: 8px;">
           <div style="text-align: center; margin-bottom: 20px;">
@@ -68,66 +94,72 @@ async function ejecutarProceso() {
           
           <div style="background-color: #ffffff; padding: 20px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
             <p style="color: #334155; font-size: 15px;">Hola <strong>Estimado/a suscriptor/a</strong>,</p>
-            <p style="color: #334155; font-size: 15px;">Tenemos novedades oficiales muy importantes en el BOJA que coinciden con tus áreas de interés:</p>
+            <p style="color: #334155; font-size: 15px;">Hemos detectado coincidencias exactas con tus palabras clave en el BOJA de hoy:</p>
             
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
       `;
       
       noticiasInteres.forEach(n => {
         let iconoSector = "📌";
-        let mensajeSector = "hay una nueva publicación:";
+        let mensajeSector = "coincidencia detectada:";
         
         switch (n.sector) {
           case 'oposiciones':
             iconoSector = "📢";
-            mensajeSector = "Se ha publicado una nueva convocatoria u oferta de empleo público:";
+            mensajeSector = "Coincidencia en Empleo Público y Oposiciones:";
             break;
           case 'agricultura':
             iconoSector = "🚜";
-            mensajeSector = "Hay novedades oficiales sobre el sector agrario, PAC o ayudas al campo:";
+            mensajeSector = "Coincidencia en Agricultura y Ganadería:";
             break;
           case 'licitaciones':
             iconoSector = "🏗️";
-            mensajeSector = "Se ha abierto un nuevo concurso público u oportunidad de contratación:";
+            mensajeSector = "Coincidencia en Licitaciones y Contratación:";
             break;
           case 'hosteleria':
             iconoSector = "🍽️";
-            mensajeSector = "Hay nuevas normativas, ayudas o resoluciones para hostelería y turismo:";
+            mensajeSector = "Coincidencia en Hostelería y Turismo:";
             break;
           case 'subvenciones':
             iconoSector = "💶";
-            mensajeSector = "Ya están disponibles nuevas líneas de ayudas y subvenciones:";
+            mensajeSector = "Coincidencia en Subvenciones y Autónomos:";
             break;
           case 'medioambiente':
             iconoSector = "🌿";
-            mensajeSector = "Se han registrado nuevas declaraciones o normativas medioambientales:";
+            mensajeSector = "Coincidencia en Medio Ambiente:";
             break;
           case 'sanidad':
             iconoSector = "🏥";
-            mensajeSector = "Hay resoluciones recientes en materia de sanidad y servicios sociales:";
+            mensajeSector = "Coincidencia en Sanidad y Servicios Sociales:";
             break;
           case 'educacion':
             iconoSector = "🎓";
-            mensajeSector = "Se ha publicado una nueva convocatoria, beca o disposición educativa:";
+            mensajeSector = "Coincidencia en Educación y Universidades:";
             break;
           default:
             iconoSector = "📌";
-            mensajeSector = `Hay una actualización oficial en el sector de <strong>${n.sector}</strong>:`;
+            mensajeSector = `Coincidencia en el sector de <strong>${n.sector}</strong>:`;
             break;
         }
 
-        const extractoTexto = obtenerExtracto(n.textoCompleto || n.titulo, n.sector);
+        // Extraemos el fragmento exacto donde sale la palabra clave
+        const extractoTexto = obtenerExtracto(n.textoCompleto || n.titulo, n.palabraDetectada);
+        // Generamos el enlace inteligente tipo "Control + F" con la palabra clave filtrada
+        const enlaceControlF = obtenerEnlaceControlF(n.sector, n.palabraDetectada);
 
         htmlContent += `
           <div style="margin-bottom: 25px; background: #f8fafc; padding: 15px; border-left: 4px solid #2563eb; border-radius: 4px;">
             <p style="margin: 0 0 8px 0; font-size: 15px; color: #1e293b; font-weight: bold;">
               ${iconoSector} ${mensajeSector}
             </p>
-            <p style="margin: 0 0 12px 0; font-size: 14px; color: #475569; font-style: italic;">
+            <p style="margin: 0 0 6px 0; font-size: 14px; color: #0f172a; font-weight: 600;">
+              ${n.titulo}
+            </p>
+            <p style="margin: 0 0 12px 0; font-size: 13px; color: #475569; font-style: italic;">
               "${extractoTexto}"
             </p>
-            <a href="${n.enlace}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; padding: 8px 14px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px;">
-              Ver disposición en el BOJA →
+            <a href="${enlaceControlF}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; padding: 8px 14px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px;">
+              🔍 Ver palabra clave destacada en el BOJA →
             </a>
           </div>
         `;
@@ -151,7 +183,7 @@ async function ejecutarProceso() {
           body: JSON.stringify({
             from: 'BoletínHoy <alertas@boletinhoy.es>',
             to: [usuario.email],
-            subject: '🔔 Nuevas Alertas Personalizadas del BOJA',
+            subject: '🔔 Alerta BOJA: Coincidencia exacta encontrada',
             html: htmlContent
           })
         });
@@ -168,7 +200,7 @@ async function ejecutarProceso() {
           },
           body: JSON.stringify({
             usuario_id: usuario.id,
-            mensaje: `Nuevo aviso en ${noticia.sector.toUpperCase()}: ${noticia.titulo}`,
+            mensaje: `Coincidencia en ${noticia.sector.toUpperCase()}: ${noticia.titulo}`,
             leida: false
           })
         });
