@@ -3,7 +3,7 @@ name: Automatizador BOJA
 on:
   schedule:
     # De lunes (1) a viernes (5), cada 15 minutos entre las 08:00 y las 15:00 UTC
-    - cron: '0,15,30,45 8-15 * * 1-5'
+    - cron: '0,15,30,45 6-13 * * 1-5'
   workflow_dispatch: # Permite lanzarlo manualmente desde GitHub cuando quieras probarlo
 
 jobs:
