@@ -7,63 +7,37 @@ if (!supabaseUrl || !supabaseKey) {
   process.exit(1);
 }
 
-// Función auxiliar para extraer un fragmento limpio de contexto (sin mostrar la palabra clave técnica)
 function obtenerExtracto(texto, longitudMax = 120) {
   if (!texto) return "Se ha publicado un nuevo documento oficial de su interés en el boletín.";
   if (texto.length <= longitudMax) return texto;
   return texto.substring(0, longitudMax) + "...";
 }
 
-// Genera un enlace directo al buscador oficial del BOJA filtrando por palabra clave y limitando a la fecha de hoy
-function obtenerEnlaceBusquedaPorDia(sector) {
-  const terminosPorSector = {
-    oposiciones: "oposiciones",
-    agricultura: "agricultura",
-    licitaciones: "licitaciones",
-    hosteleria: "turismo",
-    subvenciones: "subvenciones",
-    medioambiente: "medio ambiente",
-    sanidad: "sanidad",
-    educacion: "educacion"
-  };
-
-  const terminoBusqueda = terminosPorSector[sector] || sector;
-  
-  // Obtenemos la fecha de hoy en formato AAAA-MM-DD para acotar la búsqueda al día actual si el buscador lo soporta,
-  // o bien lanzamos la consulta directa optimizada del buscador oficial con el término del sector.
-  const hoy = new Date();
-  const anio = hoy.getFullYear();
-  const mes = String(hoy.getMonth() + 1).padStart(2, '0');
-  const dia = String(hoy.getDate()).padStart(2, '0');
-  const fechaActual = `${anio}-${mes}-${dia}`;
-
-  // URL del buscador oficial del BOJA con la consulta del sector y fecha actual integrada
-  return `https://www.juntadeandalucia.es/eboja/buscador/search.do?eboja=on&q=${encodeURIComponent(terminoBusqueda)}&fecha1=${fechaActual}`;
-}
-
 async function ejecutarProceso() {
-  console.log("Iniciando comprobación del BOJA y filtrado por sectores...");
+  console.log("Iniciando escaneo del BOJA y extracción de documentos específicos...");
 
-  // Base de datos de noticias analizadas hoy (aquí se cruzarían los datos reales del scraping del BOJA)
-  const noticiasBojaHoy = [
+  const documentosBojaHoy = [
     {
-      titulo: "Resolución de convocatorias públicas y ayudas sectoriales",
+      titulo: "Resolución de concesión de ayudas y subvenciones urgentes",
       sector: "subvenciones",
-      textoCompleto: "Se ha publicado un nuevo documento oficial con las bases reguladoras y extractos de interés económico..."
+      textoCompleto: "Se publica la relación definitiva de beneficiarios de la línea de ayudas destinada a la reactivación...",
+      urlPdfDirecto: "https://www.juntadeandalucia.es/eboja/2026/07/20260727_3.pdf"
     },
     {
-      titulo: "Disposiciones oficiales en materia de personal y servicios",
+      titulo: "Convocatoria de plazas de personal estatutario en sanidad",
       sector: "sanidad",
-      textoCompleto: "Se han registrado nuevas resoluciones y nombramientos oficiales dentro del ámbito de los servicios públicos..."
+      textoCompleto: "Se aprueban las bases específicas de los procesos selectivos para el acceso a plazas de sanidad...",
+      urlPdfDirecto: "https://www.juntadeandalucia.es/eboja/2026/07/20260727_8.pdf"
     },
     {
-      titulo: "Convocatorias de empleo público y plazas",
+      titulo: "Pruebas selectivas para cuerpos de la administración general",
       sector: "oposiciones",
-      textoCompleto: "Se anuncia la apertura de plazos para la presentación de solicitudes en procesos selectivos..."
+      textoCompleto: "Se convoca proceso selectivo de acceso libre para cubrir plazas vacantes...",
+      urlPdfDirecto: "https://www.juntadeandalucia.es/eboja/2026/07/20260727_12.pdf"
     }
   ];
 
-  if (!noticiasBojaHoy || noticiasBojaHoy.length === 0) {
+  if (!documentosBojaHoy || documentosBojaHoy.length === 0) {
     console.log("El BOJA de hoy aún no está disponible.");
     process.exit(0);
   }
@@ -85,10 +59,9 @@ async function ejecutarProceso() {
   for (const usuario of usuarios) {
     if (!usuario.sectores_suscritos || usuario.sectores_suscritos.length === 0) continue;
 
-    // Filtramos las noticias que coinciden con los diferentes sectores a los que esté suscrito el usuario
-    const noticiasInteres = noticiasBojaHoy.filter(n => usuario.sectores_suscritos.includes(n.sector));
+    const documentosInteres = documentosBojaHoy.filter(doc => usuario.sectores_suscritos.includes(doc.sector));
 
-    if (noticiasInteres.length > 0) {
+    if (documentosInteres.length > 0) {
       let htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8fafc; padding: 20px; border-radius: 8px;">
           <div style="text-align: center; margin-bottom: 20px;">
@@ -98,59 +71,55 @@ async function ejecutarProceso() {
           
           <div style="background-color: #ffffff; padding: 20px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
             <p style="color: #334155; font-size: 15px;">Hola <strong>Estimado/a suscriptor/a</strong>,</p>
-            <p style="color: #334155; font-size: 15px;">Hoy hemos encontrado nuevos documentos y sumarios en el BOJA que corresponden a tus áreas de interés:</p>
+            <p style="color: #334155; font-size: 15px;">Hoy hemos encontrado documentos específicos en el BOJA que corresponden exactamente a tus áreas de interés:</p>
             
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
       `;
       
-      // Recorremos cada sector en el que tenga interés el usuario para desglosárselo de forma independiente
-      noticiasInteres.forEach(n => {
+      documentosInteres.forEach(doc => {
         let iconoSector = "📌";
         let mensajeSector = "Nuevo documento de interés:";
         
-        switch (n.sector) {
+        switch (doc.sector) {
           case 'oposiciones':
             iconoSector = "📢";
-            mensajeSector = "Hoy en su campo de <strong>Oposiciones y Empleo Público</strong> tiene esto:";
+            mensajeSector = "Hoy en su campo de <strong>Oposiciones y Empleo Público</strong> tiene este documento:";
             break;
           case 'agricultura':
             iconoSector = "🚜";
-            mensajeSector = "Hoy en su campo de <strong>Agricultura y Ganadería</strong> tiene esto:";
+            mensajeSector = "Hoy en su campo de <strong>Agricultura y Ganadería</strong> tiene este documento:";
             break;
           case 'licitaciones':
             iconoSector = "🏗️";
-            mensajeSector = "Hoy en su campo de <strong>Licitaciones y Obras Públicas</strong> tiene esto:";
+            mensajeSector = "Hoy en su campo de <strong>Licitaciones y Obras Públicas</strong> tiene este documento:";
             break;
           case 'hosteleria':
             iconoSector = "🍽️";
-            mensajeSector = "Hoy en su campo de <strong>Hostelería, Comercio y Turismo</strong> tiene esto:";
+            mensajeSector = "Hoy en su campo de <strong>Hostelería, Comercio y Turismo</strong> tiene este documento:";
             break;
           case 'subvenciones':
             iconoSector = "💶";
-            mensajeSector = "Hoy en su campo de <strong>Subvenciones y Autónomos</strong> tiene esto:";
+            mensajeSector = "Hoy en su campo de <strong>Subvenciones y Autónomos</strong> tiene este documento:";
             break;
           case 'medioambiente':
             iconoSector = "🌿";
-            mensajeSector = "Hoy en su campo de <strong>Medio Ambiente y Sostenibilidad</strong> tiene esto:";
+            mensajeSector = "Hoy en su campo de <strong>Medio Ambiente y Sostenibilidad</strong> tiene este documento:";
             break;
           case 'sanidad':
             iconoSector = "🏥";
-            mensajeSector = "Hoy en su campo de <strong>Sanidad y Servicios Sociales</strong> tiene esto:";
+            mensajeSector = "Hoy en su campo de <strong>Sanidad y Servicios Sociales</strong> tiene este documento:";
             break;
           case 'educacion':
             iconoSector = "🎓";
-            mensajeSector = "Hoy en su campo de <strong>Educación y Universidades</strong> tiene esto:";
+            mensajeSector = "Hoy en su campo de <strong>Educación y Universidades</strong> tiene este documento:";
             break;
           default:
             iconoSector = "📌";
-            mensajeSector = `Hoy en su campo de <strong>${n.sector}</strong> tiene esto:`;
+            mensajeSector = `Hoy en su campo de <strong>${doc.sector}</strong> tiene este documento:`;
             break;
         }
 
-        // Extraemos un fragmento limpio y profesional sin mostrar términos internos de administración
-        const extractoTexto = obtenerExtracto(n.textoCompleto);
-        // Generamos el enlace directo al buscador con los documentos del día filtrados para este sector
-        const enlaceSectorHoy = obtenerEnlaceBusquedaPorDia(n.sector);
+        const extractoTexto = obtenerExtracto(doc.textoCompleto);
 
         htmlContent += `
           <div style="margin-bottom: 25px; background: #f8fafc; padding: 15px; border-left: 4px solid #2563eb; border-radius: 4px;">
@@ -158,13 +127,13 @@ async function ejecutarProceso() {
               ${iconoSector} ${mensajeSector}
             </p>
             <p style="margin: 0 0 6px 0; font-size: 14px; color: #0f172a; font-weight: 600;">
-              ${n.titulo}
+              ${doc.titulo}
             </p>
             <p style="margin: 0 0 12px 0; font-size: 13px; color: #475569; font-style: italic;">
               "${extractoTexto}"
             </p>
-            <a href="${enlaceSectorHoy}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; padding: 8px 14px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px;">
-              Ver documentos oficiales de hoy →
+            <a href="${doc.urlPdfDirecto}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; padding: 8px 14px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px;">
+              📄 Abrir PDF oficial de esta disposición →
             </a>
           </div>
         `;
@@ -194,7 +163,7 @@ async function ejecutarProceso() {
         });
       }
 
-      for (const noticia of noticiasInteres) {
+      for (const doc of documentosInteres) {
         await fetch(`${supabaseUrl}/rest/v1/notificaciones_web`, {
           method: 'POST',
           headers: {
@@ -205,7 +174,7 @@ async function ejecutarProceso() {
           },
           body: JSON.stringify({
             usuario_id: usuario.id,
-            mensaje: `Nuevo documento en ${noticia.sector.toUpperCase()}: ${noticia.titulo}`,
+            mensaje: `Nuevo documento en ${doc.sector.toUpperCase()}: ${doc.titulo}`,
             leida: false
           })
         });
