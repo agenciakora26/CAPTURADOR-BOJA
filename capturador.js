@@ -583,10 +583,20 @@ async function obtenerUrlsGuardadas() {
 
   return urls;
 }
-
 async function obtenerUsuarios() {
-  return (await supabaseRequest("perfiles_usuarios?select=id,email,sectores_suscritos")) || [];
+  return (
+    (
+      await supabaseRequest(
+        "perfiles_usuarios" +
+        "?select=id,email,sectores_suscritos,plan,estado_suscripcion,recibe_alertas" +
+        "&plan=eq.premium" +
+        "&estado_suscripcion=eq.activa" +
+        "&recibe_alertas=eq.true"
+      )
+    ) || []
+  );
 }
+
 
 async function guardarAnuncios(documentos) {
   if (documentos.length === 0) {
@@ -885,12 +895,15 @@ async function ejecutar() {
 
   for (const usuario of usuarios) {
     if (
-      !usuario.email ||
-      !Array.isArray(usuario.sectores_suscritos) ||
-      usuario.sectores_suscritos.length === 0
-    ) {
-      continue;
-    }
+      usuario.plan !== "premium" ||
+  usuario.estado_suscripcion !== "activa" ||
+  usuario.recibe_alertas !== true
+) {
+  console.log(
+    `⛔ Usuario sin Premium activo omitido: ${usuario.email || "sin email"}`
+  );
+  continue;
+}
 
     const sectoresUsuario = resolverSectoresUsuario(usuario.sectores_suscritos);
 
