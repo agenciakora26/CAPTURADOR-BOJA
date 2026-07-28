@@ -1081,29 +1081,6 @@ async function extraerTextoPdf(
   ).replace(/\u0000/g, " ");
 }
 
-function detectarSectores(
-  texto
-) {
-  const textoNormalizado =
-    normalizar(texto);
-
-  const coincidencias = [];
-
-  for (
-    const [
-      sector,
-      palabras
-    ]
-    of Object.entries(SECTORES)
-  ) {
-    const encontradas =
-      palabras.filter(
-        (palabra) =>
-          textoNormalizado.includes(
-            normalizar(palabra)
-          )
-      );
-
     if (
       encontradas.length > 0
     ) {
@@ -1718,13 +1695,9 @@ async function ejecutar() {
     return;
   }
 
-  await guardarAnuncios(
-    analizados
-  );
-
-  console.log(
-    `✅ Anuncios guardados: ${analizados.length}`
-  );
+  await guardarNotificaciones(
+  notificaciones
+);
 
   const conCoincidencias =
     analizados.filter(
