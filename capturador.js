@@ -111,9 +111,23 @@ function escaparHtml(valor = "") {
     .replace(/'/g, "&#039;");
 }
 
+function urlCanonica(url) {
+  try {
+    const parsed = new URL(url);
+    let pathname = parsed.pathname.replace(/\/index\.html$/i, "/");
+    if (!pathname.endsWith("/")) {
+      pathname += "/";
+    }
+    return `${parsed.protocol}//${parsed.host}${pathname}`;
+  } catch {
+    return null;
+  }
+}
+
 function urlAbsoluta(href, base) {
   try {
-    return new URL(href, base).href;
+    const absoluta = new URL(href, base).href;
+    return urlCanonica(absoluta);
   } catch {
     return null;
   }
@@ -156,66 +170,82 @@ function obtenerFechasRevision() {
 }
 
 async function descubrirPublicaciones() {
-  const rutosRevisar = obtenerFechasRevision();
+  const fechasRevisar = obtenerFechasRevision();
   const publicacionesValidas = [];
+  const urlsProcesadas = new Set();
 
-  for (const item of rutosRevisar) {
-    const urlsCandidatas = [
-      `${BASE_BOJA/${item.anio}/${item.formatoFecha}.html`,
-      `${BASE_BOJA}/${item.anio}/${item.formatoFecha}/index.html`,
-      `${BASE_BOJA}/${item.anio}/${item.formatoFecha}/`
-    ];
+  for (const item of fechasRevisar) {
+    const urlFecha = `${BASE_BOJA}/${item.formatoFecha}.html`;
 
-    for (const urlBase of urlsCandidatas) {
-      try {
-        const respuesta = await descargar(urlBase, "text/html");
-        const html = await respuesta.text();
-        const $ = cheerio.load(html);
-        const textoBody = normalizar($("body").text());
+    try {
+      const respuesta = await descargar(urlFecha, "text/html");
+      const html = await respuesta.text();
+      const $ = cheerio.load(html);
+      const textoBody = normalizar($("body").text());
 
-        if (textoBody.length > 100 && (textoBody.includes("boletin oficial") || textoBody.includes("boja"))) {
+      if (textoBody.length > 100 && (textoBody.includes("boletin oficial") || textoBody.includes("boja"))) {
+        const canonicalBase = urlCanonica(respuesta.url);
+        if (canonicalBase && !urlsProcesadas.has(canonicalBase)) {
+          urlsProcesadas.add(canonicalBase);
           publicacionesValidas.push({
-            url: respuesta.url,
+            url: canonicalBase,
             html,
             anio: item.anio
           });
-          
-          $("a[href]").each((_, el) => {
-            const href = $(el).attr("href");
-            const absoluta = urlAbsoluta(href, respuesta.url);
-            if (absoluta && absoluta.includes(item.formatoFecha)) {
-              if (/\/(?:c\d{2}|e\d{2})\/?$/i.test(absoluta) || absoluta.endsWith(".html")) {
-                // Se pueden registrar complementarias si es necesario
-              }
-            }
-          });
-          break;
         }
-      } catch {
-        // Ignora errores individuales de URLs que no existan
+
+        $("a[href]").each((_, el) => {
+          const href = $(el).attr("href");
+          const absoluta = urlAbsoluta(href, respuesta.url);
+          if (!absoluta) return;
+
+          // Regex estricta para asegurar formato /YYYY/NNN/ o /YYYY/NNN/cXX/ sin fusionar números
+          const matchBoja = absoluta.match(/\/eboja\/(\d{4})\/(\d+)\/(?:(c\d{2})\/)?$/i);
+          if (matchBoja) {
+            const canon = urlCanonica(absoluta);
+            if (canon && !urlsProcesadas.has(canon)) {
+              urlsProcesadas.add(canon);
+              publicacionesValidas.push({
+                url: canon,
+                html: "", // Se descargará si es necesario
+                anio: matchBoja[1]
+              });
+            }
+          }
+        });
       }
+    } catch {
+      // Ignora errores individuales de fechas que no existan
     }
   }
 
-  const mapaUnico = new Map();
-  for (const pub of publicacionesValidas) {
-    mapaUnico.set(pub.url, pub);
-  }
-
-  return [...mapaUnico.values()];
+  return publicacionesValidas;
 }
 
 async function obtenerPaginasSecciones(publicacion) {
-  const $ = cheerio.load(publicacion.html);
+  let html = publicacion.html;
+  if (!html) {
+    try {
+      const respuesta = await descargar(publicacion.url, "text/html");
+      html = await respuesta.text();
+    } catch {
+      return [publicacion.url];
+    }
+  }
+
+  const $ = cheerio.load(html);
   const paginas = new Set([publicacion.url]);
 
   $("a[href]").each((_, elemento) => {
-    const absoluta = urlAbsoluta($(elemento).attr("href"), publicacion.url);
+    const href = $(elemento).attr("href");
+    const absoluta = urlAbsoluta(href, publicacion.url);
     if (!absoluta || !absoluta.startsWith(publicacion.url)) {
       return;
     }
+
+    // Aceptar únicamente páginas de sección del tipo sXX.html o rutas internas válidas sin alterar números
     const limpia = absoluta.split("#")[0].split("?")[0];
-    if (/\/s\d+(?:\.html)?$/i.test(limpia)) {
+    if (/\/(?:s\d+(?:\.html)?|\bindex\.html)?$/i.test(limpia)) {
       paginas.add(limpia);
     }
   });
@@ -260,8 +290,9 @@ async function obtenerDocumentosPagina(urlPagina) {
     const href = enlace.attr("href") || "";
     const textoEnlace = normalizar(enlace.text());
 
-    const parecePdf = /\.pdf(?:$|[?#])/i.test(href) || textoEnlace.includes("pdf oficial autentico");
-    if (!parecePdf) {
+    // Regex estricta para validar que sea un enlace a PDF del BOJA válido
+    const esPdfValido = /\.pdf(?:$|[?#])/i.test(href) || textoEnlace.includes("pdf oficial autentico");
+    if (!esPdfValido) {
       return;
     }
 
