@@ -894,18 +894,31 @@ async function ejecutar() {
   const notificaciones = [];
 
   for (const usuario of usuarios) {
-    if (
-      usuario.plan !== "premium" ||
-  usuario.estado_suscripcion !== "activa" ||
-  usuario.recibe_alertas !== true
-) {
-  console.log(
-    `⛔ Usuario sin Premium activo omitido: ${usuario.email || "sin email"}`
-  );
-  continue;
-}
+  if (
+    usuario.plan !== "premium" ||
+    usuario.estado_suscripcion !== "activa" ||
+    usuario.recibe_alertas !== true
+  ) {
+    console.log(
+      `⛔ Usuario sin Premium activo omitido: ${usuario.email || "sin email"}`
+    );
+    continue;
+  }
 
-    const sectoresUsuario = resolverSectoresUsuario(usuario.sectores_suscritos);
+  if (
+    !usuario.email ||
+    !Array.isArray(usuario.sectores_suscritos) ||
+    usuario.sectores_suscritos.length === 0
+  ) {
+    console.log(
+      `⚠️ Usuario Premium sin email o sin sectores omitido: ${usuario.email || "sin email"}`
+    );
+    continue;
+  }
+
+  const sectoresUsuario = resolverSectoresUsuario(
+    usuario.sectores_suscritos
+  );
 
     if (sectoresUsuario.size === 0) {
       continue;
