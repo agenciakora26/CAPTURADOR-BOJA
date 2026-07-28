@@ -9,6 +9,7 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const BASE_BOJA = "https://www.juntadeandalucia.es/eboja";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0; +https://boletinhoy.es)";
+const MAX_PDF_BYTES = 35 * 1024 * 1024;
 
 if (!SUPABASE_URL || !SUPABASE_KEY || !RESEND_API_KEY) {
   console.error("❌ Faltan SUPABASE_URL, SUPABASE_KEY o RESEND_API_KEY.");
@@ -18,69 +19,68 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !RESEND_API_KEY) {
 const SECTORES = {
   "oposiciones y empleo público": {
     palabras: {
-      "oposicion": 3, "oposiciones": 3, "concurso-oposicion": 3, "concurso oposicion": 3,
-      "proceso selectivo": 3, "procesos selectivos": 3, "pruebas selectivas": 3,
+      "oposicion / oposiciones": 3, "concurso-oposicion": 3, "concurso oposicion": 3,
+      "proceso selectivo / procesos selectivos": 3, "pruebas selectivas": 3,
       "empleo publico": 3, "oferta de empleo publico": 3, "bolsa de empleo": 2,
       "bolsa de trabajo": 2, "turno libre": 2, "acceso libre": 2, "plazas vacantes": 2,
       "personal funcionario": 2, "personal laboral": 2, "personal estatutario": 2,
       "funcionario de carrera": 3, "nombramiento": 2, "toma de posesion": 2
     },
-    umbral: 3
+    umbral: 4
   },
   "subvenciones y ayudas": {
     palabras: {
-      "subvencion": 3, "subvenciones": 3, "ayuda": 2, "ayudas": 2, "bases reguladoras": 3,
-      "concesion de subvenciones": 3, "ayudas directas": 3, "incentivo": 2, "incentivos": 2,
-      "beneficiarios": 1, "beneficiarias": 1, "concurrencia competitiva": 3,
-      "concurrencia no competitiva": 3, "extracto de la resolucion": 3, "plazo de solicitud": 2,
-      "personas trabajadoras autonomas": 3, "autonomos": 2, "autonomas": 2
+      "subvencion / subvenciones": 3, "bases reguladoras": 3,
+      "concesion de subvenciones": 3, "ayudas directas": 3, "incentivo / incentivos": 2,
+      "concurrencia competitiva": 3, "concurrencia no competitiva": 3,
+      "extracto de la resolucion": 3, "plazo de solicitud": 2,
+      "personas trabajadoras autonomas": 3
     },
-    umbral: 3
+    umbral: 4
   },
   "agricultura y pesca": {
     palabras: {
-      "agricultura": 3, "agricola": 2, "pesca": 3, "pesquero": 2, "pesquera": 2,
-      "ganaderia": 3, "ganadero": 2, "ganadera": 2, "politica agraria comun": 3,
-      "explotacion agraria": 3, "explotaciones agrarias": 3, "desarrollo rural": 2,
-      "sector agrario": 2, "sector pesquero": 2, "produccion agricola": 2,
-      "sanidad animal": 2, "acuicultura": 3
+      "agricultura": 3, "agricola": 2, "pesca": 3, "pesquero / pesquera": 2,
+      "ganaderia": 3, "ganadero / ganadera": 2, "politica agraria comun": 3,
+      "explotacion agraria / explotaciones agrarias": 3, "desarrollo rural": 2,
+      "sector agrario": 2, "sector pesquero": 2, "acuicultura": 3
     },
-    umbral: 3
+    umbral: 4
   },
   "hostelería y comercio": {
     palabras: {
-      "hosteleria": 3, "hostelero": 2, "hostelera": 2, "comercio": 2, "turismo": 3,
-      "turistico": 2, "turistica": 2, "restauracion": 2, "establecimientos turisticos": 3,
+      "hosteleria": 3, "hostelero / hostelera": 2, "comercio": 2, "turismo": 3,
+      "turistico / turistica": 2, "restauracion": 2, "establecimientos turisticos": 3,
       "alojamientos turisticos": 3, "hoteles": 2, "agencias de viajes": 2,
       "comercio interior": 2, "artesania": 2, "mercados de abastos": 2
     },
-    umbral: 3
+    umbral: 4
   },
   "licitaciones y contratación": {
     palabras: {
-      "licitacion": 3, "licitaciones": 3, "contratacion publica": 3, "contrato publico": 3,
+      "licitacion / licitaciones": 3, "contratacion publica": 3, "contrato publico": 3,
       "contrato menor": 2, "mesa de contratacion": 3, "pliego de clausulas administrativas": 3,
-      "adjudicacion": 2, "adjudicaciones": 2, "formalizacion de contrato": 3,
+      "adjudicacion / adjudicaciones": 2, "formalizacion de contrato": 3,
       "procedimiento abierto": 2, "acuerdo marco": 2, "obras publicas": 2, "concurso publico": 3
     },
-    umbral: 3
+    umbral: 4
   },
   "sanidad y servicios sociales": {
     palabras: {
       "servicio andaluz de salud": 4, "personal estatutario": 2, "sanidad": 3,
-      "salud": 1, "hospital": 2, "hospitalario": 2, "enfermeria": 3, "enfermero": 2,
-      "enfermera": 2, "medicina": 2, "medico": 2, "medica": 2, "atencion primaria": 3,
+      "hospital / hospitalario": 2, "enfermeria": 3, "enfermero / enfermera": 2,
+      "medicina": 2, "medico / medica": 2, "atencion primaria": 3,
       "servicios sociales": 3, "dependencia": 2
     },
-    umbral: 3
+    umbral: 4
   },
   "educación y universidades": {
     palabras: {
-      "educacion": 3, "universidad": 3, "universidades": 3, "personal docente": 3,
-      "profesorado": 3, "maestro": 2, "maestra": 2, "beca": 2, "becas": 2,
+      "educacion": 3, "universidad / universidades": 3, "personal docente": 3,
+      "profesorado": 3, "maestro / maestra": 2, "beca / becas": 2,
       "centros educativos": 2, "formacion profesional": 3, "cuerpos docentes universitarios": 3
     },
-    umbral: 3
+    umbral: 4
   },
   "medio ambiente y sostenibilidad": {
     palabras: {
@@ -88,7 +88,7 @@ const SECTORES = {
       "evaluacion ambiental": 3, "residuos": 2, "energias renovables": 3,
       "energia solar": 2, "proteccion ambiental": 2, "calidad ambiental": 2
     },
-    umbral: 3
+    umbral: 4
   }
 };
 
@@ -111,14 +111,50 @@ function escaparHtml(valor = "") {
     .replace(/'/g, "&#039;");
 }
 
-function urlCanonica(url) {
+function extraerDatosPublicacion(url) {
   try {
     const parsed = new URL(url);
-    let pathname = parsed.pathname.replace(/\/index\.html$/i, "/");
-    if (!pathname.endsWith("/")) {
-      pathname += "/";
+
+    if (parsed.hostname !== "www.juntadeandalucia.es") {
+      return null;
     }
-    return `${parsed.protocol}//${parsed.host}${pathname}`;
+
+    const pathname = parsed.pathname
+      .replace(/\/index\.html$/i, "/")
+      .replace(/\/+$/, "/");
+
+    const match = pathname.match(
+      /^\/eboja\/(\d{4})\/(\d+)\/(?:(c\d{2,3})\/)?$/i
+    );
+
+    if (!match) {
+      return null;
+    }
+
+    return {
+      anio: match[1],
+      numero: match[2],
+      complemento: match[3]?.toLowerCase() || null,
+      url: `${parsed.protocol}//${parsed.host}${pathname}`
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizarUrlPdf(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+function normalizarUrlPagina(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
   } catch {
     return null;
   }
@@ -126,8 +162,7 @@ function urlCanonica(url) {
 
 function urlAbsoluta(href, base) {
   try {
-    const absoluta = new URL(href, base).href;
-    return urlCanonica(absoluta);
+    return new URL(href, base).href;
   } catch {
     return null;
   }
@@ -156,17 +191,60 @@ function obtenerFechasRevision() {
   const ahora = new Date();
   
   for (let i = 0; i < 3; i++) {
-    const d = new Date(ahora);
-    d.setDate(ahora.getDate() - i);
-    const anio = d.getFullYear();
-    const mes = String(d.getMonth() + 1).padStart(2, "0");
-    const dia = String(d.getDate()).padStart(2, "0");
+    const d = new Date(ahora.getTime() - (i * 24 * 60 * 60 * 1000));
+    const formatter = new Intl.DateTimeFormat("es-ES", {
+      timeZone: "Europe/Madrid",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    const partes = formatter.formatToParts(d);
+    const anio = partes.find(p => p.type === "year").value;
+    const mes = partes.find(p => p.type === "month").value;
+    const dia = partes.find(p => p.type === "day").value;
+
     fechas.push({
-      anio: String(anio),
+      anio,
       formatoFecha: `${anio}${mes}${dia}`
     });
   }
+  console.log(`📅 Fechas revisadas (Europe/Madrid):`, fechas.map(f => f.formatoFecha));
   return fechas;
+}
+
+function validarHtmlPublicacion(html, urlPublicacion) {
+  const $ = cheerio.load(html);
+  const texto = normalizar($("body").text());
+
+  if (
+    texto.length < 100 ||
+    (!texto.includes("boletin oficial") && !texto.includes("boja"))
+  ) {
+    return false;
+  }
+
+  let tieneContenidoBoja = false;
+
+  $("a[href]").each((_, elemento) => {
+    const href = $(elemento).attr("href");
+    const absoluta = urlAbsoluta(href, urlPublicacion);
+
+    if (!absoluta) {
+      return;
+    }
+
+    try {
+      const pathname = new URL(absoluta).pathname;
+      if (
+        /\/s\d+\.html$/i.test(pathname) ||
+        /\.pdf$/i.test(pathname)
+      ) {
+        tieneContenidoBoja = true;
+      }
+    } catch {}
+  });
+
+  return tieneContenidoBoja;
 }
 
 async function descubrirPublicaciones() {
@@ -180,46 +258,53 @@ async function descubrirPublicaciones() {
     try {
       const respuesta = await descargar(urlFecha, "text/html");
       const html = await respuesta.text();
+      console.log(`🔍 Índice diario encontrado: ${urlFecha}`);
+
       const $ = cheerio.load(html);
       const textoBody = normalizar($("body").text());
 
       if (textoBody.length > 100 && (textoBody.includes("boletin oficial") || textoBody.includes("boja"))) {
-        const canonicalBase = urlCanonica(respuesta.url);
-        if (canonicalBase && !urlsProcesadas.has(canonicalBase)) {
-          urlsProcesadas.add(canonicalBase);
-          publicacionesValidas.push({
-            url: canonicalBase,
-            html,
-            anio: item.anio
-          });
-        }
-
         $("a[href]").each((_, el) => {
           const href = $(el).attr("href");
           const absoluta = urlAbsoluta(href, respuesta.url);
           if (!absoluta) return;
 
-          // Regex estricta para asegurar formato /YYYY/NNN/ o /YYYY/NNN/cXX/ sin fusionar números
-          const matchBoja = absoluta.match(/\/eboja\/(\d{4})\/(\d+)\/(?:(c\d{2})\/)?$/i);
-          if (matchBoja) {
-            const canon = urlCanonica(absoluta);
-            if (canon && !urlsProcesadas.has(canon)) {
-              urlsProcesadas.add(canon);
-              publicacionesValidas.push({
-                url: canon,
-                html: "", // Se descargará si es necesario
-                anio: matchBoja[1]
-              });
-            }
+          const datos = extraerDatosPublicacion(absoluta);
+          if (!datos) {
+            return;
+          }
+
+          if (!urlsProcesadas.has(datos.url)) {
+            urlsProcesadas.add(datos.url);
+            console.log(`   📌 Publicación válida detectada -> Año: ${datos.anio}, Número: ${datos.numero}, Complemento: ${datos.complemento || "Ninguno"}`);
+            publicacionesValidas.push(datos);
           }
         });
       }
     } catch {
-      // Ignora errores individuales de fechas que no existan
+      console.log(`   ⚠️ Índice diario no disponible o sin BOJA: ${urlFecha}`);
     }
   }
 
-  return publicacionesValidas;
+  const publicacionesValidadasFinal = [];
+  for (const pub of publicacionesValidas) {
+    try {
+      const resp = await descargar(pub.url, "text/html");
+      const contentHtml = await resp.text();
+
+      if (validarHtmlPublicacion(contentHtml, pub.url)) {
+        publicacionesValidadasFinal.push({
+          ...pub,
+          html: contentHtml
+        });
+        console.log(`   ✅ Publicación verificada correctamente: ${pub.url}`);
+      }
+    } catch {
+      console.log(`   ⚠️ Publicación inaccesible o no válida: ${pub.url}`);
+    }
+  }
+
+  return publicacionesValidadasFinal;
 }
 
 async function obtenerPaginasSecciones(publicacion) {
@@ -243,11 +328,16 @@ async function obtenerPaginasSecciones(publicacion) {
       return;
     }
 
-    // Aceptar únicamente páginas de sección del tipo sXX.html o rutas internas válidas sin alterar números
-    const limpia = absoluta.split("#")[0].split("?")[0];
-    if (/\/(?:s\d+(?:\.html)?|\bindex\.html)?$/i.test(limpia)) {
-      paginas.add(limpia);
-    }
+    try {
+      const parsedPath = new URL(absoluta).pathname;
+      if (/\/s\d+\.html$/i.test(parsedPath)) {
+        const limpia = normalizarUrlPagina(absoluta);
+        if (limpia) {
+          paginas.add(limpia);
+          console.log(`      📁 Sección encontrada: ${limpia}`);
+        }
+      }
+    } catch {}
   });
 
   return [...paginas];
@@ -290,14 +380,18 @@ async function obtenerDocumentosPagina(urlPagina) {
     const href = enlace.attr("href") || "";
     const textoEnlace = normalizar(enlace.text());
 
-    // Regex estricta para validar que sea un enlace a PDF del BOJA válido
     const esPdfValido = /\.pdf(?:$|[?#])/i.test(href) || textoEnlace.includes("pdf oficial autentico");
     if (!esPdfValido) {
       return;
     }
 
-    const urlPdf = urlAbsoluta(href, respuesta.url);
-    if (!urlPdf) {
+    const urlPdfAbs = urlAbsoluta(href, respuesta.url);
+    if (!urlPdfAbs) {
+      return;
+    }
+
+    const urlPdfNorm = normalizarUrlPdf(urlPdfAbs);
+    if (!urlPdfNorm) {
       return;
     }
 
@@ -306,8 +400,8 @@ async function obtenerDocumentosPagina(urlPagina) {
       return;
     }
 
-    documentos.set(urlPdf, {
-      urlPdf,
+    documentos.set(urlPdfNorm, {
+      urlPdf: urlPdfNorm,
       tituloPagina: obtenerTituloCercano($, elemento),
       urlSeccion: respuesta.url
     });
@@ -336,37 +430,82 @@ async function obtenerDocumentosPublicacion(publicacion) {
 
 async function extraerTextoPdf(urlPdf) {
   const respuesta = await descargar(urlPdf, "application/pdf");
+  const contentType = normalizar(
+    respuesta.headers.get("content-type") || ""
+  );
+
+  if (
+    contentType &&
+    !contentType.includes("application/pdf") &&
+    !contentType.includes("application/octet-stream")
+  ) {
+    throw new Error(`Contenido inesperado: ${contentType}`);
+  }
+
+  const contentLength = Number(respuesta.headers.get("content-length") || 0);
+
+  if (contentLength > MAX_PDF_BYTES) {
+    throw new Error("El PDF supera los 35 MB.");
+  }
+
   const buffer = Buffer.from(await respuesta.arrayBuffer());
 
-  if (buffer.length > 35 * 1024 * 1024) {
+  if (buffer.length > MAX_PDF_BYTES) {
     throw new Error("El PDF supera los 35 MB.");
+  }
+
+  if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
+    throw new Error("El contenido descargado no es un PDF válido.");
   }
 
   const resultado = await pdfParse(buffer);
   return String(resultado.text || "").replace(/\u0000/g, " ");
 }
 
-function detectarSectores(texto) {
+function detectarSectores(texto, titulo = "") {
   const textoNormalizado = normalizar(texto);
+  const tituloNormalizado = normalizar(titulo);
   const coincidencias = [];
+
+  const escaparRegex = valor =>
+    valor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   for (const [sector, configuracion] of Object.entries(SECTORES)) {
     let puntuacionTotal = 0;
     const palabrasEncontradasSet = new Set();
 
-    for (const [palabraClave, peso] of Object.entries(configuracion.palabras)) {
-      const palabraNorm = normalizar(palabraClave);
-      if (palabraNorm.length <= 2) {
-        const regex = new RegExp(`\\b${palabraNorm}\\b`, "i");
+    for (const [claveGrupo, peso] of Object.entries(configuracion.palabras)) {
+      const variantes = claveGrupo.split("/").map(v => v.trim());
+      let varianteCoincidente = null;
+      let encontradaEnTitulo = false;
+      let encontradaEnTexto = false;
+
+      for (const variante of variantes) {
+        const palabraNorm = normalizar(variante);
+        const patron = escaparRegex(palabraNorm).replace(/\s+/g, "\\s+");
+        const regex = new RegExp(
+          `(^|[^a-z0-9áéíóúüñ])${patron}(?=$|[^a-z0-9áéíóúüñ])`,
+          "i"
+        );
+
+        if (regex.test(tituloNormalizado)) {
+          encontradaEnTitulo = true;
+          varianteCoincidente = variante;
+          break;
+        }
         if (regex.test(textoNormalizado)) {
-          puntuacionTotal += peso;
-          palabrasEncontradasSet.add(palabraClave);
+          encontradaEnTexto = true;
+          varianteCoincidente = variante;
         }
-      } else {
-        if (textoNormalizado.includes(palabraNorm)) {
-          puntuacionTotal += peso;
-          palabrasEncontradasSet.add(palabraClave);
+      }
+
+      if (encontradaEnTitulo || encontradaEnTexto) {
+        let pesoFinal = peso;
+        if (encontradaEnTitulo) {
+          pesoFinal += 2;
         }
+        puntuacionTotal += pesoFinal;
+        palabrasEncontradasSet.add(varianteCoincidente || claveGrupo);
       }
     }
 
@@ -395,7 +534,9 @@ async function supabaseRequest(ruta, opciones = {}) {
   });
 
   if (!respuesta.ok) {
-    throw new Error(`Supabase ${respuesta.status}: ${await respuesta.text()}`);
+    const errorText = await respuesta.text();
+    console.error(`❌ Error Supabase ${respuesta.status} en ${ruta}: ${errorText}`);
+    throw new Error(`Supabase ${respuesta.status}: ${errorText}`);
   }
 
   if (respuesta.status === 204) {
@@ -407,8 +548,40 @@ async function supabaseRequest(ruta, opciones = {}) {
 }
 
 async function obtenerUrlsGuardadas() {
-  const filas = (await supabaseRequest("anuncios_boja?select=url_pdf")) || [];
-  return new Set(filas.map((fila) => fila.url_pdf).filter(Boolean));
+  const urls = new Set();
+  const tamanioPagina = 1000;
+  let desde = 0;
+
+  while (true) {
+    const hasta = desde + tamanioPagina - 1;
+
+    const filas = await supabaseRequest(
+      `anuncios_boja?select=url_pdf&order=id.asc`,
+      {
+        headers: {
+          Range: `${desde}-${hasta}`
+        }
+      }
+    );
+
+    const resultados = Array.isArray(filas) ? filas : [];
+
+    for (const fila of resultados) {
+      const urlNormalizada = normalizarUrlPdf(fila.url_pdf);
+
+      if (urlNormalizada) {
+        urls.add(urlNormalizada);
+      }
+    }
+
+    if (resultados.length < tamanioPagina) {
+      break;
+    }
+
+    desde += tamanioPagina;
+  }
+
+  return urls;
 }
 
 async function obtenerUsuarios() {
@@ -428,13 +601,16 @@ async function guardarAnuncios(documentos) {
       : "Sin coincidencias"
   }));
 
-  await supabaseRequest("anuncios_boja", {
-    method: "POST",
-    headers: {
-      Prefer: "return=minimal"
-    },
-    body: JSON.stringify(filas)
-  });
+  await supabaseRequest(
+    "anuncios_boja?on_conflict=url_pdf",
+    {
+      method: "POST",
+      headers: {
+        Prefer: "resolution=ignore-duplicates,return=representation"
+      },
+      body: JSON.stringify(filas)
+    }
+  );
 }
 
 async function guardarNotificaciones(notificaciones) {
@@ -575,15 +751,15 @@ async function ejecutar() {
     return;
   }
 
-  console.log(`📚 Publicaciones encontradas: ${publicaciones.length}`);
+  console.log(`📚 Publicaciones válidas totales: ${publicaciones.length}`);
 
   const documentosTotales = new Map();
 
   for (const publicacion of publicaciones) {
-    console.log(`🔍 Revisando ${publicacion.url}`);
+    console.log(`🔍 Revisando publicación: ${publicacion.url}`);
     try {
       const documentos = await obtenerDocumentosPublicacion(publicacion);
-      console.log(`   PDF localizados: ${documentos.length}`);
+      console.log(`   PDF localizados en esta publicación: ${documentos.length}`);
       for (const documento of documentos) {
         documentosTotales.set(documento.urlPdf, documento);
       }
@@ -595,15 +771,26 @@ async function ejecutar() {
   let urlsGuardadas = new Set();
   try {
     urlsGuardadas = await obtenerUrlsGuardadas();
+    console.log(`💾 URLs ya existentes en Supabase cargadas: ${urlsGuardadas.size}`);
   } catch (error) {
-    console.log(`⚠️ Error obteniendo URLs guardadas de Supabase: ${error.message}`);
+    console.error(`❌ Error crítico obteniendo URLs guardadas de Supabase: ${error.message}`);
+    console.error(`🛑 Deteniendo ejecución por seguridad para evitar duplicados.`);
+    return;
   }
 
-  const documentosNuevos = [...documentosTotales.values()].filter(
-    (documento) => !urlsGuardadas.has(documento.urlPdf)
-  );
+  const documentosNuevos = [];
+  let pdfDuplicadosDescartados = 0;
 
-  console.log(`🆕 PDF nuevos: ${documentosNuevos.length}`);
+  for (const [urlPdf, documento] of documentosTotales.entries()) {
+    if (urlsGuardadas.has(urlPdf)) {
+      pdfDuplicadosDescartados++;
+    } else {
+      documentosNuevos.push(documento);
+    }
+  }
+
+  console.log(`🗑️ PDF duplicados descartados: ${pdfDuplicadosDescartados}`);
+  console.log(`🆕 PDF nuevos pendientes de procesar: ${documentosNuevos.length}`);
 
   if (documentosNuevos.length === 0) {
     console.log("✅ No hay documentos nuevos.");
@@ -611,43 +798,73 @@ async function ejecutar() {
   }
 
   const analizados = [];
+  let pdfOmitidosTamanio = 0;
 
   for (let indice = 0; indice < documentosNuevos.length; indice++) {
     const documento = documentosNuevos[indice];
-    console.log(`📄 Analizando ${indice + 1}/${documentosNuevos.length}`);
+    console.log(`📄 Analizando ${indice + 1}/${documentosNuevos.length}: ${documento.urlPdf}`);
 
     try {
       const texto = await extraerTextoPdf(documento.urlPdf);
-      const sectores = detectarSectores(texto);
+      const tituloFinal = documento.tituloPagina || "Documento publicado en el BOJA";
+      const sectores = detectarSectores(texto, tituloFinal);
 
       analizados.push({
         ...documento,
         texto,
-        titulo: documento.tituloPagina || "Documento publicado en el BOJA",
+        titulo: tituloFinal,
         sectores
       });
     } catch (error) {
+      if (error.message.includes("35 MB")) {
+        pdfOmitidosTamanio++;
+      }
       console.log(`⚠️ PDF omitido ${documento.urlPdf}: ${error.message}`);
     }
   }
+
+  console.log(`📏 PDF omitidos por superar tamaño: ${pdfOmitidosTamanio}`);
 
   if (analizados.length === 0) {
     console.log("ℹ️ No se pudo analizar ningún PDF.");
     return;
   }
 
+  let documentosGuardados = [];
+
   try {
-    await guardarAnuncios(analizados);
-    console.log(`✅ Anuncios guardados: ${analizados.length}`);
+    const urlsActualizadas = await obtenerUrlsGuardadas();
+
+    const realmenteNuevos = analizados.filter(
+      documento => !urlsActualizadas.has(documento.urlPdf)
+    );
+
+    if (realmenteNuevos.length === 0) {
+      console.log("ℹ️ Todos los documentos ya estaban guardados.");
+      return;
+    }
+
+    await guardarAnuncios(realmenteNuevos);
+    documentosGuardados = realmenteNuevos;
+
+    console.log(
+      `✅ Anuncios nuevos guardados en Supabase: ${documentosGuardados.length}`
+    );
   } catch (error) {
-    console.log(`⚠️ Error guardando anuncios en Supabase: ${error.message}`);
+    console.error(
+      `❌ No se pudieron guardar los anuncios: ${error.message}`
+    );
+    console.error(
+      "🛑 No se enviarán correos para evitar notificaciones duplicadas."
+    );
+    return;
   }
 
-  const conCoincidencias = analizados.filter(
-    (documento) => documento.sectores.length > 0
+  const conCoincidencias = documentosGuardados.filter(
+    documento => documento.sectores.length > 0
   );
 
-  console.log(`🎯 Documentos con coincidencias: ${conCoincidencias.length}`);
+  console.log(`🎯 Documentos con coincidencias de sectores: ${conCoincidencias.length}`);
 
   if (conCoincidencias.length === 0) {
     console.log("ℹ️ No hay coincidencias para notificar.");
@@ -704,28 +921,22 @@ async function ejecutar() {
       console.log(`📧 Enviando correo a ${usuario.email}...`);
       await enviarCorreo(usuario.email, relevantes);
 
-      notificaciones.push({
-        usuario_id: usuario.id,
-        email: usuario.email,
-        estado: "enviado",
-        total_documentos: relevantes.length
-      });
+      for (const rel of relevantes) {
+        notificaciones.push({
+          usuario_id: usuario.id,
+          mensaje: `Novedad BOJA: ${rel.titulo}`,
+          leida: false
+        });
+      }
     } catch (error) {
       console.log(`❌ Error al enviar correo a ${usuario.email}: ${error.message}`);
-
-      notificaciones.push({
-        usuario_id: usuario.id,
-        email: usuario.email,
-        estado: "error",
-        error: error.message
-      });
     }
   }
 
   if (notificaciones.length > 0) {
     try {
       await guardarNotificaciones(notificaciones);
-      console.log(`📊 Registro de notificaciones guardado: ${notificaciones.length}`);
+      console.log(`📊 Registro de notificaciones web guardado: ${notificaciones.length}`);
     } catch (error) {
       console.log(`⚠️ Error guardando registro de notificaciones: ${error.message}`);
     }
