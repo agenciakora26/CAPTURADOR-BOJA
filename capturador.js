@@ -254,7 +254,6 @@ function extraerDatosPublicacion(url) {
   }
 }
 
-// Ingesta adicional mediante feedparser para RSS oficial del BOJA
 async function obtenerPublicacionesDesdeRss(fechas) {
   const publicaciones = [];
   try {
@@ -262,14 +261,20 @@ async function obtenerPublicacionesDesdeRss(fechas) {
       headers: { "User-Agent": USER_AGENT, Accept: "application/rss+xml, application/xml, text/xml" },
       signal: AbortSignal.timeout(20000)
     });
-    if (!resp.ok) return publicaciones;
+    if (!resp.ok) {
+      console.warn(`⚠️ RSS BOJA respondió con estado ${resp.status}`);
+      return publicaciones;
+    }
 
     const feedparser = new FeedParser();
     const stream = Readable.fromWeb(resp.body);
 
     await new Promise((resolve) => {
       stream.pipe(feedparser);
-      feedparser.on("error", () => resolve());
+      feedparser.on("error", (err) => {
+        console.warn(`⚠️ Error procesando RSS Feedparser: ${err.message}`);
+        resolve();
+      });
       feedparser.on("end", () => resolve());
       feedparser.on("readable", function () {
         let item;
@@ -302,7 +307,9 @@ async function obtenerPublicacionesDesdeRss(fechas) {
         }
       });
     });
-  } catch {}
+  } catch (error) {
+    console.warn(`⚠️ Error al obtener publicaciones desde RSS (${RSS_BOJA}): ${error.message}`);
+  }
   return publicaciones;
 }
 
@@ -343,15 +350,18 @@ async function obtenerPublicacionesDesdeApi(fechas) {
           section: item.seccion || item.section || ""
         });
       }
-    } catch {}
+    } catch (error) {
+      console.warn(`⚠️ Error al consultar API del BOJA (${BASE_API_BOJA}): ${error.message}`);
+    }
   }
   return publicaciones;
 }
 
 async function obtenerPublicacionesDesdePortada(fechas) {
   const publicaciones = [];
+  const portadaUrl = `${BASE_BOJA}.html`;
   try {
-    const resp = await fetchCached(`${BASE_BOJA}.html`, "text/html");
+    const resp = await fetchCached(portadaUrl, "text/html");
     const html = await resp.text();
     const $ = cheerio.load(html);
 
@@ -409,7 +419,9 @@ async function obtenerPublicacionesDesdePortada(fechas) {
         });
       }
     });
-  } catch {}
+  } catch (error) {
+    console.warn(`⚠️ Error al obtener publicaciones desde la Portada (${portadaUrl}): ${error.message}`);
+  }
   return publicaciones;
 }
 
@@ -447,7 +459,9 @@ async function obtenerPublicacionesDesdeIndicesDiarios(fechas) {
           });
         }
       });
-    } catch {}
+    } catch (error) {
+      console.warn(`⚠️ Aviso: No se pudo cargar el índice diario para ${f.formatoFecha} (${urlFecha}): ${error.message}`);
+    }
   }
   return publicaciones;
 }
@@ -473,7 +487,8 @@ async function obtenerPaginasSecciones(publicacionUrl) {
     });
 
     return [...paginas];
-  } catch {
+  } catch (error) {
+    console.warn(`⚠️ No se pudieron obtener secciones secundarias para ${publicacionUrl}: ${error.message}`);
     return [publicacionUrl];
   }
 }
@@ -510,48 +525,53 @@ async function esUrlPdfValida(urlPdfAbs) {
 }
 
 async function obtenerDocumentosPagina(urlPagina) {
-  const resp = await fetchCached(urlPagina, "text/html");
-  const html = await resp.text();
-  const $ = cheerio.load(html);
-  const documentos = new Map();
+  try {
+    const resp = await fetchCached(urlPagina, "text/html");
+    const html = await resp.text();
+    const $ = cheerio.load(html);
+    const documentos = new Map();
 
-  for (const elemento of $("a[href]").toArray()) {
-    const enlace = $(elemento);
-    const href = enlace.attr("href") || "";
-    const textoEnlace = normalizar(enlace.text());
+    for (const elemento of $("a[href]").toArray()) {
+      const enlace = $(elemento);
+      const href = enlace.attr("href") || "";
+      const textoEnlace = normalizar(enlace.text());
 
-    const urlPdfAbs = urlAbsoluta(href, resp.url);
-    if (!urlPdfAbs) continue;
+      const urlPdfAbs = urlAbsoluta(href, resp.url);
+      if (!urlPdfAbs) continue;
 
-    const esValido = await esUrlPdfValida(urlPdfAbs);
-    if (!esValido && !textoEnlace.includes("pdf oficial autentico")) continue;
+      const esValido = await esUrlPdfValida(urlPdfAbs);
+      if (!esValido && !textoEnlace.includes("pdf oficial autentico")) continue;
 
-    const urlPdfNorm = normalizarUrlPdf(urlPdfAbs);
-    if (!urlPdfNorm) continue;
+      const urlPdfNorm = normalizarUrlPdf(urlPdfAbs);
+      if (!urlPdfNorm) continue;
 
-    const contexto = normalizar(enlace.closest("li,article,div").text());
-    if (contexto.includes("boletin completo") || contexto.includes("sumario boletin")) continue;
+      const contexto = normalizar(enlace.closest("li,article,div").text());
+      if (contexto.includes("boletin completo") || contexto.includes("sumario boletin")) continue;
 
-    let cve = null;
-    const matchCve = (urlPdfNorm + " " + contexto).match(/cve-[0-9a-f-]+/i);
-    if (matchCve) cve = matchCve[0].toUpperCase();
+      let cve = null;
+      const matchCve = (urlPdfNorm + " " + contexto).match(/cve-[0-9a-f-]+/i);
+      if (matchCve) cve = matchCve[0].toUpperCase();
 
-    documentos.set(urlPdfNorm, {
-      cve,
-      urlPdf: urlPdfNorm,
-      tituloPagina: obtenerTituloCercano($, enlace),
-      urlSeccion: resp.url
-    });
+      documentos.set(urlPdfNorm, {
+        cve,
+        urlPdf: urlPdfNorm,
+        tituloPagina: obtenerTituloCercano($, enlace),
+        urlSeccion: resp.url
+      });
+    }
+
+    return [...documentos.values()];
+  } catch (error) {
+    console.warn(`⚠️ Error al extraer documentos de la página ${urlPagina}: ${error.message}`);
+    return [];
   }
-
-  return [...documentos.values()];
 }
 
 async function extraerTextoPdf(urlPdf) {
   const respuesta = await descargar(urlPdf, "application/pdf");
   const buffer = Buffer.from(await respuesta.arrayBuffer());
   if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
-    throw new Error("El contenido descargado no es un PDF válido.");
+    throw new Error(`El contenido descargado en ${urlPdf} no es un PDF válido.`);
   }
   const resultado = await pdfParse(buffer);
   return String(resultado.text || "").replace(/\u0000/g, " ");
@@ -623,7 +643,7 @@ async function supabaseRequest(ruta, opciones = {}) {
 
   if (!respuesta.ok) {
     const errorText = await respuesta.text();
-    throw new Error(`Supabase ${respuesta.status}: ${errorText}`);
+    throw new Error(`Supabase ${respuesta.status} en endpoint ${ruta}: ${errorText}`);
   }
 
   if (respuesta.status === 204) return null;
@@ -696,7 +716,7 @@ async function verificarYRegistrarIdempotenciaEnvio(usuarioId, documentosClaves)
     if (error.message.includes("23505") || error.message.includes("duplicate key")) {
       return true;
     }
-    return false;
+    throw error;
   }
 }
 
@@ -760,13 +780,21 @@ async function enviarCorreo(email, documentos) {
 }
 
 async function ejecutar() {
-  console.log("🚀 INICIANDO CAPTURADOR BOJA CON FEEDPARSER, SUPABASE Y RESEND");
+  console.log("🚀 INICIANDO CAPTURADOR BOJA CON AUDITORÍA FUNCIONAL Y LOGS DETALLADOS");
   const fechas = obtenerFechasRevision();
+  console.log(`📅 Fechas de revisión calculadas:`, fechas.map(f => f.fechaIso));
 
   const pubsRss = await obtenerPublicacionesDesdeRss(fechas);
+  console.log(`📊 Publicaciones obtenidas del RSS: ${pubsRss.length}`);
+
   const pubsPortada = await obtenerPublicacionesDesdePortada(fechas);
+  console.log(`📊 Publicaciones obtenidas de la Portada: ${pubsPortada.length}`);
+
   const pubsApi = await obtenerPublicacionesDesdeApi(fechas);
+  console.log(`📊 Publicaciones obtenidas de la API: ${pubsApi.length}`);
+
   const pubsIndices = await obtenerPublicacionesDesdeIndicesDiarios(fechas);
+  console.log(`📊 Publicaciones obtenidas de los Índices Diarios: ${pubsIndices.length}`);
 
   const mapaDisposiciones = new Map();
   for (const p of [...pubsRss, ...pubsPortada, ...pubsApi, ...pubsIndices]) {
@@ -786,6 +814,8 @@ async function ejecutar() {
   }
 
   const publicacionesUnicas = [...mapaDisposiciones.values()];
+  console.log(`🔗 Total de publicaciones únicas consolidadas: ${publicacionesUnicas.length}`);
+
   const documentosTotales = new Map();
 
   for (const pub of publicacionesUnicas) {
@@ -801,13 +831,19 @@ async function ejecutar() {
           }
         }
       }
-    } catch {}
+    } catch (error) {
+      console.warn(`⚠️ Error explorando secciones para la publicación ${urlObjetivo}: ${error.message}`);
+    }
   }
+
+  console.log(`📄 Total de PDFs encontrados en las páginas/secciones: ${documentosTotales.size}`);
 
   let urlsGuardadas = new Set();
   try {
     urlsGuardadas = await obtenerUrlsGuardadas();
+    console.log(`🗄️ URLs de PDFs ya existentes en Supabase: ${urlsGuardadas.size}`);
   } catch (error) {
+    console.error(`❌ Error crítico al consultar Supabase URLs guardadas: ${error.message}`);
     process.exit(1);
   }
 
@@ -818,33 +854,46 @@ async function ejecutar() {
     }
   }
 
+  console.log(`✨ Total de documentos considerados nuevos (pendientes de analizar): ${documentosNuevos.length}`);
+
   if (documentosNuevos.length === 0) {
     console.log("✅ No hay documentos nuevos.");
     return;
   }
 
   const limit = pLimit(3);
+  let analizadosExitosos = 0;
   const tareasAnalisis = documentosNuevos.map((doc) =>
     limit(async () => {
       try {
         const texto = await extraerTextoPdf(doc.urlPdf);
+        analizadosExitosos++;
         const tituloFinal = doc.tituloPagina || doc.publicationInfo?.title || "Documento BOJA";
         const sectores = detectarSectores(texto, tituloFinal);
         return { ...doc, texto, titulo: tituloFinal, sectores };
-      } catch {
+      } catch (error) {
+        console.warn(`⚠️ Error al analizar el PDF ${doc.urlPdf}: ${error.message}`);
         return null;
       }
     })
   );
 
   const analizados = (await Promise.all(tareasAnalisis)).filter(Boolean);
-  if (analizados.length > 0) await guardarAnuncios(analizados);
+  console.log(`🔍 Total de PDFs analizados correctamente: ${analizados.length} (Exitosos: ${analizadosExitosos})`);
+
+  if (analizados.length > 0) {
+    await guardarAnuncios(analizados);
+    console.log(`💾 Guardados ${analizados.length} anuncios nuevos en Supabase.`);
+  }
 
   const conCoincidencias = analizados.filter(d => d.sectores.length > 0);
   let usuarios = [];
   try {
     usuarios = await obtenerUsuarios();
-  } catch {}
+    console.log(`👥 Usuarios premium con alertas activas obtenidos: ${usuarios.length}`);
+  } catch (error) {
+    console.warn(`⚠️ No se pudieron obtener los usuarios de Supabase: ${error.message}`);
+  }
 
   let alertasEnviadas = 0;
   for (const usuario of usuarios) {
@@ -866,13 +915,15 @@ async function ejecutar() {
     try {
       await enviarCorreo(usuario.email, relevantes);
       alertasEnviadas++;
-    } catch {}
+    } catch (error) {
+      console.error(`❌ Error al enviar correo de alerta a ${usuario.email}: ${error.message}`);
+    }
   }
 
-  console.log(`🏁 FIN. Documentos nuevos analizados: ${analizados.length}, Alertas enviadas: ${alertasEnviadas}`);
+  console.log(`🏁 FIN. Documentos nuevos analizados: ${analizados.length}, Correos/Alertas enviadas: ${alertasEnviadas}`);
 }
 
 ejecutar().catch((error) => {
-  console.error("❌ Error crítico:", error);
+  console.error("❌ Error crítico en la ejecución principal:", error);
   process.exit(1);
 });
