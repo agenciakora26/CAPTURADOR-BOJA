@@ -7,10 +7,12 @@
   "scripts": {
     "start": "node capturador.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
-    "@supabase/supabase-js": "^2.56.0",
-    "cheerio": "^1.0.0",
-    "p-limit": "^4.0.0",
+    "cheerio": "^1.1.2",
+    "p-limit": "3.1.0",
     "pdf-parse": "1.1.1"
   }
 }
