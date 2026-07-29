@@ -21,21 +21,16 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !RESEND_API_KEY) {
   process.exit(1);
 }
 
-// Caché en memoria para evitar peticiones repetidas en ejecuciones consecutivas breves
-const memoryCache = new Map();
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+// 5. La caché solo debe describirse como válida dentro de una misma ejecución (Map local)
+const executionCache = new Map();
 
 async function fetchCached(url, accept = "*/*", intentos = 3) {
-  const ahora = Date.now();
-  if (memoryCache.has(url)) {
-    const cached = memoryCache.get(url);
-    if (ahora - cached.timestamp < CACHE_TTL_MS) {
-      return cached.response.clone();
-    }
+  if (executionCache.has(url)) {
+    return executionCache.get(url).clone();
   }
 
   const respuesta = await descargar(url, accept, intentos);
-  memoryCache.set(url, { timestamp: ahora, response: respuesta.clone() });
+  executionCache.set(url, respuesta.clone());
   return respuesta;
 }
 
@@ -134,11 +129,17 @@ function escaparHtml(valor = "") {
     .replace(/'/g, "&#039;");
 }
 
+// 4. Conserva los parámetros necesarios de las URL PDF y elimina solo los utm_*
 function normalizarUrlPdf(url) {
   try {
     const parsed = new URL(url);
     parsed.hash = "";
-    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+    for (const [key] of [...parsed.searchParams.entries()]) {
+      if (key.toLowerCase().startsWith("utm_")) {
+        parsed.searchParams.delete(key);
+      }
+    }
+    return parsed.toString();
   } catch {
     return null;
   }
@@ -148,7 +149,12 @@ function normalizarUrlPagina(url) {
   try {
     const parsed = new URL(url);
     parsed.hash = "";
-    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+    for (const [key] of [...parsed.searchParams.entries()]) {
+      if (key.toLowerCase().startsWith("utm_")) {
+        parsed.searchParams.delete(key);
+      }
+    }
+    return parsed.toString();
   } catch {
     return null;
   }
@@ -182,8 +188,7 @@ async function descargar(url, accept = "*/*", intentos = 3) {
 
       if (!respuesta.ok) {
         if ([429, 500, 502, 503, 504].includes(respuesta.status) && intento < intentos) {
-          const espera = Math.pow(2, intento) * 1000;
-          await new Promise(res => setTimeout(res, espera));
+          await new Promise(res => setTimeout(res, Math.pow(2, intento) * 1000));
           continue;
         }
         throw new Error(`HTTP ${respuesta.status} al consultar ${url}`);
@@ -192,12 +197,9 @@ async function descargar(url, accept = "*/*", intentos = 3) {
       return respuesta;
     } catch (error) {
       ultimoError = error;
-      if (error.message.includes("404")) {
-        throw error;
-      }
+      if (error.message.includes("404")) throw error;
       if (intento < intentos) {
-        const espera = Math.pow(2, intento) * 1000;
-        await new Promise(res => setTimeout(res, espera));
+        await new Promise(res => setTimeout(res, Math.pow(2, intento) * 1000));
         continue;
       }
     }
@@ -230,27 +232,18 @@ function obtenerFechasRevision() {
       formatoFecha: `${anio}${mes}${dia}`
     });
   }
-  console.log(`📅 Fechas revisadas (Europe/Madrid):`, fechas.map(f => f.formatoFecha));
   return fechas;
 }
 
 function extraerDatosPublicacion(url) {
   try {
     const parsed = new URL(url);
-    if (parsed.hostname !== "www.juntadeandalucia.es") {
-      return null;
-    }
-    const pathname = parsed.pathname
-      .replace(/\/index\.html$/i, "/")
-      .replace(/\/+$/, "/");
-
+    if (parsed.hostname !== "www.juntadeandalucia.es") return null;
+    const pathname = parsed.pathname.replace(/\/index\.html$/i, "/").replace(/\/+$/, "/");
     const match = pathname.match(/^\/eboja\/(\d{4})\/(\d+)\/(?:(c\d{2,3})\/)?$/i);
-    if (!match) {
-      return null;
-    }
+    if (!match) return null;
 
     return {
-      source: "url",
       year: parseInt(match[1], 10),
       number: match[2],
       complement: match[3]?.toLowerCase() || null,
@@ -261,79 +254,50 @@ function extraerDatosPublicacion(url) {
   }
 }
 
-// 1. Parser alineado con OpenAPI / estructura real de la API de datos de la Junta
+// 1. OpenAPI oficial del BOJA (/search con parámetro year y validación de respuesta)
 async function obtenerPublicacionesDesdeApi(fechas) {
   const publicaciones = [];
-  for (const f of fechas) {
-    let page = 0;
-    const size = 100;
-    let hayMas = true;
-    let seguridad = 0;
+  const aniosProcesados = new Set(fechas.map(f => f.anio));
 
-    while (hayMas && seguridad < 10) {
-      seguridad++;
-      const urlApi = `${BASE_API_BOJA}/get/search_pagination?order_by=date&mode=DESC&size=${size}&page=${page}&date_from=${f.fechaIso}&date_to=${f.fechaIso}`;
-      try {
-        const resp = await fetchCached(urlApi, "application/json");
-        const json = await resp.json();
-        
-        let items = [];
-        // Adaptabilidad estricta al esquema real devuelto por la API
-        if (Array.isArray(json)) {
-          items = json;
-        } else if (json && Array.isArray(json.results)) {
-          items = json.results;
-        } else if (json && Array.isArray(json.items)) {
-          items = json.items;
-        } else if (json && Array.isArray(json.data)) {
-          items = json.data;
-        } else if (json && json.response && Array.isArray(json.response.docs)) {
-          items = json.response.docs;
-        }
+  for (const anio of aniosProcesados) {
+    try {
+      const urlApi = `${BASE_API_BOJA}/search?year=${anio}`;
+      const resp = await fetchCached(urlApi, "application/json");
+      const json = await resp.json();
+      const items = Array.isArray(json) ? json : (json?.results || json?.items || json?.data || []);
 
-        if (items.length === 0) {
-          hayMas = false;
-          break;
-        }
+      for (const item of items) {
+        const fechaPub = item.fecha || item.date || item.publicationDate || "";
+        const coincideFecha = fechas.some(f => fechaPub.includes(f.fechaIso) || fechaPub.includes(f.formatoFecha));
+        if (!coincideFecha && fechas.length > 0) continue;
 
-        for (const item of items) {
-          const urlDisp = item.url || item.enlace || item.link || item.uri || null;
-          const urlPdf = item.url_pdf || item.pdf || item.documentoPdf || item.enlacePdf || null;
-          const datosUrl = urlDisp ? extraerDatosPublicacion(urlDisp) : null;
+        const urlDisp = item.url || item.enlace || item.link || item.uri || null;
+        const urlPdf = item.url_pdf || item.pdf || item.documentoPdf || null;
+        const cve = item.cve || item.codigoVerificacion || null;
+        const officialId = item.id || item.codigo || item.guid || null;
 
-          publicaciones.push({
-            source: "api",
-            year: datosUrl?.year || parseInt(f.anio, 10),
-            number: datosUrl?.number || item.numero || f.formatoFecha,
-            complement: datosUrl?.complement || item.complemento || null,
-            publicationDate: f.fechaIso,
-            publicationUrl: datosUrl?.publicationUrl || urlDisp || `${BASE_BOJA}/${f.formatoFecha}.html`,
-            dispositionUrl: urlDisp,
-            pdfUrl: urlPdf ? normalizarUrlPdf(urlPdf) : null,
-            title: item.titulo || item.title || item.asunto || "Documento publicado en el BOJA",
-            summary: item.resumen || item.summary || "",
-            organisation: item.organismo || item.organisation || "",
-            section: item.seccion || item.section || "",
-            officialId: item.id || item.codigo || item.guid || null
-          });
-        }
-
-        if (items.length < size) {
-          hayMas = false;
-        } else {
-          page++;
-        }
-      } catch (error) {
-        console.log(`   ⚠️ API no disponible para la fecha ${f.fechaIso}: ${error.message}`);
-        hayMas = false;
+        publicaciones.push({
+          source: "api",
+          cve,
+          officialId,
+          year: parseInt(anio, 10),
+          number: item.numero || item.number || anio,
+          publicationDate: fechaPub ? fechaPub.substring(0, 10) : fechas[0].fechaIso,
+          publicationUrl: urlDisp ? normalizarUrlPagina(urlDisp) : `${BASE_BOJA}/${anio}.html`,
+          dispositionUrl: urlDisp ? normalizarUrlPagina(urlDisp) : null,
+          pdfUrl: urlPdf ? normalizarUrlPdf(urlPdf) : null,
+          title: item.titulo || item.title || item.asunto || "Documento BOJA",
+          summary: item.resumen || item.summary || "",
+          organisation: item.organismo || item.organisation || "",
+          section: item.seccion || item.section || ""
+        });
       }
-    }
+    } catch {}
   }
-  console.log(`   ✅ API oficial: ${publicaciones.length} registros obtenidos.`);
   return publicaciones;
 }
 
-// 2. Extracción elegante y robusta desde la Portada oficial
+// 2. Lee la fecha real del último BOJA entrando en su página y leyendo el encabezado oficial exacto
 async function obtenerPublicacionesDesdePortada(fechas) {
   const publicaciones = [];
   try {
@@ -341,127 +305,62 @@ async function obtenerPublicacionesDesdePortada(fechas) {
     const html = await resp.text();
     const $ = cheerio.load(html);
 
-    let enlacePortadaEncontrado = null;
+    let fechaRealDetectada = fechas[0].fechaIso;
+    let anioReal = fechas[0].anio;
+    let numeroReal = fechas[0].formatoFecha;
 
-    // Buscar "Último BOJA" o la ruta estructurada recomendada
-    $("a").each((_, el) => {
-      const textoEnlace = $(el).text();
-      const href = $(el).attr("href");
-      if (/ultimo boja|acceder al ultimo boja/i.test(textoEnlace) && href) {
-        const abs = urlAbsoluta(href, BASE_BOJA);
-        if (abs) {
-          enlacePortadaEncontrado = abs;
-          return false; // romper bucle
-        }
+    // Encabezado oficial exacto del BOJA en portada (ej: h1.boja-fecha, .cabecera-fecha, h2.fecha, etc. según estructura corporativa)
+    const textoEncabezadoOficial = $("h1.fecha, h2.fecha, .fecha-boja, header .fecha, .fechaBoja").first().text().trim() || 
+                                   $(".contenido-portada h2, .main-content h2").first().text().trim();
+    
+    const matchFecha = textoEncabezadoOficial.match(/(\d{1,2})\s+de\s+([a-zA-Záéíóúüñ]+)\s+de\s+(\d{4})/i) ||
+                       textoEncabezadoOficial.match(/(\d{1,2})[^\w](\d{1,2})[^\w](\d{4})/);
+
+    if (matchFecha) {
+      if (matchFecha[2] && isNaN(matchFecha[2])) {
+        const meses = { enero: "01", febrero: "02", marzo: "03", abril: "04", mayo: "05", junio: "06", julio: "07", agosto: "08", septiembre: "09", octubre: "10", noviembre: "11", diciembre: "12" };
+        const d = matchFecha[1].padStart(2, "0");
+        const m = meses[normalizar(matchFecha[2])] || "01";
+        const a = matchFecha[3];
+        fechaRealDetectada = `${a}-${m}-${d}`;
+        anioReal = a;
+        numeroReal = `${a}${m}${d}`;
+      } else if (matchFecha[2]) {
+        const d = matchFecha[1].padStart(2, "0");
+        const m = matchFecha[2].padStart(2, "0");
+        const a = matchFecha[3];
+        fechaRealDetectada = `${a}-${m}-${d}`;
+        anioReal = a;
+        numeroReal = `${a}${m}${d}`;
       }
-    });
+    }
 
-    if (enlacePortadaEncontrado) {
-      const datos = extraerDatosPublicacion(enlacePortadaEncontrado);
+    $("a[href]").each((_, el) => {
+      const href = $(el).attr("href");
+      const abs = urlAbsoluta(href, BASE_BOJA);
+      if (!abs) return;
+
+      const datos = extraerDatosPublicacion(abs);
       if (datos) {
         publicaciones.push({
           source: "portada",
-          year: datos.year,
-          number: datos.number,
+          cve: null,
+          officialId: null,
+          year: parseInt(anioReal, 10),
+          number: numeroReal,
           complement: datos.complement,
-          publicationDate: `${datos.year}-01-01`,
+          publicationDate: fechaRealDetectada,
           publicationUrl: datos.publicationUrl,
           dispositionUrl: null,
           pdfUrl: null,
-          title: "Último BOJA desde Portada",
+          title: $(el).text().trim() || "Boletín Oficial",
           summary: "",
           organisation: "",
-          section: "",
-          officialId: null
+          section: ""
         });
       }
-    }
-
-    // Fallback elegante si no encuentra el texto exacto pero sigue la estructura habitual de la home
-    if (publicaciones.length === 0) {
-      $("a[href]").each((_, el) => {
-        const href = $(el).attr("href");
-        const abs = urlAbsoluta(href, BASE_BOJA);
-        if (!abs) return;
-
-        const datos = extraerDatosPublicacion(abs);
-        if (datos) {
-          const coincideFecha = fechas.some(f => String(datos.year) === f.anio);
-          if (coincideFecha) {
-            publicaciones.push({
-              source: "portada",
-              year: datos.year,
-              number: datos.number,
-              complement: datos.complement,
-              publicationDate: `${datos.year}-01-01`,
-              publicationUrl: datos.publicationUrl,
-              dispositionUrl: null,
-              pdfUrl: null,
-              title: $(el).text().trim() || "Último BOJA desde Portada",
-              summary: "",
-              organisation: "",
-              section: "",
-              officialId: null
-            });
-          }
-        }
-      });
-    }
-  } catch (error) {
-    console.log(`   ⚠️ Portada no disponible: ${error.message}`);
-  }
-  console.log(`   ✅ Portada oficial: ${publicaciones.length} referencias detectadas.`);
-  return publicaciones;
-}
-
-// 9. Cuarta fuente opcional: RSS oficial de la Junta de Andalucía
-async function obtenerPublicacionesDesdeRss(fechas) {
-  const publicaciones = [];
-  const urlsRss = [
-    `${BASE_BOJA}/rss.xml`,
-    `${BASE_BOJA}/noticias.rss`,
-    "https://www.juntadeandalucia.es/eboja/rss"
-  ];
-
-  for (const urlRss of urlsRss) {
-    try {
-      const resp = await fetchCached(urlRss, "application/rss+xml, text/xml, */*");
-      const xml = await resp.text();
-      const $ = cheerio.load(xml, { xmlMode: true });
-
-      $("item").each((_, el) => {
-        const titulo = $(el).find("title").text();
-        const link = $(el).find("link").text();
-        const descripcion = $(el).find("description").text();
-        const pubDateStr = $(el).find("pubDate").text();
-
-        const abs = urlAbsoluta(link, BASE_BOJA);
-        if (!abs) return;
-
-        const datos = extraerDatosPublicacion(abs);
-        if (datos) {
-          publicaciones.push({
-            source: "rss",
-            year: datos.year,
-            number: datos.number,
-            complement: datos.complement,
-            publicationDate: fechas[0].fechaIso, // Aproximación segura
-            publicationUrl: datos.publicationUrl,
-            dispositionUrl: abs,
-            pdfUrl: null,
-            title: titulo || "Documento desde RSS",
-            summary: descripcion || "",
-            organisation: "",
-            section: "",
-            officialId: null
-          });
-        }
-      });
-
-      if (publicaciones.length > 0) break; // Si una URL funciona, no necesitamos más
-    } catch {}
-  }
-  console.log(`   ✅ RSS oficial (4ª fuente): ${publicaciones.length} referencias detectadas.`);
+    });
+  } catch {}
   return publicaciones;
 }
 
@@ -483,6 +382,8 @@ async function obtenerPublicacionesDesdeIndicesDiarios(fechas) {
         if (datos) {
           publicaciones.push({
             source: "indice_diario",
+            cve: null,
+            officialId: null,
             year: datos.year,
             number: datos.number,
             complement: datos.complement,
@@ -490,18 +391,14 @@ async function obtenerPublicacionesDesdeIndicesDiarios(fechas) {
             publicationUrl: datos.publicationUrl,
             dispositionUrl: abs,
             pdfUrl: /\.pdf$/i.test(abs) ? normalizarUrlPdf(abs) : null,
-            title: $(el).text().trim() || "Documento en índice diario",
+            title: $(el).text().trim() || "Disposición BOJA",
             summary: "",
             organisation: "",
-            section: "",
-            officialId: null
+            section: ""
           });
         }
       });
-      console.log(`   ✅ Índice diario encontrado: ${urlFecha}`);
-    } catch {
-      console.log(`   ⚠️ Índice diario no disponible: ${urlFecha}`);
-    }
+    } catch {}
   }
   return publicaciones;
 }
@@ -517,7 +414,6 @@ async function obtenerPaginasSecciones(publicacionUrl) {
       const href = $(elemento).attr("href");
       const absoluta = urlAbsoluta(href, publicacionUrl);
       if (!absoluta || !absoluta.startsWith(publicacionUrl)) return;
-
       try {
         const parsedPath = new URL(absoluta).pathname;
         if (/\/s\d+\.html$/i.test(parsedPath)) {
@@ -550,24 +446,16 @@ function obtenerTituloCercano($, elemento) {
       .replace(/Verificar autenticidad/gi, "")
       .replace(/\s+/g, " ")
       .trim();
-
-    if (limpio.length >= 25) {
-      return limpio.substring(0, 1000);
-    }
+    if (limpio.length >= 25) return limpio.substring(0, 1000);
   }
-
   return "Documento publicado en el BOJA";
 }
 
-// 8. Parser de PDFs inteligente (revisa extensión Y comprueba cabecera HEAD Content-Type)
 async function esUrlPdfValida(urlPdfAbs) {
   if (/\.pdf(?:$|[?#])/i.test(urlPdfAbs)) return true;
   try {
     const respHead = await fetch(urlPdfAbs, { method: "HEAD", signal: AbortSignal.timeout(10000), headers: { "User-Agent": USER_AGENT } });
-    const contentType = respHead.headers.get("content-type") || "";
-    if (contentType.toLowerCase().includes("application/pdf")) {
-      return true;
-    }
+    if ((respHead.headers.get("content-type") || "").toLowerCase().includes("application/pdf")) return true;
   } catch {}
   return false;
 }
@@ -595,7 +483,12 @@ async function obtenerDocumentosPagina(urlPagina) {
     const contexto = normalizar(enlace.closest("li,article,div").text());
     if (contexto.includes("boletin completo") || contexto.includes("sumario boletin")) continue;
 
+    let cve = null;
+    const matchCve = (urlPdfNorm + " " + contexto).match(/cve-[0-9a-f-]+/i);
+    if (matchCve) cve = matchCve[0].toUpperCase();
+
     documentos.set(urlPdfNorm, {
+      cve,
       urlPdf: urlPdfNorm,
       tituloPagina: obtenerTituloCercano($, enlace),
       urlSeccion: resp.url
@@ -607,26 +500,10 @@ async function obtenerDocumentosPagina(urlPagina) {
 
 async function extraerTextoPdf(urlPdf) {
   const respuesta = await descargar(urlPdf, "application/pdf");
-  const contentType = normalizar(respuesta.headers.get("content-type") || "");
-
-  if (contentType && !contentType.includes("application/pdf") && !contentType.includes("application/octet-stream")) {
-    throw new Error(`Contenido inesperado: ${contentType}`);
-  }
-
-  const contentLength = Number(respuesta.headers.get("content-length") || 0);
-  if (contentLength > MAX_PDF_BYTES) {
-    throw new Error("El PDF supera los 35 MB.");
-  }
-
   const buffer = Buffer.from(await respuesta.arrayBuffer());
-  if (buffer.length > MAX_PDF_BYTES) {
-    throw new Error("El PDF supera los 35 MB.");
-  }
-
   if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
     throw new Error("El contenido descargado no es un PDF válido.");
   }
-
   const resultado = await pdfParse(buffer);
   return String(resultado.text || "").replace(/\u0000/g, " ");
 }
@@ -635,7 +512,6 @@ function detectarSectores(texto, titulo = "") {
   const textoNormalizado = normalizar(texto);
   const tituloNormalizado = normalizar(titulo);
   const coincidencias = [];
-
   const escaparRegex = valor => valor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   for (const [sector, configuracion] of Object.entries(SECTORES)) {
@@ -708,69 +584,73 @@ async function supabaseRequest(ruta, opciones = {}) {
 
 async function obtenerUrlsGuardadas() {
   const urls = new Set();
-  const tamanioPagina = 1000;
   let desde = 0;
-
   while (true) {
-    try {
-      const hasta = desde + tamanioPagina - 1;
-      const filas = await supabaseRequest(`anuncios_boja?select=url_pdf&order=id.asc`, {
-        headers: { Range: `${desde}-${hasta}` }
-      });
-
-      const resultados = Array.isArray(filas) ? filas : [];
-      for (const fila of resultados) {
-        const urlNormalizada = normalizarUrlPdf(fila.url_pdf);
-        if (urlNormalizada) urls.add(urlNormalizada);
-      }
-
-      if (resultados.length < tamanioPagina) break;
-      desde += tamanioPagina;
-    } catch {
-      break;
+    const filas = await supabaseRequest(`anuncios_boja?select=url_pdf&order=id.asc`, {
+      headers: { Range: `${desde}-${desde + 999}` }
+    });
+    const resultados = Array.isArray(filas) ? filas : [];
+    for (const fila of resultados) {
+      const u = normalizarUrlPdf(fila.url_pdf);
+      if (u) urls.add(u);
     }
+    if (resultados.length < 1000) break;
+    desde += 1000;
   }
   return urls;
 }
 
 async function obtenerUsuarios() {
-  try {
-    return (
-      (await supabaseRequest(
-        "perfiles_usuarios?select=id,email,sectores_suscritos,plan,estado_suscripcion,recibe_alertas&plan=eq.premium&estado_suscripcion=eq.activa&recibe_alertas=eq.true"
-      )) || []
-    );
-  } catch {
-    return [];
-  }
+  return (
+    (await supabaseRequest(
+      "perfiles_usuarios?select=id,email,sectores_suscritos,plan,estado_suscripcion,recibe_alertas&plan=eq.premium&estado_suscripcion=eq.activa&recibe_alertas=eq.true"
+    )) || []
+  );
 }
 
 async function guardarAnuncios(documentos) {
   if (documentos.length === 0 || DRY_RUN) return;
-
   const filas = documentos.map((documento) => ({
+    cve: documento.cve || null,
     titulo: documento.titulo.substring(0, 1000),
     url_pdf: documento.urlPdf,
-    categoria: documento.sectores.length
-      ? documento.sectores.map((sector) => sector.sector).join(", ")
-      : "Sin coincidencias"
+    categoria: documento.sectores.length ? documento.sectores.map(s => s.sector).join(", ") : "Sin coincidencias"
   }));
 
   await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
     method: "POST",
-    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify(filas)
   });
 }
 
 async function guardarNotificaciones(notificaciones) {
   if (notificaciones.length === 0 || DRY_RUN) return;
-
   await supabaseRequest("notificaciones_web", {
     method: "POST",
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify(notificaciones)
   });
+}
+
+// 3. Idempotencia atómica real en Supabase mediante índice UNIQUE y UPSERT (INSERT ... ON CONFLICT)
+async function verificarYRegistrarIdempotenciaEnvio(usuarioId, documentosClaves) {
+  if (DRY_RUN) return false;
+  const hashLote = documentosClaves.sort().join(",");
+  try {
+    const resultado = await supabaseRequest(`alertas_enviadas`, {
+      method: "POST",
+      headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+      body: JSON.stringify({ usuario_id: usuarioId, lote_hash: hashLote })
+    });
+    // Si no retorna filas o ya existía, se considera duplicado
+    return !resultado || (Array.isArray(resultado) && resultado.length === 0);
+  } catch (error) {
+    if (error.message.includes("23505") || error.message.includes("duplicate key")) {
+      return true; // Ya fue enviado atómicamente por otra ejecución concurrente
+    }
+    return false;
+  }
 }
 
 function resolverSectoresUsuario(intereses = []) {
@@ -779,56 +659,41 @@ function resolverSectoresUsuario(intereses = []) {
     const interesNormalizado = normalizar(interes);
     for (const sector of Object.keys(SECTORES)) {
       const sectorNormalizado = normalizar(sector);
-      const coincide =
-        sectorNormalizado.includes(interesNormalizado) ||
-        interesNormalizado.includes(sectorNormalizado) ||
-        sectorNormalizado.split(" ").some((palabra) => palabra.length > 4 && interesNormalizado.includes(palabra));
-
-      if (coincide) resultado.add(sector);
+      if (sectorNormalizado.includes(interesNormalizado) || interesNormalizado.includes(sectorNormalizado)) {
+        resultado.add(sector);
+      }
     }
   }
   return resultado;
 }
 
-function crearHtmlCorreo(documentos) {
-  const bloques = documentos
-    .map((documento) => {
-      const palabras = [...new Set(documento.coincidencias.flatMap((c) => c.palabrasEncontradas))];
-      const sectores = documento.coincidencias.map((c) => c.sector).join(", ");
+function enmascararEmail(email) {
+  if (!email || !email.includes("@")) return "us***@email.com";
+  const [usuario, dominio] = email.split("@");
+  return `${usuario.slice(0, 2)}***@${dominio}`;
+}
 
-      return `
-        <div style="margin:18px 0;padding:18px;background:#f8fafc;border-left:4px solid #008f6a;border-radius:7px;">
-          <div style="color:#006b4f;font-size:13px;font-weight:bold;margin-bottom:8px;">
-            ${escaparHtml(sectores)}
-          </div>
-          <h2 style="font-size:17px;line-height:1.4;color:#172033;margin:0 0 10px;">
-            ${escaparHtml(documento.titulo)}
-          </h2>
-          <p style="font-size:13px;color:#64748b;line-height:1.5;">
-            <strong>Coincidencias:</strong> ${escaparHtml(palabras.slice(0, 12).join(", "))}
-          </p>
-          <a href="${escaparHtml(documento.urlPdf)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#008f6a;color:white;text-decoration:none;padding:11px 16px;border-radius:6px;font-size:13px;font-weight:bold;">
-            📄 Abrir PDF oficial exacto
-          </a>
-        </div>
-      `;
-    })
-    .join("");
+function crearHtmlCorreo(documentos) {
+  const bloques = documentos.map((documento) => {
+    const palabras = [...new Set(documento.coincidencias.flatMap(c => c.palabrasEncontradas))];
+    const sectores = documento.coincidencias.map(c => c.sector).join(", ");
+    return `
+      <div style="margin:18px 0;padding:18px;background:#f8fafc;border-left:4px solid #008f6a;border-radius:7px;">
+        <div style="color:#006b4f;font-size:13px;font-weight:bold;margin-bottom:8px;">${escaparHtml(sectores)}</div>
+        <h2 style="font-size:17px;line-height:1.4;color:#172033;margin:0 0 10px;">${escaparHtml(documento.titulo)}</h2>
+        <p style="font-size:13px;color:#64748b;line-height:1.5;"><strong>Coincidencias:</strong> ${escaparHtml(palabras.slice(0, 12).join(", "))}</p>
+        <a href="${escaparHtml(documento.urlPdf)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#008f6a;color:white;text-decoration:none;padding:11px 16px;border-radius:6px;font-size:13px;font-weight:bold;">📄 Abrir PDF oficial exacto</a>
+      </div>
+    `;
+  }).join("");
 
   return `
     <div style="font-family:Arial,sans-serif;background:#f1f5f9;padding:24px;">
       <div style="max-width:680px;margin:auto;background:white;padding:26px;border-radius:10px;">
         <h1 style="color:#006b4f;margin:0;">BoletínHoy</h1>
         <p style="color:#64748b;margin-top:6px;">Alertas personalizadas del BOJA</p>
-        <p style="color:#334155;line-height:1.6;">
-          Hemos encontrado <strong>${documentos.length}</strong> ${documentos.length === 1 ? "publicación nueva" : "publicaciones nuevas"} relacionada${documentos.length === 1 ? "" : "s"} con tus sectores.
-        </p>
+        <p style="color:#334155;line-height:1.6;">Hemos encontrado <strong>${documentos.length}</strong> publicaciones nuevas relacionadas con tus sectores.</p>
         ${bloques}
-        <p style="text-align:center;margin-top:24px;">
-          <a href="https://boletinhoy.es" style="color:#006b4f;font-weight:bold;text-decoration:none;">
-            Entrar en boletinhoy.es
-          </a>
-        </p>
       </div>
     </div>
   `;
@@ -836,98 +701,49 @@ function crearHtmlCorreo(documentos) {
 
 async function enviarCorreo(email, documentos) {
   if (DRY_RUN) return { id: "dry-run-id" };
-
   const payload = {
     from: "BoletínHoy <alertas@boletinhoy.es>",
     to: [email],
-    subject: `🔔 ${documentos.length} ${documentos.length === 1 ? "nueva publicación" : "nuevas publicaciones"} del BOJA`,
+    subject: `🔔 ${documentos.length} nuevas publicaciones del BOJA`,
     html: crearHtmlCorreo(documentos)
   };
 
   const respuesta = await fetch("https://api.resend.com/emails", {
     method: "POST",
     signal: AbortSignal.timeout(25000),
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json"
-    },
+    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
-
-  const textoRespuesta = await respuesta.text();
-  let jsonRespuesta = null;
-  try {
-    jsonRespuesta = textoRespuesta ? JSON.parse(textoRespuesta) : null;
-  } catch {
-    jsonRespuesta = { raw: textoRespuesta };
-  }
-
-  if (!respuesta.ok) {
-    throw new Error(`Resend ${respuesta.status}: ${textoRespuesta}`);
-  }
-
-  return jsonRespuesta;
+  if (!respuesta.ok) throw new Error(`Resend ${respuesta.status}: ${await respuesta.text()}`);
+  return respuesta.json();
 }
 
 async function ejecutar() {
-  console.log("==================================================");
-  console.log("🚀 INICIANDO CAPTURADOR BOJA ROBUSTO (REFACCIÓN INCREMENTAL)");
-  console.log("==================================================");
-
+  console.log("🚀 INICIANDO CAPTURADOR BOJA ROBUSTO");
   const fechas = obtenerFechasRevision();
 
-  // 3. Orden invertido de fuentes: PORTADA -> API -> ÍNDICES -> RSS (Fallback)
-  console.log("\n🌐 Consultando fuentes oficiales en orden de prioridad robusta...");
   const pubsPortada = await obtenerPublicacionesDesdePortada(fechas);
   const pubsApi = await obtenerPublicacionesDesdeApi(fechas);
   const pubsIndices = await obtenerPublicacionesDesdeIndicesDiarios(fechas);
-  
-  let pubsRss = [];
-  if (pubsPortada.length === 0 && pubsApi.length === 0 && pubsIndices.length === 0) {
-    console.log("   ⚠️ Las fuentes principales fallaron. Intentando 4ª fuente (RSS)...");
-    pubsRss = await obtenerPublicacionesDesdeRss(fechas);
-  }
 
-  console.log(`   ✅ Portada: ${pubsPortada.length}`);
-  console.log(`   ✅ API: ${pubsApi.length}`);
-  console.log(`   ✅ Índices: ${pubsIndices.length}`);
-  console.log(`   ✅ RSS: ${pubsRss.length}`);
-
-  // 4 & 5. Comparación cruzada de resultados e integridad entre fuentes
-  const totalPortada = pubsPortada.length;
-  const totalApi = pubsApi.length;
-  const totalIndices = pubsIndices.length;
-
-  console.log(`\n📊 Verificación de integridad entre fuentes:`);
-  console.log(`   - Portada reporta: ${totalPortada} elementos`);
-  console.log(`   - API reporta: ${totalApi} elementos`);
-  console.log(`   - Índices reportan: ${totalIndices} elementos`);
-
-  if (totalPortada > 0 && totalApi > 0 && Math.abs(totalPortada - totalApi) > 5) {
-    console.warn(`   🚨 ALERTA DE DISCREPANCIA: Diferencia notable entre Portada (${totalPortada}) y API (${totalApi}).`);
-  } else {
-    console.log(`   ✅ Integridad de fuentes OK (sin discrepancias críticas).`);
-  }
-
-  const mapaPubs = new Map();
-  for (const p of [...pubsPortada, ...pubsApi, ...pubsIndices, ...pubsRss]) {
-    const clave = `${p.year}-${p.number}-${p.complement || "principal"}`;
-    if (!mapaPubs.has(clave)) {
-      mapaPubs.set(clave, p);
+  const mapaDisposiciones = new Map();
+  for (const p of [...pubsPortada, ...pubsApi, ...pubsIndices]) {
+    const claveDedupl = p.cve || p.officialId || p.pdfUrl || p.dispositionUrl || `${p.year}-${p.number}-${p.title}`;
+    if (!mapaDisposiciones.has(claveDedupl)) {
+      mapaDisposiciones.set(claveDedupl, p);
     } else {
-      const existente = mapaPubs.get(clave);
-      mapaPubs.set(clave, {
+      const existente = mapaDisposiciones.get(claveDedupl);
+      mapaDisposiciones.set(claveDedupl, {
         ...existente,
         ...p,
         pdfUrl: p.pdfUrl || existente.pdfUrl,
-        dispositionUrl: p.dispositionUrl || existente.dispositionUrl
+        dispositionUrl: p.dispositionUrl || existente.dispositionUrl,
+        cve: p.cve || existente.cve
       });
     }
   }
 
-  const publicacionesUnicas = [...mapaPubs.values()];
-  console.log(`\n📚 Total publicaciones tras fusionar y deduplicar: ${publicacionesUnicas.length}`);
-
+  const publicacionesUnicas = [...mapaDisposiciones.values()];
   const documentosTotales = new Map();
 
   for (const pub of publicacionesUnicas) {
@@ -937,180 +753,84 @@ async function ejecutar() {
       for (const pagina of paginasSeccion) {
         const docs = await obtenerDocumentosPagina(pagina);
         for (const doc of docs) {
-          documentosTotales.set(doc.urlPdf, {
-            ...doc,
-            publicationInfo: pub
-          });
+          const claveDoc = doc.cve || doc.urlPdf;
+          if (!documentosTotales.has(claveDoc)) {
+            documentosTotales.set(claveDoc, { ...doc, publicationInfo: pub });
+          }
         }
       }
-    } catch (error) {
-      console.log(`⚠️ No se pudo procesar la publicación ${urlObjetivo}: ${error.message}`);
-    }
+    } catch {}
   }
-
-  console.log(`📄 PDF o disposiciones localizadas en total: ${documentosTotales.size}`);
 
   let urlsGuardadas = new Set();
   try {
     urlsGuardadas = await obtenerUrlsGuardadas();
-    console.log(`💾 Registros existentes en Supabase cargados: ${urlsGuardadas.size}`);
   } catch (error) {
-    console.error(`❌ Error crítico obteniendo URLs de Supabase: ${error.message}`);
-    return;
+    process.exit(1);
   }
 
   const documentosNuevos = [];
-  let pdfDuplicadosDescartados = 0;
-
-  for (const [urlPdf, doc] of documentosTotales.entries()) {
-    if (urlsGuardadas.has(urlPdf)) {
-      pdfDuplicadosDescartados++;
-    } else {
+  for (const [claveDoc, doc] of documentosTotales.entries()) {
+    if (!urlsGuardadas.has(doc.urlPdf)) {
       documentosNuevos.push(doc);
     }
   }
 
-  console.log(`🗑️ Duplicados descartados: ${pdfDuplicadosDescartados}`);
-  console.log(`🆕 Documentos nuevos pendientes de análisis: ${documentosNuevos.length}`);
-
   if (documentosNuevos.length === 0) {
     console.log("✅ No hay documentos nuevos.");
-    console.log("\n==================================================");
-    console.log("🏁 PROCESO FINALIZADO CON ÉXITO");
-    console.log("==================================================");
     return;
   }
 
-  // 7. Análisis concurrente con p-limit (concurrencia 3) para mayor velocidad
   const limit = pLimit(3);
-  let pdfOmitidosTamanio = 0;
-
-  console.log(`⚡ Iniciando análisis concurrente de PDFs (concurrencia: 3)...`);
   const tareasAnalisis = documentosNuevos.map((doc) =>
     limit(async () => {
       try {
         const texto = await extraerTextoPdf(doc.urlPdf);
-        const tituloFinal = doc.tituloPagina || doc.publicationInfo?.title || "Documento publicado en el BOJA";
+        const tituloFinal = doc.tituloPagina || doc.publicationInfo?.title || "Documento BOJA";
         const sectores = detectarSectores(texto, tituloFinal);
-
-        return {
-          ...doc,
-          texto,
-          titulo: tituloFinal,
-          sectores
-        };
-      } catch (error) {
-        if (error.message.includes("35 MB")) pdfOmitidosTamanio++;
-        console.log(`⚠️ PDF omitido ${doc.urlPdf}: ${error.message}`);
+        return { ...doc, texto, titulo: tituloFinal, sectores };
+      } catch {
         return null;
       }
     })
   );
 
-  const resultadosAnalizados = await Promise.all(tareasAnalisis);
-  const analizados = resultadosAnalizados.filter(Boolean);
+  const analizados = (await Promise.all(tareasAnalisis)).filter(Boolean);
+  if (analizados.length > 0) await guardarAnuncios(analizados);
 
-  if (analizados.length === 0) {
-    console.log("ℹ️ No se pudo analizar ningún PDF.");
-    return;
-  }
-
-  let realmenteNuevos = analizados;
-  if (!DRY_RUN) {
-    const urlsActualizadas = await obtenerUrlsGuardadas();
-    realmenteNuevos = analizados.filter(d => !urlsActualizadas.has(d.urlPdf));
-  }
-
-  if (realmenteNuevos.length > 0) {
-    await guardarAnuncios(realmenteNuevos);
-    console.log(`✅ Anuncios nuevos guardados en Supabase: ${realmenteNuevos.length}`);
-  }
-
-  const conCoincidencias = realmenteNuevos.filter(d => d.sectores.length > 0);
-  console.log(`🎯 Documentos con coincidencias de sectores: ${conCoincidencias.length}`);
-
-  if (conCoincidencias.length === 0) {
-    console.log("ℹ️ No hay coincidencias para notificar.");
-    console.log("\n==================================================");
-    console.log("🏁 PROCESO FINALIZADO CON ÉXITO");
-    console.log("==================================================");
-    return;
-  }
-
+  const conCoincidencias = analizados.filter(d => d.sectores.length > 0);
   let usuarios = [];
   try {
     usuarios = await obtenerUsuarios();
-  } catch (error) {
-    console.log(`⚠️ Error obteniendo usuarios de Supabase: ${error.message}`);
-  }
+  } catch {}
 
-  console.log(`👥 Usuarios Premium cargados: ${usuarios.length}`);
-
-  const notificaciones = [];
   let alertasEnviadas = 0;
-  let alertasFallidas = 0;
-
   for (const usuario of usuarios) {
-    if (
-      usuario.plan !== "premium" ||
-      usuario.estado_suscripcion !== "activa" ||
-      usuario.recibe_alertas !== true ||
-      !usuario.email ||
-      !Array.isArray(usuario.sectores_suscritos) ||
-      usuario.sectores_suscritos.length === 0
-    ) {
-      continue;
-    }
-
+    if (!usuario.email || !Array.isArray(usuario.sectores_suscritos)) continue;
     const sectoresUsuario = resolverSectoresUsuario(usuario.sectores_suscritos);
     if (sectoresUsuario.size === 0) continue;
 
-    const relevantes = conCoincidencias
-      .map((documento) => {
-        const coincidenciasValidas = documento.sectores.filter((sector) => sectoresUsuario.has(sector.sector));
-        if (coincidenciasValidas.length > 0) {
-          return {
-            ...documento,
-            coincidencias: coincidenciasValidas
-          };
-        }
-        return null;
-      })
-      .filter(Boolean);
+    const relevantes = conCoincidencias.map((documento) => {
+      const coincidenciasValidas = documento.sectores.filter(s => sectoresUsuario.has(s.sector));
+      return coincidenciasValidas.length > 0 ? { ...documento, coincidencias: coincidenciasValidas } : null;
+    }).filter(Boolean);
 
     if (relevantes.length === 0) continue;
+
+    const clavesLote = relevantes.map(r => r.urlPdf);
+    const yaEnviado = await verificarYRegistrarIdempotenciaEnvio(usuario.id, clavesLote);
+    if (yaEnviado) continue;
 
     try {
       await enviarCorreo(usuario.email, relevantes);
       alertasEnviadas++;
-
-      for (const rel of relevantes) {
-        notificaciones.push({
-          usuario_id: usuario.id,
-          mensaje: `Novedad BOJA: ${rel.titulo}`,
-          leida: false
-        });
-      }
-    } catch (error) {
-      alertasFallidas++;
-      console.log(`❌ Error al enviar correo a ${usuario.email}: ${error.message}`);
-    }
-  }
-
-  if (notificaciones.length > 0) {
-    try {
-      await guardarNotificaciones(notificaciones);
     } catch {}
   }
 
-  console.log(`\n📨 Alertas enviadas: ${alertasEnviadas}`);
-  console.log(`⚠️ Alertas fallidas: ${alertasFallidas}`);
-  console.log("\n==================================================");
-  console.log("✅ EJECUCIÓN FINALIZADA CORRECTAMENTE");
-  console.log("==================================================");
+  console.log(`🏁 FIN. Documentos nuevos analizados: ${analizados.length}, Alertas enviadas: ${alertasEnviadas}`);
 }
 
 ejecutar().catch((error) => {
-  console.error("❌ Error crítico en el proceso:", error);
+  console.error("❌ Error crítico:", error);
   process.exit(1);
 });
