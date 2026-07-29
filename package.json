@@ -1,17 +1,18 @@
 {
-  "name": "capturador-boja",[cite: 2]
-  "version": "1.0.0",[cite: 2]
-  "private": true,[cite: 2]
-  "description": "Capturador automático de documentos del BOJA",[cite: 2]
-  "main": "capturador.js",[cite: 2]
+  "name": "capturador-boja",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Capturador automático de documentos del BOJA",
+  "main": "capturador.js",
   "scripts": {
-    "start": "node capturador.js"[cite: 2]
+    "start": "node capturador.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.56.0",[cite: 2]
-    "cheerio": "^1.0.0",[cite: 2]
-    "feedparser": "^2.29.0",
-    "p-limit": "^4.0.0",
-    "pdf-parse": "1.1.1"[cite: 2]
+    "cheerio": "^1.1.2",
+    "p-limit": "3.1.0",
+    "pdf-parse": "1.1.1"
   }
 }
