@@ -2,15 +2,23 @@ name: Automatizador BOJA
 
 on:
   schedule:
-    # De lunes a viernes, cada 15 minutos entre las 08:00 y las 15:00 hora española peninsular en verano
+    # GitHub Actions usa UTC.
+    # 06:00-13:45 UTC = 08:00-15:45 en verano (España peninsular).
     - cron: '0,15,30,45 6-13 * * 1-5'
 
-  # Permite ejecutarlo manualmente desde GitHub
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capturador-boja
+  cancel-in-progress: false
 
 jobs:
   verificar-boja:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Clonar repositorio
@@ -20,14 +28,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Instalar dependencias
         run: npm install
 
-      - name: Ejecutar script de verificación
+      - name: Ejecutar capturador BOJA
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-
         run: node capturador.js
