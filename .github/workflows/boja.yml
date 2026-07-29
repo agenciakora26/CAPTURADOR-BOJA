@@ -22,7 +22,7 @@ jobs:
           node-version: '20'
 
       - name: Instalar dependencias
-        run: npm install @supabase/supabase-js cheerio pdf-parse@1.1.1
+        run: npm install
 
       - name: Ejecutar script de verificación
         env:
