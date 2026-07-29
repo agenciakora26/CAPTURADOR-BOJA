@@ -1,31 +1,42 @@
-name: Automatizador BOJA[cite: 3]
+name: Automatizador BOJA
 
 on:
   schedule:
-    - cron: '0,15,30,45 6-13 * * 1-5'
+    # GitHub Actions usa UTC
+    # 06:00-13:45 UTC = 08:00-15:45 (horario de verano en España)
+    - cron: "0,15,30,45 6-13 * * 1-5"
 
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capturador-boja
+  cancel-in-progress: false
 
 jobs:
   verificar-boja:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - name: Clonar repositorio[cite: 3]
-        uses: actions/checkout@v4[cite: 3]
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
 
-      - name: Configurar Node.js[cite: 3]
-        uses: actions/setup-node@v4[cite: 3]
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '20'[cite: 3]
+          node-version: "20"
+          cache: "npm"
 
-      - name: Instalar dependencias[cite: 3]
+      - name: Instalar dependencias
         run: npm install
 
-      - name: Ejecutar script de verificación[cite: 3]
+      - name: Ejecutar capturador
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-
-        run: node capturador.js[cite: 3]
+          TZ: Europe/Madrid
+        run: node capturador.js
