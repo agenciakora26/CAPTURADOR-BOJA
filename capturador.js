@@ -1,6 +1,8 @@
 const cheerio = require("cheerio");
 const pdfParse = require("pdf-parse");
 const pLimit = require("p-limit");
+const FeedParser = require("feedparser");
+const { Readable } = require("stream");
 
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
   .replace(/\/rest\/v1\/?$/i, "")
@@ -10,8 +12,8 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const BASE_BOJA = "https://www.juntadeandalucia.es/eboja";
 const BASE_API_BOJA = "https://datos.juntadeandalucia.es/api/v0/boja";
+const RSS_BOJA = "https://www.juntadeandalucia.es/eboja/rss.xml";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0; +https://boletinhoy.es)";
-const MAX_PDF_BYTES = 35 * 1024 * 1024;
 
 const DRY_RUN = process.env.DRY_RUN === "true";
 const TARGET_DATE = process.env.TARGET_DATE || null;
@@ -21,7 +23,6 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !RESEND_API_KEY) {
   process.exit(1);
 }
 
-// 5. La caché solo debe describirse como válida dentro de una misma ejecución (Map local)
 const executionCache = new Map();
 
 async function fetchCached(url, accept = "*/*", intentos = 3) {
@@ -129,7 +130,6 @@ function escaparHtml(valor = "") {
     .replace(/'/g, "&#039;");
 }
 
-// 4. Conserva los parámetros necesarios de las URL PDF y elimina solo los utm_*
 function normalizarUrlPdf(url) {
   try {
     const parsed = new URL(url);
@@ -254,14 +254,65 @@ function extraerDatosPublicacion(url) {
   }
 }
 
-// 1. OpenAPI oficial del BOJA (/search con parámetro year y validación de respuesta)
+// Ingesta adicional mediante feedparser para RSS oficial del BOJA
+async function obtenerPublicacionesDesdeRss(fechas) {
+  const publicaciones = [];
+  try {
+    const resp = await fetch(RSS_BOJA, {
+      headers: { "User-Agent": USER_AGENT, Accept: "application/rss+xml, application/xml, text/xml" },
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!resp.ok) return publicaciones;
+
+    const feedparser = new FeedParser();
+    const stream = Readable.fromWeb(resp.body);
+
+    await new Promise((resolve) => {
+      stream.pipe(feedparser);
+      feedparser.on("error", () => resolve());
+      feedparser.on("end", () => resolve());
+      feedparser.on("readable", function () {
+        let item;
+        while ((item = this.read())) {
+          const fechaPub = item.date ? item.date.toISOString().substring(0, 10) : fechas[0].fechaIso;
+          const coincideFecha = fechas.some(f => fechaPub.includes(f.fechaIso));
+          if (!coincideFecha && fechas.length > 0) continue;
+
+          const urlDisp = item.link || null;
+          let urlPdf = null;
+          if (item.enclosures && item.enclosures.length > 0) {
+            urlPdf = item.enclosures[0].url;
+          }
+
+          publicaciones.push({
+            source: "rss",
+            cve: item.guid || null,
+            officialId: item.meta?.title || null,
+            year: new Date(fechaPub).getFullYear(),
+            number: fechaPub.replace(/-/g, ""),
+            publicationDate: fechaPub,
+            publicationUrl: urlDisp ? normalizarUrlPagina(urlDisp) : `${BASE_BOJA}.html`,
+            dispositionUrl: urlDisp ? normalizarUrlPagina(urlDisp) : null,
+            pdfUrl: urlPdf ? normalizarUrlPdf(urlPdf) : null,
+            title: item.title || "Documento BOJA RSS",
+            summary: item.summary || item.description || "",
+            organisation: item.author || "",
+            section: item.categories ? item.categories.join(", ") : ""
+          });
+        }
+      });
+    });
+  } catch {}
+  return publicaciones;
+}
+
 async function obtenerPublicacionesDesdeApi(fechas) {
   const publicaciones = [];
   const aniosProcesados = new Set(fechas.map(f => f.anio));
 
   for (const anio of aniosProcesados) {
     try {
-      const urlApi = `${BASE_API_BOJA}/search?year=${anio}`;
+      const urlApi = `${BASE_API_BOJA}/all?year=${anio}&format=json`;
       const resp = await fetchCached(urlApi, "application/json");
       const json = await resp.json();
       const items = Array.isArray(json) ? json : (json?.results || json?.items || json?.data || []);
@@ -297,7 +348,6 @@ async function obtenerPublicacionesDesdeApi(fechas) {
   return publicaciones;
 }
 
-// 2. Lee la fecha real del último BOJA entrando en su página y leyendo el encabezado oficial exacto
 async function obtenerPublicacionesDesdePortada(fechas) {
   const publicaciones = [];
   try {
@@ -309,10 +359,9 @@ async function obtenerPublicacionesDesdePortada(fechas) {
     let anioReal = fechas[0].anio;
     let numeroReal = fechas[0].formatoFecha;
 
-    // Encabezado oficial exacto del BOJA en portada (ej: h1.boja-fecha, .cabecera-fecha, h2.fecha, etc. según estructura corporativa)
-    const textoEncabezadoOficial = $("h1.fecha, h2.fecha, .fecha-boja, header .fecha, .fechaBoja").first().text().trim() || 
+    const textoEncabezadoOficial = $("h1.fecha, h2.fecha, .fecha-boja, header .fecha, .fechaBoja").first().text().trim() ||
                                    $(".contenido-portada h2, .main-content h2").first().text().trim();
-    
+
     const matchFecha = textoEncabezadoOficial.match(/(\d{1,2})\s+de\s+([a-zA-Záéíóúüñ]+)\s+de\s+(\d{4})/i) ||
                        textoEncabezadoOficial.match(/(\d{1,2})[^\w](\d{1,2})[^\w](\d{4})/);
 
@@ -633,7 +682,6 @@ async function guardarNotificaciones(notificaciones) {
   });
 }
 
-// 3. Idempotencia atómica real en Supabase mediante índice UNIQUE y UPSERT (INSERT ... ON CONFLICT)
 async function verificarYRegistrarIdempotenciaEnvio(usuarioId, documentosClaves) {
   if (DRY_RUN) return false;
   const hashLote = documentosClaves.sort().join(",");
@@ -643,11 +691,10 @@ async function verificarYRegistrarIdempotenciaEnvio(usuarioId, documentosClaves)
       headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
       body: JSON.stringify({ usuario_id: usuarioId, lote_hash: hashLote })
     });
-    // Si no retorna filas o ya existía, se considera duplicado
     return !resultado || (Array.isArray(resultado) && resultado.length === 0);
   } catch (error) {
     if (error.message.includes("23505") || error.message.includes("duplicate key")) {
-      return true; // Ya fue enviado atómicamente por otra ejecución concurrente
+      return true;
     }
     return false;
   }
@@ -665,12 +712,6 @@ function resolverSectoresUsuario(intereses = []) {
     }
   }
   return resultado;
-}
-
-function enmascararEmail(email) {
-  if (!email || !email.includes("@")) return "us***@email.com";
-  const [usuario, dominio] = email.split("@");
-  return `${usuario.slice(0, 2)}***@${dominio}`;
 }
 
 function crearHtmlCorreo(documentos) {
@@ -692,7 +733,7 @@ function crearHtmlCorreo(documentos) {
       <div style="max-width:680px;margin:auto;background:white;padding:26px;border-radius:10px;">
         <h1 style="color:#006b4f;margin:0;">BoletínHoy</h1>
         <p style="color:#64748b;margin-top:6px;">Alertas personalizadas del BOJA</p>
-        <p style="color:#334155;line-height:1.6;">Hemos encontrado <strong>${documentos.length}</strong> publicaciones nuevas relacionadas con tus sectores.</p>
+        <p style="color:#334155;line-height:1.6;">Hemos encontrado <strong>${documentos.length}</strong> publicaciones nuevas relacionadas contigo.</p>
         ${bloques}
       </div>
     </div>
@@ -719,15 +760,16 @@ async function enviarCorreo(email, documentos) {
 }
 
 async function ejecutar() {
-  console.log("🚀 INICIANDO CAPTURADOR BOJA ROBUSTO");
+  console.log("🚀 INICIANDO CAPTURADOR BOJA CON FEEDPARSER, SUPABASE Y RESEND");
   const fechas = obtenerFechasRevision();
 
+  const pubsRss = await obtenerPublicacionesDesdeRss(fechas);
   const pubsPortada = await obtenerPublicacionesDesdePortada(fechas);
   const pubsApi = await obtenerPublicacionesDesdeApi(fechas);
   const pubsIndices = await obtenerPublicacionesDesdeIndicesDiarios(fechas);
 
   const mapaDisposiciones = new Map();
-  for (const p of [...pubsPortada, ...pubsApi, ...pubsIndices]) {
+  for (const p of [...pubsRss, ...pubsPortada, ...pubsApi, ...pubsIndices]) {
     const claveDedupl = p.cve || p.officialId || p.pdfUrl || p.dispositionUrl || `${p.year}-${p.number}-${p.title}`;
     if (!mapaDisposiciones.has(claveDedupl)) {
       mapaDisposiciones.set(claveDedupl, p);
