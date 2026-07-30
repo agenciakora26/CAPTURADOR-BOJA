@@ -139,42 +139,38 @@ async function ejecutar() {
   const $ = cheerio.load(htmlPortada);
   let urlsPdfSumarios = [];
 
-  // Buscamos estrictamente enlaces de "Sumario Boletín", ignorando verificación u otros apartados
+  // Buscamos estrictamente el enlace cuyo texto visible sea "sumario boletín"
   $("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
     
-    if (href) {
-      const hrefLower = href.toLowerCase();
-      // Filtro estricto: debe ser un sumario de boletín y NO contener la palabra "verificacion"
-      if ((texto.includes("sumario boletín") || hrefLower.includes("boja")) && hrefLower.endsWith(".pdf") && !hrefLower.includes("verificacion")) {
-        let urlFinal = "";
-        
-        if (href.includes("/eboja/")) {
-          urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
+    if (href && texto.includes("sumario boletín")) {
+      let urlFinal = "";
+      
+      if (href.includes("/eboja/")) {
+        urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
+      } else {
+        const cleanHref = href.startsWith("/") ? href : `/${href}`;
+        const matchAnio = cleanHref.match(/BOJA(\d{2})-(\d+)-/);
+        if (matchAnio) {
+          const anioCompleto = `20${matchAnio[1]}`;
+          const numBoletin = parseInt(matchAnio[2], 10);
+          urlFinal = `https://www.juntadeandalucia.es/eboja/${anioCompleto}/${numBoletin}/${cleanHref.split('/').pop()}`;
         } else {
-          const cleanHref = href.startsWith("/") ? href : `/${href}`;
-          const matchAnio = cleanHref.match(/BOJA(\d{2})-(\d+)-/);
-          if (matchAnio) {
-            const anioCompleto = `20${matchAnio[1]}`;
-            const numBoletin = parseInt(matchAnio[2], 10);
-            urlFinal = `https://www.juntadeandalucia.es/eboja/${anioCompleto}/${numBoletin}/${cleanHref.split('/').pop()}`;
-          } else {
-            urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
-          }
+          urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
         }
+      }
 
-        if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
-          urlsPdfSumarios.push(urlFinal);
-        }
+      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
+        urlsPdfSumarios.push(urlFinal);
       }
     }
   });
 
-  console.log(`📄 PDFs de sumarios finales detectados:`, urlsPdfSumarios);
+  console.log(`📄 PDFs de sumarios oficiales detectados:`, urlsPdfSumarios);
 
   if (urlsPdfSumarios.length === 0) {
-    console.log("⚠️ No se ha podido extraer ningún PDF de los sumarios.");
+    console.log("⚠️ No se ha podido extraer ningún PDF de sumario boletín.");
     return;
   }
   urlPdfSumario = urlPdfSumario.trim().replace(/\s+/g, '%20');
