@@ -209,6 +209,7 @@ async function capturarBOJA() {
 // --- CAPTURA BOE MEJORADA ---
 // --- CAPTURA BOE DEFINITIVA ---
 // --- CAPTURA BOE CON ENLACES DIRECTOS A PDF ---
+// --- CAPTURA BOE DEFINITIVA (TEXTO PRECEDENTE) ---
 async function capturarBOE() {
   console.log("🚀 Iniciando captura del BOE desde la última edición...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
@@ -217,13 +218,13 @@ async function capturarBOE() {
   try {
     const res = await fetch(urlBoe, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
     if (!res.ok) {
-      console.log("⚠️ No se pudo acceder a la portada del BOE. Código HTTP:", res.status);
+      console.log("⚠️ No se pudo acceder a la portada del BOE.");
       return [];
     }
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Buscamos cualquier enlace que apunte al PDF oficial del BOE (ej: /pdfs/BOE-A-...)
+    // Buscamos todos los enlaces de la página que apunten a un PDF del BOE
     $("a").each((_, el) => {
       const href = $(el).attr("href");
       const textoEnlace = $(el).text().trim();
@@ -231,26 +232,33 @@ async function capturarBOE() {
       if (href && (href.includes("/pdfs/BOE-A-") || textoEnlace.includes("PDF"))) {
         let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
 
-        // Buscamos el contenedor principal (párrafo o bloque) donde reside la disposición
-        const contenedor = $(el).closest("p, div");
+        // Buscamos el bloque contenedor principal y extraemos todo su texto visible quitando el enlace
+        const contenedor = $(el).closest("p, div, li, td");
         let tituloTexto = "";
 
         if (contenedor.length) {
+          // Nos quedamos con el texto del contenedor excluyendo los elementos de enlaces/botones
           const clone = contenedor.clone();
-          clone.find("a, span, img").remove(); // Limpiamos enlaces y elementos internos para dejar solo el texto del título
+          clone.find("a, span, img").remove();
           tituloTexto = clone.text().replace(/\s+/g, " ").trim();
         }
 
-        // Si el contenedor no aísla bien el texto, probamos con el elemento anterior
+        // Si el contenedor no lo aísla bien, probamos cogiendo el texto previo inmediato en el DOM
         if (!tituloTexto || tituloTexto.length < 15) {
-          tituloTexto = $(el).parent().prev().text().replace(/\s+/g, " ").trim();
+          tituloTexto = $(el).parent().text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
         }
 
+        // Depuración opcional para ver qué texto va encontrando
         if (tituloTexto && tituloTexto.length > 15) {
           const tituloNorm = normalizar(tituloTexto);
+          
           for (const [sector, reglas] of Object.entries(SECTORES)) {
-            if (reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)))) continue;
-            if (reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)))) {
+            const tieneExclusion = reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)));
+            if (tieneExclusion) continue;
+
+            const coincide = reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)));
+
+            if (coincide) {
               documentos.push({
                 titulo: tituloTexto,
                 url_pdf: urlPdfIndividual,
