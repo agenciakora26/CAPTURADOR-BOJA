@@ -139,22 +139,21 @@ async function ejecutar() {
   const $ = cheerio.load(htmlPortada);
   let urlsPdfSumarios = [];
 
-  // Buscamos los enlaces que contengan "sumario boletín"
+  // Buscamos estrictamente enlaces de "Sumario Boletín", ignorando verificación u otros apartados
   $("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
     
-    if (href && (texto.includes("sumario boletín") || texto.includes("sumario"))) {
-      let urlFinal = "";
-      
-      // Si el enlace ya es el PDF directo pero le falta la ruta '/eboja/YYYY/NNN/'
-      if (href.toLowerCase().endsWith(".pdf")) {
+    if (href) {
+      const hrefLower = href.toLowerCase();
+      // Filtro estricto: debe ser un sumario de boletín y NO contener la palabra "verificacion"
+      if ((texto.includes("sumario boletín") || hrefLower.includes("boja")) && hrefLower.endsWith(".pdf") && !hrefLower.includes("verificacion")) {
+        let urlFinal = "";
+        
         if (href.includes("/eboja/")) {
           urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
         } else {
-          // Si viene como '/BOJA26-...' lo redirigimos a la estructura correcta '/eboja/2026/...' o respetamos su ruta añadiendo /eboja/
           const cleanHref = href.startsWith("/") ? href : `/${href}`;
-          // Si el href ya trae el año y número incrustado (ej: /BOJA26-146-...)
           const matchAnio = cleanHref.match(/BOJA(\d{2})-(\d+)-/);
           if (matchAnio) {
             const anioCompleto = `20${matchAnio[1]}`;
@@ -164,12 +163,10 @@ async function ejecutar() {
             urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
           }
         }
-      } else {
-        urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
-      }
 
-      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
-        urlsPdfSumarios.push(urlFinal);
+        if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
+          urlsPdfSumarios.push(urlFinal);
+        }
       }
     }
   });
