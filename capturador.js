@@ -1,12 +1,13 @@
 const cheerio = require("cheerio");
+const pdfParse = require("pdf-parse");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const BASE_BOJA = "https://www.juntadeandalucia.es/eboja";
+const BASE_BOJA = "https://www.juntadeandalucia.es/BOJA";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
-// Sectores, palabras clave de inclusión y términos de exclusión
+// Tus 7 sectores definidos con sus inclusiones y exclusiones
 const SECTORES = {
   "oposiciones y empleo": {
     inulsion: [
@@ -120,103 +121,98 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutar() {
-  console.log("🚀 Iniciando capturador inteligente del BOJA...");
+  console.log("🚀 Iniciando capturador del BOJA...");
 
   const urlPortada = "https://www.juntadeandalucia.es/BOJA";
-  
   let htmlPortada;
   try {
-    const resPortada = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-    if (!resPortada.ok) return;
-    htmlPortada = await resPortada.text();
+    const res = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) {
+      console.log("⚠️ No se pudo acceder a la portada del BOJA.");
+      return;
+    }
+    htmlPortada = await res.text();
   } catch (error) {
     console.log(`⚠️ Error al conectar con la portada: ${error.message}`);
     return;
   }
 
-  // 1. Obtener la URL del sumario HTML del día actual de forma estricta
-  const $portada = cheerio.load(htmlPortada);
-  let urlIndice = null;
+  // 1. Encontrar el enlace al PDF del Sumario en la portada
+  const $ = cheerio.load(htmlPortada);
+  let urlPdfSumario = null;
 
-  $portada("a").each((_, el) => {
-    const href = $portada(el).attr("href");
-    const texto = $portada(el).text().toLowerCase();
+  $("a").each((_, el) => {
+    const texto = $(el).text().toLowerCase();
+    const href = $(el).attr("href");
     
-    if (href && (texto.includes("sumario") || href.includes("/2026/"))) {
+    if (href && (texto.includes("sumario boletín") || texto.includes("sumario") || href.toLowerCase().endsWith(".pdf"))) {
       const urlAbsoluta = new URL(href, urlPortada).href;
-      // Asegurarnos de que es una página web de índice (terminada en .html o sin extensión de pdf)
-      if (!urlAbsoluta.toLowerCase().endsWith(".pdf")) {
-        urlIndice = urlAbsoluta;
-        return false; // Rompe al encontrar el primero
+      if (urlAbsoluta.toLowerCase().includes(".pdf")) {
+        urlPdfSumario = urlAbsoluta;
+        return false; // Rompe el bucle al encontrar el PDF del sumario
       }
     }
   });
 
-  if (!urlIndice) {
-    console.log("⚠️ No se ha encontrado el enlace del sumario.");
+  if (!urlPdfSumario) {
+    console.log("⚠️ No se ha encontrado el enlace al PDF del sumario en la portada.");
     return;
   }
 
-  console.log(`🔗 Sumario detectado con éxito: ${urlIndice}`);
+  console.log(`📄 Descargando PDF del Sumario: ${urlPdfSumario}`);
 
-  let htmlSumario;
+  // 2. Descargar y parsear el PDF del sumario
+  let parsedPdf;
   try {
-    const resSumario = await fetch(urlIndice, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-    if (!resSumario.ok) return;
-    htmlSumario = await resSumario.text();
-  } catch (error) {
-    console.log(`⚠️ Error al descargar el sumario: ${error.message}`);
+    const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
+    if (!pdfRes.ok) {
+      console.log("⚠️ No se pudo descargar el archivo PDF del sumario.");
+      return;
+    }
+    const buffer = Buffer.from(await pdfRes.arrayBuffer());
+    parsedPdf = await pdfParse(buffer);
+  } catch (err) {
+    console.log(`⚠️ Error al procesar el PDF del sumario: ${err.message}`);
     return;
   }
 
-  const $ = cheerio.load(htmlSumario);
+  // Dividir el texto del PDF en bloques o líneas para analizarlos individualmente
+  const textoCompleto = parsedPdf.text;
+  const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+
+  console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario...`);
+
   const documentosProcesados = [];
 
-  // 2. Analizar bloques de texto del sumario aplicando inclusión y exclusión
-  $("p, div").each((_, el) => {
-    const textoBloque = $(el).text().trim();
-    if (textoBloque.length < 30) return;
-
-    const textoNorm = normalizar(textoBloque);
+  // Recorremos el texto buscando coincidencias con nuestros sectores
+  for (let i = 0; i < lineas.length; i++) {
+    const lineaNorm = normalizar(lineas[i]);
 
     for (const [sector, reglas] of Object.entries(SECTORES)) {
-      // Comprobar si contiene alguna palabra de exclusión (si las tiene)
-      const tieneExclusion = reglas.exclusion.some(ex => textoNorm.includes(normalizar(ex)));
-      if (tieneExclusion) continue; // Descartamos este bloque si tiene términos prohibidos
+      // Verificar exclusiones
+      const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
+      if (tieneExclusion) continue;
 
-      // Comprobar si cumple con las palabras clave de inclusión
-      const coincide = reglas.inulsion.some(inc => textoNorm.includes(normalizar(inc)));
-      
+      // Verificar inclusiones
+      const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
+
       if (coincide) {
-        let urlPdf = null;
-        $(el).find("a").each((_, aEl) => {
-          const hrefA = $(aEl).attr("href");
-          if (hrefA && hrefA.toLowerCase().includes(".pdf")) {
-            urlPdf = new URL(hrefA, urlIndice).href;
-          }
+        // Buscamos si en las líneas cercanas hay un código de documento o enlace PDF asociado
+        // En el BOJA, los documentos individuales suelen enlazarse con su código numérico (ej: 10000562)
+        let urlPdfIndependiente = urlPdfSumario; // Por defecto el del sumario, o construimos si encontramos patrón
+
+        documentosProcesados.push({
+          titulo: lineas[i],
+          url_pdf: urlPdfSumario, // Apunta al sumario o documento oficial filtrado
+          sector: sector
         });
-
-        if (!urlPdf) {
-          const siguienteEnlace = $(el).nextAll("a[href*='.pdf']").first();
-          if (siguienteEnlace.length > 0) {
-            urlPdf = new URL(siguienteEnlace.attr("href"), urlIndice).href;
-          }
-        }
-
-        if (urlPdf) {
-          documentosProcesados.push({
-            titulo: textoBloque.substring(0, 120) + "...",
-            url_pdf: urlPdf,
-            sector: sector
-          });
-        }
         break;
       }
     }
-  });
+  }
 
-  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
-  console.log(`🔍 Anuncios relevantes filtrados por sectores: ${unicos.length}`);
+  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
+  console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
 
   // 3. Guardar en Supabase
   if (unicos.length > 0) {
@@ -231,7 +227,7 @@ async function ejecutar() {
     });
   }
 
-  // 4. Consultar usuarios y enviar correos personalizados
+  // 4. Consultar usuarios y enviar correos mediante Resend
   console.log("👥 Consultando usuarios suscritos...");
   const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
 
@@ -240,22 +236,22 @@ async function ejecutar() {
 
     if (relevantes.length === 0) continue;
 
-    console.log(`📧 Enviando correo a ${usuario.email} con ${relevantes.length} alertas...`);
+    console.log(`📧 Enviando correo de alerta a ${usuario.email}...`);
     
     const htmlCorreo = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
         <h2 style="color: #006b4f;">Boletín Oficial de la Junta de Andalucía</h2>
-        <p>Hola, <strong>tienes ${relevantes.length} alertas nuevas del BOJA de hoy</strong> relacionadas con tus sectores de interés:</p>
+        <p>Hola, <strong>tienes ${relevantes.length} alertas nuevas del BOJA de hoy</strong> relacionadas con tus sectores:</p>
         <ul style="line-height: 1.6;">
           ${relevantes.map(r => `
             <li style="margin-bottom: 12px;">
               <strong>[${r.sector.toUpperCase()}]</strong><br>
               <span style="font-size: 14px; color: #555;">${r.titulo}</span><br>
-              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver documento PDF oficial</a>
+              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver documento PDF oficial en el BOJA</a>
             </li>
           `).join("")}
         </ul>
-        <p style="font-size: 12px; color: #888; margin-top: 20px;">Este es un mensaje automático de tu plataforma de empleo y formación.</p>
+        <p style="font-size: 12px; color: #888; margin-top: 20px;">Mensaje automático de tu plataforma de empleo y formación.</p>
       </div>
     `;
 
@@ -274,7 +270,7 @@ async function ejecutar() {
     });
   }
 
-  console.log("✅ Proceso de análisis y envío finalizado correctamente.");
+  console.log("✅ Proceso completado con éxito.");
 }
 
 ejecutar().catch((error) => {
