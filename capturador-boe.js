@@ -183,7 +183,7 @@ async function ejecutarBOE() {
           titulo: d.titulo,
           url_pdf: d.url_pdf,
           categoria: d.sector,
-          origen: d.origen,
+          origen: "BOE",
           enviado: false
         })
       });
