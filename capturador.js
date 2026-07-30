@@ -8,6 +8,7 @@ const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
 const SECTORES = {
   "oposiciones y empleo": {
+    color: "#006b4f",
     inulsion: [
       "convocatoria de pruebas selectivas",
       "oferta de empleo publico",
@@ -26,6 +27,7 @@ const SECTORES = {
     ]
   },
   "hosteleria y comercio": {
+    color: "#d97706",
     inulsion: [
       "subvencion hosteleria",
       "ayudas al comercio minorista",
@@ -38,6 +40,7 @@ const SECTORES = {
     exclusion: []
   },
   "agricultura y ganaderia": {
+    color: "#16a34a",
     inulsion: [
       "ayudas a la agricultura",
       "explotaciones ganaderas",
@@ -51,6 +54,7 @@ const SECTORES = {
     exclusion: []
   },
   "licitaciones y obras": {
+    color: "#2563eb",
     inulsion: [
       "anuncio de licitacion",
       "contratacion de obras",
@@ -63,6 +67,7 @@ const SECTORES = {
     exclusion: []
   },
   "educacion y formacion": {
+    color: "#7c3aed",
     inulsion: [
       "convocatoria de plazas de profesorado",
       "cuerpo de maestros",
@@ -75,6 +80,7 @@ const SECTORES = {
     exclusion: []
   },
   "sanidad y bienestar social": {
+    color: "#dc2626",
     inulsion: [
       "servicio andaluz de salud",
       "personal estatutario",
@@ -87,6 +93,7 @@ const SECTORES = {
     exclusion: []
   },
   "subvenciones y ayudas generales": {
+    color: "#0891b2",
     inulsion: [
       "incentivos economicos regionales",
       "ayudas a autonomos",
@@ -199,12 +206,9 @@ async function ejecutar() {
       const textoUnido = lineasGlobales.join("\n");
       const lineas = textoUnido.split("\n").map(l => l.trim()).filter(l => l.length > 0);
 
-      // Extraemos año y número de boletín de la URL del sumario
       const partesUrl = urlPdfSumario.split('/');
       const anio = partesUrl[4];
       const numBoletin = partesUrl[5];
-
-      // Enlace seguro por defecto: la página índice del BOJA de ese día (cero errores 404 ni verificaciones)
       const urlIndiceBoletin = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
 
       console.log(`🔍 Analizando ${lineas.length} líneas y extrayendo enlaces incrustados...`);
@@ -219,14 +223,12 @@ async function ejecutar() {
           const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
 
           if (coincide) {
-            let urlPdfIndividual = urlIndiceBoletin; // Respaldo seguro por defecto
+            let urlPdfIndividual = urlIndiceBoletin;
 
             for (let j = i; j < Math.min(i + 6, lineas.length); j++) {
               const matchTextoNum = lineas[j].match(/texto\s+n[uú]m\.?\s*(\d+)/i);
               if (matchTextoNum) {
                 const numDisposicion = matchTextoNum[1];
-
-                // Buscamos estrictamente un enlace real que contenga el número y termine en .pdf (el documento oficial)
                 const enlaceReal = enlacesGlobales.find(ann => ann.url && ann.url.includes(numDisposicion) && ann.url.endsWith(".pdf"));
                 if (enlaceReal && enlaceReal.url) {
                   urlPdfIndividual = enlaceReal.url;
@@ -279,20 +281,47 @@ async function ejecutar() {
 
     console.log(`📧 Enviando correo de alerta a ${usuario.email}...`);
     
+    // Diseño HTML moderno, limpio y visualmente atractivo tipo tarjeta
     const htmlCorreo = `
-      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-        <h2 style="color: #006b4f;">Boletín Oficial de la Junta de Andalucía</h2>
-        <p>Hola, <strong>tienes ${relevantes.length} alertas nuevas del BOJA de hoy</strong> relacionadas con tus sectores:</p>
-        <ul style="line-height: 1.6;">
-          ${relevantes.map(r => `
-            <li style="margin-bottom: 12px;">
-              <strong>[${r.sector.toUpperCase()}]</strong><br>
-              <span style="font-size: 14px; color: #555;">${r.titulo}</span><br>
-              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver documento oficial de este anuncio</a>
-            </li>
-          `).join("")}
-        </ul>
-        <p style="font-size: 12px; color: #888; margin-top: 20px;">Mensaje automático de tu plataforma de empleo y formación.</p>
+      <div style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f6f8; padding: 30px 10px; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+          
+          <!-- Cabecera del correo -->
+          <div style="background-color: #006b4f; color: #ffffff; padding: 25px 30px; text-align: left;">
+            <h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.5px;">Boletín Oficial de la Junta de Andalucía</h1>
+            <p style="margin: 5px 0 0 0; font-size: 14px; color: #e2fcf5;">Resumen diario de convocatorias y alertas personalizadas</p>
+          </div>
+
+          <!-- Cuerpo principal -->
+          <div style="padding: 30px;">
+            <p style="margin-top: 0; font-size: 16px; color: #2d3748;">Hola,</p>
+            <p style="font-size: 15px; color: #4a5568; line-height:.5;">Se han publicado <strong>${relevantes.length} nuevas disposiciones</strong> hoy que coinciden con los sectores a los que estás suscrito:</p>
+
+            <div style="margin-top: 25px;">
+              ${relevantes.map(r => {
+                const colorSector = SECTORES[r.sector]?.color || "#006b4f";
+                return `
+                  <div style="background-color: #f8fafc; border-left: 4px solid ${colorSector}; border: 1px solid #e2e8f0; border-left-width: 5px; border-radius: 6px; padding: 18px; margin-bottom: 20px;">
+                    <span style="display: inline-block; background-color: ${colorSector}; color: #ffffff; font-size: 11px; font-weight: bold; text-transform: uppercase; padding: 4px 10px; border-radius: 4px; margin-bottom: 10px; letter-spacing: 0.5px;">
+                      ${r.sector}
+                    </span>
+                    <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: 500; color: #1a202c; line-height: 1.5;">
+                      ${r.titulo}
+                    </p>
+                    <a href="${r.url_pdf}" target="_blank" style="display: inline-block; background-color: #ffffff; color: ${colorSector}; border: 1px solid ${colorSector}; font-size: 13px; font-weight: bold; text-decoration: none; padding: 8px 16px; border-radius: 4px; transition: all 0.2s;">
+                      📄 Ver documento oficial completo
+                    </a>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+
+            <p style="font-size: 14px; color: #718096; margin-top: 30px; border-top: 1px solid #edf2f7; padding-top: 20px;">
+              Este es un mensaje automático generado por tu plataforma de empleo y formación. Por favor, no respondas a este correo.
+            </p>
+          </div>
+
+        </div>
       </div>
     `;
 
@@ -305,7 +334,7 @@ async function ejecutar() {
       body: JSON.stringify({
         from: "BoletínHoy <alertas@boletinhoy.es>",
         to: [usuario.email],
-        subject: `🔔 Tienes ${relevantes.length} alertas nuevas del BOJA de hoy`,
+        subject: `🔔 Tienes ${relevantes.length} nuevas alertas del BOJA de hoy`,
         html: htmlCorreo
       })
     });
