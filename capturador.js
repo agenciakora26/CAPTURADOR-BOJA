@@ -35,7 +35,7 @@ const SECTORES = {
       "turismo y artesania",
       "horarios comerciales",
       "plan de apoyo al sector hostelero",
-      "calidad turistica andaluza"
+      "calidad turistica"
     ],
     exclusion: []
   },
@@ -62,7 +62,7 @@ const SECTORES = {
       "pliego de clausulas administrativas",
       "procedimiento abierto",
       "adjudicacion de contrato",
-      "obras publicas de interes autonomico"
+      "obras publicas"
     ],
     exclusion: []
   },
@@ -74,7 +74,7 @@ const SECTORES = {
       "profesores de ensenanza secundaria",
       "becas y ayudas al estudio",
       "formacion profesional para el empleo",
-      "universidades publicas de andalucia",
+      "universidades",
       "oferta educativa"
     ],
     exclusion: []
@@ -82,25 +82,24 @@ const SECTORES = {
   "sanidad y bienestar social": {
     color: "#dc2626",
     inulsion: [
-      "servicio andaluz de salud",
       "personal estatutario",
       "atencion a la dependencia",
       "subvenciones a entidades sociales",
       "centros de servicios sociales",
       "prestaciones sociales publicas",
-      "concurso de traslado sanidad"
+      "sanidad"
     ],
     exclusion: []
   },
   "subvenciones y ayudas generales": {
     color: "#0891b2",
     inulsion: [
-      "incentivos economicos regionales",
+      "incentivos economicos",
       "ayudas a autonomos",
       "emprendimiento y creacion de empresas",
-      "digitalizacion de pymes",
-      "fomento del empleo autonomo",
-      "i+d+i empresarial"
+      "digitalizacion",
+      "fomento del empleo",
+      "i+d+i"
     ],
     exclusion: []
   }
@@ -125,70 +124,33 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-async function ejecutar() {
-  console.log("🚀 Iniciando capturador inteligente del BOJA en GitHub...");
-
+// --- CAPTURA BOJA ---
+async function capturarBOJA() {
+  console.log("🚀 Iniciando captura del BOJA...");
   const urlPortada = "https://www.juntadeandalucia.es/BOJA";
-  let htmlPortada;
+  let documentos = [];
+
   try {
     const res = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-    if (!res.ok) {
-      console.log("⚠️ No se pudo acceder a la portada del BOJA.");
-      return;
-    }
-    htmlPortada = await res.text();
-  } catch (error) {
-    console.log(`⚠️ Error al conectar con la portada: ${error.message}`);
-    return;
-  }
+    if (!res.ok) return documentos;
+    const htmlPortada = await res.text();
+    const $ = cheerio.load(htmlPortada);
+    let urlsPdfSumarios = [];
 
-  const $ = cheerio.load(htmlPortada);
-  let urlsPdfSumarios = [];
-
-  $("a").each((_, el) => {
-    const texto = $(el).text().toLowerCase();
-    const href = $(el).attr("href");
-    
-    if (href && texto.includes("sumario boletín")) {
-      let urlFinal = "";
-      if (href.includes("/eboja/")) {
-        urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
-      } else {
-        const cleanHref = href.startsWith("/") ? href : `/${href}`;
-        const matchAnio = cleanHref.match(/BOJA(\d{2})-(\d+)-/);
-        if (matchAnio) {
-          const anioCompleto = `20${matchAnio[1]}`;
-          const numBoletin = parseInt(matchAnio[2], 10);
-          urlFinal = `https://www.juntadeandalucia.es/eboja/${anioCompleto}/${numBoletin}/${cleanHref.split('/').pop()}`;
-        } else {
-          urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
-        }
+    $("a").each((_, el) => {
+      const texto = $(el).text().toLowerCase();
+      const href = $(el).attr("href");
+      if (href && texto.includes("sumario boletín")) {
+        let urlFinal = href.includes("/eboja/") ? new URL(href, "https://www.juntadeandalucia.es").href : new URL(href.startsWith("/") ? href : `/${href}`, "https://www.juntadeandalucia.es/eboja/").href;
+        if (!urlsPdfSumarios.includes(urlFinal)) urlsPdfSumarios.push(urlFinal);
       }
-      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
-        urlsPdfSumarios.push(urlFinal);
-      }
-    }
-  });
+    });
 
-  console.log(`📄 PDFs de sumarios oficiales detectados:`, urlsPdfSumarios);
-
-  if (urlsPdfSumarios.length === 0) {
-    console.log("⚠️ No se ha podido extraer ningún PDF de sumario boletín.");
-    return;
-  }
-
-  const documentosProcesados = [];
-
-  for (const urlPdfSumario of urlsPdfSumarios) {
-    console.log(`📄 Descargando y leyendo hipervínculos del Sumario oficial: ${urlPdfSumario}`);
-
-    try {
+    for (const urlPdfSumario of urlsPdfSumarios) {
       const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
       if (!pdfRes.ok) continue;
       const buffer = Buffer.from(await pdfRes.arrayBuffer());
-      
-      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-      const pdfDoc = await loadingTask.promise;
+      const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
 
       let lineasGlobales = [];
       let enlacesGlobales = [];
@@ -197,82 +159,100 @@ async function ejecutar() {
         const page = await pdfDoc.getPage(i);
         const textContent = await page.getTextContent();
         const annotations = await page.getAnnotations();
-
-        let itemsPagina = textContent.items.map(item => item.str);
-        lineasGlobales.push(...itemsPagina);
+        lineasGlobales.push(...textContent.items.map(item => item.str));
         enlacesGlobales.push(...annotations);
       }
 
       const partesUrl = urlPdfSumario.split('/');
-      const anio = partesUrl[4];
-      const numBoletin = partesUrl[5];
-      const urlIndiceBoletin = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
-
-      console.log(`🔍 Agrupando líneas por bloques de anuncio ("texto núm.")...\n`);
-
-      // Recorremos las líneas buscando los bloques que terminan en "texto núm."
+      const urlIndiceBoletin = `https://www.juntadeandalucia.es/eboja/${partesUrl[4]}/${partesUrl[5]}/index.html`;
       let bufferTituloLines = [];
-      
+
       for (let i = 0; i < lineasGlobales.length; i++) {
         const textoLinea = lineasGlobales[i].trim();
         if (!textoLinea) continue;
-
         const matchTextoNum = textoLinea.match(/texto\s+n[uú]m\.?\s*(\d+)/i);
 
         if (matchTextoNum) {
-          // ¡Encontramos el final de un anuncio! El texto acumulado antes de esta línea es el título completo.
           const numDisposicion = matchTextoNum[1];
           const tituloCompleto = bufferTituloLines.join(" ").replace(/\s+/g, " ").trim();
           
           if (tituloCompleto.length > 15) {
             const tituloNorm = normalizar(tituloCompleto);
-
-            // Comprobamos si encaja en algún sector
             for (const [sector, reglas] of Object.entries(SECTORES)) {
-              const tieneExclusion = reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)));
-              if (tieneExclusion) continue;
-
-              const coincide = reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)));
-
-              if (coincide) {
-                // Buscamos el enlace PDF individual mediante las anotaciones
+              if (reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)))) continue;
+              if (reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)))) {
                 let urlPdfIndividual = urlIndiceBoletin;
                 const enlaceReal = enlacesGlobales.find(ann => ann.url && ann.url.includes(numDisposicion) && ann.url.endsWith(".pdf"));
-                if (enlaceReal && enlaceReal.url) {
-                  urlPdfIndividual = enlaceReal.url;
-                }
+                if (enlaceReal && enlaceReal.url) urlPdfIndividual = enlaceReal.url;
 
-                documentosProcesados.push({
-                  titulo: tituloCompleto,
-                  url_pdf: urlPdfIndividual,
-                  sector: sector
-                });
+                documentos.push({ titulo: tituloCompleto, url_pdf: urlPdfIndividual, sector: sector, origen: "BOJA" });
                 break;
               }
             }
           }
-
-          // Reiniciamos el buffer para el siguiente anuncio
           bufferTituloLines = [];
         } else {
-          // Si no es la línea de "texto núm.", acumulamos la línea si parece parte del título de la disposición
-          // Ignoramos cabeceras repetitivas de páginas o fechas sueltas si fuera necesario
           if (!textoLinea.startsWith("BOLETÍN OFICIAL") && !textoLinea.match(/^\d{1,2}\s+de\s+[a-z]+\s+de\s+\d{4}$/i)) {
             bufferTituloLines.push(textoLinea);
           }
         }
       }
-
-    } catch (err) {
-      console.log(`⚠️ Error al procesar el PDF con pdfjs: ${err.message}`);
-      continue;
     }
+  } catch (err) {
+    console.log(`⚠️ Error en BOJA: ${err.message}`);
   }
+  return Array.from(new Map(documentos.map(d => [d.titulo, d])).values());
+}
 
-  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
+// --- CAPTURA BOE ---
+async function capturarBOE() {
+  console.log("🚀 Iniciando captura del BOE desde la última edición...");
+  const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
+  let documentos = [];
 
-  for (const d of unicos) {
+  try {
+    const res = await fetch(urlBoe, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return documentos;
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    // El BOE estructura sus enlaces de sumario en listas de artículos o sumarios por departamento
+    $("a").each((_, el) => {
+      const texto = $(el).text().replace(/\s+/g, " ").trim();
+      const href = $(el).attr("href");
+
+      if (href && (href.includes("BOE-A-") || href.includes("id=BOE-A-")) && texto.length > 20) {
+        let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
+        // Transformar si es HTML a PDF del BOE si se desea, o mantener enlace directo
+        if (urlPdfIndividual.includes("detallado.php")) {
+          urlPdfIndividual = urlPdfIndividual.replace("detallado.php", "pdf.php");
+        }
+
+        const tituloNorm = normalizar(texto);
+        for (const [sector, reglas] of Object.entries(SECTORES)) {
+          if (reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)))) continue;
+          if (reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)))) {
+            documentos.push({ titulo: texto, url_pdf: urlPdfIndividual, sector: sector, origen: "BOE" });
+            break;
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.log(`⚠️ Error en BOE: ${err.message}`);
+  }
+  return Array.from(new Map(documentos.map(d => [d.titulo, d])).values());
+}
+
+async function ejecutar() {
+  const anunciosBoja = await capturarBOJA();
+  const anunciosBoe = await capturarBOE();
+  const todosAnuncios = [...anunciosBoja, ...anunciosBoe];
+
+  console.log(`🎯 Total relevantes encontrados -> BOJA: ${anunciosBoja.length} | BOE: ${anunciosBoe.length}`);
+
+  // Guardar en Supabase
+  for (const d of todosAnuncios) {
     try {
       await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
         method: "POST",
@@ -280,7 +260,8 @@ async function ejecutar() {
         body: JSON.stringify({
           titulo: d.titulo,
           url_pdf: d.url_pdf,
-          categoria: d.sector
+          categoria: d.sector,
+          origen: d.origen
         })
       });
     } catch (err) {
@@ -288,76 +269,79 @@ async function ejecutar() {
     }
   }
 
-  console.log("👥 Consultando usuarios suscritos...");
+  console.log("👥 Consultando usuarios suscritos para envío unificado...");
   const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
 
   for (const usuario of (usuarios || [])) {
-    const relevantes = unicos.filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
-    if (relevantes.length === 0) continue;
+    const relevantesBoja = anunciosBoja.filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
+    const relevantesBoe = anunciosBoe.filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
 
-    console.log(`📧 Enviando correo de alerta a ${usuario.email}...`);
+    if (relevantesBoja.length === 0 && relevantesBoe.length === 0) continue;
+
+    console.log(`📧 Enviando correo unificado a ${usuario.email}...`);
     
+    const generarBloqueHTML = (lista, tituloSeccion, colorBase) => {
+      if (lista.length === 0) return "";
+      return `
+        <div style="margin-top: 25px; margin-bottom: 15px;">
+          <h2 style="font-size: 16px; color: ${colorBase}; border-bottom: 2px solid ${colorBase}; padding-bottom: 6px; margin-bottom: 15px;">
+            ${tituloSeccion} (${lista.length})
+          </h2>
+          ${lista.map(r => {
+            const colorSector = SECTORES[r.sector]?.color || colorBase;
+            return `
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 5px solid ${colorSector}; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                <span style="display: inline-block; background-color: ${colorSector}; color: #ffffff; font-size: 11px; font-weight: bold; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; margin-bottom: 10px;">
+                  ${r.sector}
+                </span>
+                <p style="margin: 0 0 12px 0; font-size: 14px; font-weight: 500; color: #1a202c; line-height: 1.4;">
+                  ${r.titulo}
+                </p>
+                <a href="${r.url_pdf}" target="_blank" style="display: inline-block; background-color: #ffffff; color: ${colorSector}; border: 1px solid ${colorSector}; font-size: 12px; font-weight: bold; text-decoration: none; padding: 6px 12px; border-radius: 4px;">
+                  📄 Ver documento oficial
+                </a>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `;
+    };
+
     const htmlCorreo = `
       <div style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f6f8; padding: 30px 10px; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-          
-          <!-- Cabecera del correo -->
           <div style="background-color: #006b4f; color: #ffffff; padding: 25px 30px; text-align: left;">
-            <h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.5px;">Boletín Oficial de la Junta de Andalucía</h1>
-            <p style="margin: 5px 0 0 0; font-size: 14px; color: #e2fcf5;">Resumen diario de convocatorias y alertas personalizadas</p>
+            <h1 style="margin: 0; font-size: 20px; font-weight: 600;">BoletínHoy - Resumen Oficial Diario</h1>
+            <p style="margin: 5px 0 0 0; font-size: 14px; color: #e2fcf5;">Actualidad conjunta de BOJA y BOE adaptada a tus intereses</p>
           </div>
+          <div style="padding: 25px;">
+            <p style="margin-top: 0; font-size: 15px; color: #2d3748;">Hola,</p>
+            <p style="font-size: 14px; color: #4a5568; line-height: 1.5;">Aquí tienes las novedades publicadas hoy en los boletines oficiales correspondientes a tus sectores suscritos:</p>
 
-          <!-- Cuerpo principal -->
-          <div style="padding: 30px;">
-            <p style="margin-top: 0; font-size: 16px; color: #2d3748; line-height: 1.5;">Hola,</p>
-            <p style="font-size: 15px; color: #4a5568; line-height: 1.5; margin-bottom: 25px;">Se han publicado <strong>${relevantes.length} nuevas disposiciones</strong> hoy que coinciden con los sectores a los que estás suscrito:</p>
+            ${generarBloqueHTML(relevantesBoja, "🟢 Boletín Oficial de la Junta de Andalucía (BOJA)", "#006b4f")}
+            ${generarBloqueHTML(relevantesBoe, "🔵 Boletín Oficial del Estado (BOE)", "#2563eb")}
 
-            <div>
-              ${relevantes.map(r => {
-                const colorSector = SECTORES[r.sector]?.color || "#006b4f";
-                return `
-                  <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 5px solid ${colorSector}; border-radius: 6px; padding: 18px; margin-bottom: 20px;">
-                    <span style="display: inline-block; background-color: ${colorSector}; color: #ffffff; font-size: 11px; font-weight: bold; text-transform: uppercase; padding: 4px 10px; border-radius: 4px; margin-bottom: 12px; letter-spacing: 0.5px;">
-                      ${r.sector}
-                    </span>
-
-                    <p style="margin: 0 0 16px 0; font-size: 15px; font-weight: 500; color: #1a202c; line-height: 1.5;">
-                      ${r.titulo}
-                    </p>
-
-                    <a href="${r.url_pdf}" target="_blank" style="display: inline-block; background-color: #ffffff; color: ${colorSector}; border: 1px solid ${colorSector}; font-size: 13px; font-weight: bold; text-decoration: none; padding: 8px 16px; border-radius: 4px;">
-                      📄 Ver documento oficial completo
-                    </a>
-                  </div>
-                `;
-              }).join("")}
-            </div>
-
-            <p style="font-size: 14px; color: #718096; margin-top: 30px; border-top: 1px solid #edf2f7; padding-top: 20px; line-height: 1.4;">
-              Este es un mensaje automático generado por tu plataforma de empleo y formación. Por favor, no respondas a este correo.
+            <p style="font-size: 13px; color: #718096; margin-top: 30px; border-top: 1px solid #edf2f7; padding-top: 15px;">
+              Mensaje automático generado por BoletínHoy. Por favor, no respondas a este correo.
             </p>
           </div>
-
         </div>
       </div>
     `;
 
     await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { 
-        Authorization: `Bearer ${RESEND_API_KEY}`, 
-        "Content-Type": "application/json" 
-      },
+      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from: "BoletínHoy <alertas@boletinhoy.es>",
         to: [usuario.email],
-        subject: `🔔 Tienes ${relevantes.length} nuevas alertas del BOJA de hoy`,
+        subject: `🔔 Tus alertas del día: ${relevantesBoja.length + relevantesBoe.length} nuevas disposiciones`,
         html: htmlCorreo
       })
     });
   }
 
-  console.log("✅ Proceso completado con éxito.");
+  console.log("✅ Proceso unificado completado con éxito.");
 }
 
 ejecutar().catch((error) => {
