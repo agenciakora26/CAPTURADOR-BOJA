@@ -138,7 +138,6 @@ async function ejecutar() {
   const $ = cheerio.load(htmlPortada);
   let urlsPdfSumarios = [];
 
-  // Filtro estricto para capturar exclusivamente el PDF del sumario oficial de la portada
   $("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
@@ -195,13 +194,9 @@ async function ejecutar() {
     const textoCompleto = parsedPdf.text;
     const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
 
-    // Extraemos el año y número de boletín directamente de la URL oficial del sumario
     const partesUrl = urlPdfSumario.split('/');
     const anio = partesUrl[4];
     const numBoletin = partesUrl[5];
-    
-    // Enlace web oficial y directo al boletín de ese día (evita cualquier error 404)
-    const urlWebBoletin = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
 
     console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario...`);
 
@@ -215,9 +210,22 @@ async function ejecutar() {
         const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
 
         if (coincide) {
+          let urlPdfIndividual = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
+          
+          // Buscamos el número de texto asociado en las líneas cercanas del sumario
+          for (let j = i; j < Math.min(i + 6, lineas.length); j++) {
+            const matchTextoNum = lineas[j].match(/texto\s+n[uú]m\.?\s*(\d+)/i);
+            if (matchTextoNum) {
+              const numDisposicion = matchTextoNum[1];
+              // Generamos el enlace oficial de verificación del BOJA para esa disposición exacta
+              urlPdfIndividual = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/${numDisposicion}-verificacion`;
+              break;
+            }
+          }
+
           documentosProcesados.push({
             titulo: lineas[i],
-            url_pdf: urlWebBoletin,
+            url_pdf: urlPdfIndividual,
             sector: sector
           });
           break;
@@ -263,7 +271,7 @@ async function ejecutar() {
             <li style="margin-bottom: 12px;">
               <strong>[${r.sector.toUpperCase()}]</strong><br>
               <span style="font-size: 14px; color: #555;">${r.titulo}</span><br>
-              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver edición oficial del BOJA de hoy</a>
+              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver documento oficial de este anuncio</a>
             </li>
           `).join("")}
         </ul>
