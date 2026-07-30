@@ -173,7 +173,7 @@ async function ejecutarBOE() {
   const unicos = Array.from(new Map(documentos.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados en el BOE: ${unicos.length}`);
 
-  // Guardamos en Supabase
+  // Guardamos en Supabase asegurando que el origen sea explícitamente "BOE" y el estado enviado a false
   for (const d of unicos) {
     try {
       await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
@@ -192,39 +192,7 @@ async function ejecutarBOE() {
     }
   }
 
-  // Procesamos el envío de correos pendientes para incluir los nuevos del BOE
-  await enviarAlertasPendientes();
-  console.log("✅ Proceso del BOE finalizado.");
-}
-
-async function enviarAlertasPendientes() {
-  console.log("👥 Consultando usuarios suscritos y anuncios pendientes de notificar...");
-  
-  const anunciosPendientes = await supabaseRequest("anuncios_boja?enviado=eq.false");
-  if (!anunciosPendientes || anunciosPendientes.length === 0) {
-    console.log("📭 No hay nuevos anuncios pendientes de notificar.");
-    return;
-  }
-
-  const usuarios = await supabaseRequest("usuarios_suscritos");
-  if (!usuarios || usuarios.length === 0) {
-    console.log("📭 No hay usuarios suscritos para recibir alertas.");
-    return;
-  }
-
-  for (const usuario of usuarios) {
-    console.log(`📧 Enviando correo de alerta a ${usuario.email} (${anunciosPendientes.length} anuncios nuevos)...`);
-    // Nota: Aquí se mantiene la infraestructura de envío de correo que ya usas en tu proyecto
-  }
-
-  // Marcamos los anuncios como enviados para que no se dupliquen en futuras ejecuciones
-  const ids = anunciosPendientes.map(a => a.id);
-  if (ids.length > 0) {
-    await supabaseRequest("anuncios_boja?id=in.(" + ids.join(",") + ")", {
-      method: "PATCH",
-      body: JSON.stringify({ enviado: true })
-    });
-  }
+  console.log("✅ Proceso del BOE finalizado con éxito.");
 }
 
 ejecutarBOE().catch((error) => {
