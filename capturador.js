@@ -147,7 +147,7 @@ async function ejecutar() {
     if (href) {
       const urlAbsoluta = new URL(href, "https://www.juntadeandalucia.es").href;
       // Filtramos para asegurarnos de que es un PDF de sumario y no una disposición individual larga
-      if (urlAbsoluta.toLowerCase().endsWith(".pdf") && (texto.includes("sumario") || urlAbsoluta.includes("sumario") || urlAbsoluta.includes("sumnario"))) {
+      if (urlAbsoluta.toLowerCase().endsWith(".pdf") && (texto.includes("Sumario") || urlAbsoluta.includes("Sumario") || urlAbsoluta.includes("sumnario"))) {
         if (!urlsSumarios.includes(urlAbsoluta)) {
           urlsSumarios.push(urlAbsoluta);
         }
