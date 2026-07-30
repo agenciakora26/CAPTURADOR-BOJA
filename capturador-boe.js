@@ -1,4 +1,4 @@
-const cheerio = "cheerio" in globalThis ? require("cheerio") : require("cheerio");
+const cheerio = require("cheerio");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -112,7 +112,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarBOE() {
-  console.log("🚀 Iniciando rastreo optimizado del BOE...");
+  console.log("🚀 Iniciando extracción directa de títulos del BOE...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
   let documentos = [];
 
@@ -125,43 +125,36 @@ async function ejecutarBOE() {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    let totalEnlacesPdfEncontrados = 0;
+    let encontradosCount = 0;
 
-    // Buscamos directamente cualquier etiqueta 'a' que contenga el texto del PDF oficial
     $("a").each((_, el) => {
       const textoEnlace = $(el).text();
       const href = $(el).attr("href");
 
       if (href && textoEnlace.includes("PDF (BOE")) {
-        totalEnlacesPdfEncontrados++;
+        encontradosCount++;
         const urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
 
-        // El título descriptivo en la estructura del BOE suele encontrarse en el elemento de bloque previo (p.ej. un párrafo anterior)
-        // Buscamos el texto analizando el contenedor padre o el hermano anterior
-        let contenedor = $(el).closest("div, p");
-        let tituloTexto = "";
+        // En la estructura del BOE, el bloque contenedor (por ejemplo, el div principal del anuncio) 
+        // contiene el título descriptivo arriba y los botones de formato abajo.
+        const caja = $(el).closest("div");
+        
+        // Extraemos el texto de la caja eliminando las etiquetas de enlaces (como los botones de PDF y HTML)
+        const cajaClonada = caja.clone();
+        cajaClonada.find("a, span, img").remove();
+        let tituloTexto = cajaClonada.text().replace(/\s+/g, " ").trim();
 
-        if (contenedor.length) {
-          // Extraemos el texto del bloque eliminando los botones de enlaces y formatos
-          const clone = contenedor.clone();
-          clone.find("a, span, img, strong").remove();
-          tituloTexto = clone.text().replace(/\s+/g, " ").trim();
-
-          // Si el texto queda muy corto, buscamos en el texto completo del bloque contenedor
-          if (tituloTexto.length < 15) {
-            tituloTexto = contenedor.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
-          }
+        // Si por lo que sea el clon se queda vacío, cogemos el texto previo al enlace dentro del párrafo contenedor
+        if (!tituloTexto || tituloTexto.length < 5) {
+          const parrafo = $(el).closest("p");
+          tituloTexto = parrafo.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
         }
 
-        // Método alternativo si el anterior no captura suficiente texto: buscar en el bloque padre general
-        if (!tituloTexto || tituloTexto.length < 15) {
-          const parentBlock = $(el).parent().parent();
-          tituloTexto = parentBlock.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
+        if (encontradosCount <= 5 || (encontradosCount % 40 === 0)) {
+          console.log(`🔎 [Muestra BOE] Título: "${tituloTexto}"`);
         }
 
-        console.log(`🔎 [BOE Encontrado] Título extraído: "${tituloTexto.substring(0, 60)}..."`);
-
-        if (tituloTexto && tituloTexto.length > 10) {
+        if (tituloTexto && tituloTexto.length > 5) {
           const tituloNorm = normalizar(tituloTexto);
 
           for (const [sector, reglas] of Object.entries(SECTORES)) {
@@ -184,7 +177,7 @@ async function ejecutarBOE() {
       }
     });
 
-    console.log(`📌 Total de enlaces de PDF oficiales analizados en el BOE: ${totalEnlacesPdfEncontrados}`);
+    console.log(`📌 Enlaces de PDF analizados: ${encontradosCount}`);
 
   } catch (err) {
     console.log(`⚠️ Error al conectar con el BOE: ${err.message}`);
