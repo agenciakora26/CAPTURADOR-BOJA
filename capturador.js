@@ -208,6 +208,7 @@ async function capturarBOJA() {
 // --- CAPTURA BOE (Adaptada a tu estructura exacta) ---
 // --- CAPTURA BOE MEJORADA ---
 // --- CAPTURA BOE DEFINITIVA ---
+// --- CAPTURA BOE CON ENLACES DIRECTOS A PDF ---
 async function capturarBOE() {
   console.log("🚀 Iniciando captura del BOE desde la última edición...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
@@ -222,29 +223,27 @@ async function capturarBOE() {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Recorremos todos los enlaces de la página para cazar cualquier referencia al BOE
+    // Buscamos cualquier enlace que apunte al PDF oficial del BOE (ej: /pdfs/BOE-A-...)
     $("a").each((_, el) => {
       const href = $(el).attr("href");
       const textoEnlace = $(el).text().trim();
 
-      // Buscamos si el enlace apunta a un documento del BOE (contiene BOE-A en su href o texto)
-      if (href && (href.includes("BOE-A-") || textoEnlace.includes("BOE-A-"))) {
-        let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es/diario_boe/").href;
-        
-        // Transformamos la URL a formato PDF directo si apunta a una vista detallada o HTML
-        if (urlPdfIndividual.includes("detallado.php")) {
-          urlPdfIndividual = urlPdfIndividual.replace("detallado.php", "pdf.php");
+      if (href && (href.includes("/pdfs/BOE-A-") || textoEnlace.includes("PDF"))) {
+        let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
+
+        // Buscamos el contenedor principal (párrafo o bloque) donde reside la disposición
+        const contenedor = $(el).closest("p, div");
+        let tituloTexto = "";
+
+        if (contenedor.length) {
+          const clone = contenedor.clone();
+          clone.find("a, span, img").remove(); // Limpiamos enlaces y elementos internos para dejar solo el texto del título
+          tituloTexto = clone.text().replace(/\s+/g, " ").trim();
         }
 
-        // Buscamos el texto descriptivo (título) en el contenedor superior o párrafo adyacente
-        let contenedor = $(el).closest("p, div, td");
-        let tituloTexto = contenedor.text().replace(/PDF|Otros formatos|BOE-A-[\d-]+/gi, "").replace(/\s+/g, " ").trim();
-
+        // Si el contenedor no aísla bien el texto, probamos con el elemento anterior
         if (!tituloTexto || tituloTexto.length < 15) {
           tituloTexto = $(el).parent().prev().text().replace(/\s+/g, " ").trim();
-        }
-        if (!tituloTexto || tituloTexto.length < 15) {
-          tituloTexto = textoEnlace; // Fallback al texto del propio enlace si lo hubiera
         }
 
         if (tituloTexto && tituloTexto.length > 15) {
