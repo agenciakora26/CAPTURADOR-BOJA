@@ -137,56 +137,44 @@ async function ejecutar() {
   }
 
   const $ = cheerio.load(htmlPortada);
-  let urlsPaginasBoletin = [];
+  let urlsPdfSumarios = [];
 
-  // 1. Buscamos los enlaces que contengan "sumario boletín" en la portada
+  // Buscamos los enlaces que contengan "sumario boletín"
   $("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
     
-    if (href && texto.includes("sumario boletín")) {
-      const urlAbsoluta = new URL(href, "https://www.juntadeandalucia.es").href;
-      if (!urlsPaginasBoletin.includes(urlAbsoluta)) {
-        urlsPaginasBoletin.push(urlAbsoluta);
+    if (href && (texto.includes("sumario boletín") || texto.includes("sumario"))) {
+      let urlFinal = "";
+      
+      // Si el enlace ya es el PDF directo pero le falta la ruta '/eboja/YYYY/NNN/'
+      if (href.toLowerCase().endsWith(".pdf")) {
+        if (href.includes("/eboja/")) {
+          urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
+        } else {
+          // Si viene como '/BOJA26-...' lo redirigimos a la estructura correcta '/eboja/2026/...' o respetamos su ruta añadiendo /eboja/
+          const cleanHref = href.startsWith("/") ? href : `/${href}`;
+          // Si el href ya trae el año y número incrustado (ej: /BOJA26-146-...)
+          const matchAnio = cleanHref.match(/BOJA(\d{2})-(\d+)-/);
+          if (matchAnio) {
+            const anioCompleto = `20${matchAnio[1]}`;
+            const numBoletin = parseInt(matchAnio[2], 10);
+            urlFinal = `https://www.juntadeandalucia.es/eboja/${anioCompleto}/${numBoletin}/${cleanHref.split('/').pop()}`;
+          } else {
+            urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
+          }
+        }
+      } else {
+        urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
+      }
+
+      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
+        urlsPdfSumarios.push(urlFinal);
       }
     }
   });
 
-  console.log(`🔗 Páginas de "Sumario Boletín" detectadas:`, urlsPaginasBoletin);
-
-  if (urlsPaginasBoletin.length === 0) {
-    console.log("⚠️ No se han encontrado enlaces de 'Sumario Boletín' en la portada.");
-    return;
-  }
-
-  let urlsPdfSumarios = [];
-
-  // 2. Entramos en cada una de esas páginas/hipervínculos para extraer el PDF definitivo
-  for (const urlPagina of urlsPaginasBoletin) {
-    try {
-      const resPagina = await fetch(urlPagina, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-      if (!resPagina.ok) continue;
-      const htmlPagina = await resPagina.text();
-      const $pag = cheerio.load(htmlPagina);
-
-      // Buscamos el enlace al PDF dentro de esta página de sumario
-      $pag("a").each((_, el) => {
-        const hrefPdf = $pag(el).attr("href");
-        const textoPdf = $pag(el).text().toLowerCase();
-        
-        if (hrefPdf && hrefPdf.toLowerCase().endsWith(".pdf")) {
-          const urlPdfAbsoluta = new URL(hrefPdf, urlPagina).href;
-          if (!urlsPdfSumarios.includes(urlPdfAbsoluta)) {
-            urlsPdfSumarios.push(urlPdfAbsoluta);
-          }
-        }
-      });
-    } catch (err) {
-      console.log(`⚠️ Error al procesar la página ${urlPagina}: ${err.message}`);
-    }
-  }
-
-  console.log(`📄 PDFs de sumarios finales encontrados:`, urlsPdfSumarios);
+  console.log(`📄 PDFs de sumarios finales detectados:`, urlsPdfSumarios);
 
   if (urlsPdfSumarios.length === 0) {
     console.log("⚠️ No se ha podido extraer ningún PDF de los sumarios.");
