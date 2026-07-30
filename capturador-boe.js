@@ -2,6 +2,7 @@ const cheerio = require("cheerio");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
 const SECTORES = {
@@ -173,7 +174,7 @@ async function ejecutarBOE() {
   const unicos = Array.from(new Map(documentos.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados en el BOE: ${unicos.length}`);
 
-  // Guardamos en Supabase asegurando que el origen sea explícitamente "BOE" y el estado enviado a false
+  // Guardamos en Supabase
   for (const d of unicos) {
     try {
       await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
@@ -192,7 +193,49 @@ async function ejecutarBOE() {
     }
   }
 
-  console.log("✅ Proceso del BOE finalizado con éxito.");
+  // Consultar usuarios y enviar correos específicos del BOE
+  console.log("👥 Consultando usuarios suscritos para el BOE...");
+  const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
+
+  for (const usuario of (usuarios || [])) {
+    const relevantes = unicos.filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
+    if (relevantes.length === 0) continue;
+
+    console.log(`📧 Enviando correo de alerta del BOE a ${usuario.email}...`);
+    
+    const htmlCorreo = `
+      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <h2 style="color: #1a365d;">Boletín Oficial del Estado (BOE)</h2>
+        <p>Hola, <strong>tienes ${relevantes.length} alertas nuevas del BOE de hoy</strong> relacionadas contigo:</p>
+        <ul style="line-height: 1.6;">
+          ${relevantes.map(r => `
+            <li style="margin-bottom: 12px;">
+              <strong>[${r.sector.toUpperCase()}]</strong><br>
+              <span style="font-size: 14px; color: #555;">${r.titulo}</span><br>
+              <a href="${r.url_pdf}" target="_blank" style="color: #2b6cb0; font-weight: bold; text-decoration: underline;">Ver documento PDF oficial en el BOE</a>
+            </li>
+          `).join("")}
+        </ul>
+        <p style="font-size: 12px; color: #888; margin-top: 20px;">Mensaje automático de tu plataforma de empleo y formación.</p>
+      </div>
+    `;
+
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { 
+        Authorization: `Bearer ${RESEND_API_KEY}`, 
+        "Content-Type": "application/json" 
+      },
+      body: JSON.stringify({
+        from: "BoletínHoy <alertas@boletinhoy.es>",
+        to: [usuario.email],
+        subject: `🔔 Tienes ${relevantes.length} alertas nuevas del BOE de hoy`,
+        html: htmlCorreo
+      })
+    });
+  }
+
+  console.log("✅ Proceso del BOE y envío de correos finalizado con éxito.");
 }
 
 ejecutarBOE().catch((error) => {
