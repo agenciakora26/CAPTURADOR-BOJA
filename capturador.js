@@ -122,7 +122,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function ejecutar() {
   console.log("🚀 Iniciando capturador inteligente del BOJA...");
 
-const urlPortada = "https://www.juntadeandalucia.es/BOJA";
+  const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
   try {
     const res = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
@@ -139,57 +139,26 @@ const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   const $ = cheerio.load(htmlPortada);
   let urlPdfSumario = null;
 
-  // Buscamos estrictamente el enlace cuyo texto contenga "sumario boletín" en la portada
+  // Buscamos estrictamente el enlace del sumario en la portada de la Junta
   $("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
     
-    if (href && texto.includes("sumario boletín")) {
-      // Resolvemos la URL correctamente respecto a la base del dominio principal
+    if (href && (texto.includes("sumario boletín") || texto.includes("sumario"))) {
       urlPdfSumario = new URL(href, "https://www.juntadeandalucia.es").href;
-      return false; // Rompe el bucle al encontrar el sumario exacto
+      return false; 
     }
   });
 
   if (!urlPdfSumario) {
-    console.log("⚠️ No se ha encontrado el enlace del 'Sumario boletín' en la portada.");
+    console.log("⚠️ No se ha encontrado el enlace del sumario en la portada.");
     return;
   }
 
-  // Limpiar espacios por seguridad
   urlPdfSumario = urlPdfSumario.trim().replace(/\s+/g, '%20');
-
   console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
 
-  // 2. Buscar el PDF del Sumario dentro de la página del boletín
-  $boletin("a").each((_, el) => {
-    const texto = $boletin(el).text().toLowerCase();
-    const href = $boletin(el).attr("href");
-    if (href && (texto.includes("sumario boletín") || href.toLowerCase().includes("sumario"))) {
-      urlPdfSumario = new URL(href, urlBoletinHtml).href;
-      return false;
-    }
-  });
-
-  // Si no encuentra por texto exacto, buscamos el PDF que tenga formato de sumario o general de la página
-  if (!urlPdfSumario) {
-    $boletin("a").each((_, el) => {
-      const href = $boletin(el).attr("href");
-      if (href && href.toLowerCase().endsWith(".pdf") && !href.includes("ANUNCIO")) {
-        urlPdfSumario = new URL(href, urlBoletinHtml).href;
-        return false;
-      }
-    });
-  }
-
-  if (!urlPdfSumario) {
-    console.log("⚠️ No se ha encontrado el PDF del sumario.");
-    return;
-  }
-
-  console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
-
-  // 3. Descargar y parsear el PDF del sumario
+  // Descargar y parsear el PDF del sumario
   let parsedPdf;
   try {
     const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
@@ -211,7 +180,6 @@ const urlPortada = "https://www.juntadeandalucia.es/BOJA";
 
   const documentosProcesados = [];
 
-  // 4. Analizar líneas aplicando reglas de inclusión y exclusión por sector
   for (let i = 0; i < lineas.length; i++) {
     const lineaNorm = normalizar(lineas[i]);
 
@@ -235,7 +203,6 @@ const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
 
-  // 5. Guardar en Supabase
   if (unicos.length > 0) {
     await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
       method: "POST",
@@ -248,13 +215,11 @@ const urlPortada = "https://www.juntadeandalucia.es/BOJA";
     });
   }
 
-  // 6. Consultar usuarios y enviar correos mediante Resend
   console.log("👥 Consultando usuarios suscritos...");
   const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
 
   for (const usuario of (usuarios || [])) {
     const relevantes = unicos.filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
-
     if (relevantes.length === 0) continue;
 
     console.log(`📧 Enviando correo de alerta a ${usuario.email}...`);
