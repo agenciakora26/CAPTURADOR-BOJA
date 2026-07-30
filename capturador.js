@@ -194,6 +194,14 @@ async function ejecutar() {
     const textoCompleto = parsedPdf.text;
     const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
 
+    // Extraemos el año y número de boletín directamente de la URL del sumario PDF
+    const partesUrl = urlPdfSumario.split('/');
+    const anio = partesUrl[4];
+    const numBoletin = partesUrl[5];
+    
+    // URL web oficial del BOJA para ese número de boletín específico
+    const urlWebBoletin = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
+
     console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario...`);
 
     for (let i = 0; i < lineas.length; i++) {
@@ -206,26 +214,9 @@ async function ejecutar() {
         const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
 
         if (coincide) {
-          let urlPdfIndividual = urlPdfSumario; // Por defecto si no se localiza
-          
-          // Buscamos en las siguientes líneas el texto con el número de disposición (ej. "texto núm. 10247")
-          for (let j = i; j < Math.min(i + 6, lineas.length); j++) {
-            const matchTextoNum = lineas[j].match(/texto\s+n[uú]m\.?\s*(\d+)/i);
-            if (matchTextoNum) {
-              const numDisposicion = matchTextoNum[1];
-              const partesUrl = urlPdfSumario.split('/');
-              const anio = partesUrl[4];
-              const numBoletin = partesUrl[5];
-              
-              // Construimos la URL directa al PDF individual usando el estándar del BOJA
-              urlPdfIndividual = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/BOJA${anio.slice(-2)}-${numBoletin}-${numDisposicion}.pdf`;
-              break;
-            }
-          }
-
           documentosProcesados.push({
             titulo: lineas[i],
-            url_pdf: urlPdfIndividual,
+            url_pdf: urlWebBoletin,
             sector: sector
           });
           break;
@@ -271,7 +262,7 @@ async function ejecutar() {
             <li style="margin-bottom: 12px;">
               <strong>[${r.sector.toUpperCase()}]</strong><br>
               <span style="font-size: 14px; color: #555;">${r.titulo}</span><br>
-              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver documento PDF oficial de este anuncio</a>
+              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver edición oficial del BOJA de hoy</a>
             </li>
           `).join("")}
         </ul>
