@@ -4,10 +4,9 @@ const pdfParse = require("pdf-parse");
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const BASE_BOJA = "https://www.juntadeandalucia.es/BOJA";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
-// Tus 7 sectores definidos con sus inclusiones y exclusiones
+// Tus 7 sectores con sus inclusiones y exclusiones
 const SECTORES = {
   "oposiciones y empleo": {
     inulsion: [
@@ -123,8 +122,6 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function ejecutar() {
   console.log("🚀 Iniciando capturador inteligente del BOJA...");
 
-  // Construir la fecha de hoy en formato YYYY y número de día/mes si hace falta, 
-  // o extraer el enlace exacto buscando la estructura del sumario de la fecha actual.
   const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
   try {
@@ -139,50 +136,72 @@ async function ejecutar() {
     return;
   }
 
-  // 1. Encontrar el enlace oficial del sumario en la portada evitando PDFs internos de anuncios
   const $ = cheerio.load(htmlPortada);
-  let urlPdfSumario = null;
+  let urlBoletinHtml = null;
 
+  // 1. Encontrar la página HTML del boletín del día actual desde la portada
   $("a").each((_, el) => {
-    const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
+    const texto = $(el).text().toLowerCase();
     
     if (href) {
       const urlAbsoluta = new URL(href, urlPortada).href;
-      // Buscamos específicamente el enlace que contenga la palabra sumario o el patrón general del boletín del día
-      if (urlAbsoluta.toLowerCase().includes(".pdf") && (texto.includes("sumario") || urlAbsoluta.includes("000005") || urlAbsoluta.includes("sumario"))) {
-        urlPdfSumario = urlAbsoluta;
-        return false; // Encontrado
+      if (!urlAbsoluta.toLowerCase().endsWith(".pdf") && (texto.includes("sumario") || texto.includes("boletín") || urlAbsoluta.includes("/2026/"))) {
+        urlBoletinHtml = urlAbsoluta;
+        return false;
       }
     }
   });
 
-  // Si por lo que sea el texto varía, cogemos el primer enlace PDF de la sección del día actual que tenga la estructura estándar del BOJA
+  if (!urlBoletinHtml) {
+    console.log("⚠️ No se ha podido localizar la página del boletín.");
+    return;
+  }
+
+  console.log(`🔗 Página del boletín detectada: ${urlBoletinHtml}`);
+
+  let htmlBoletin;
+  try {
+    const resBoletin = await fetch(urlBoletinHtml, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
+    if (!resBoletin.ok) return;
+    htmlBoletin = await resBoletin.text();
+  } catch (err) {
+    console.log(`⚠️ Error al conectar con la página del boletín: ${err.message}`);
+    return;
+  }
+
+  const $boletin = cheerio.load(htmlBoletin);
+  let urlPdfSumario = null;
+
+  // 2. Buscar el PDF del Sumario dentro de la página del boletín
+  $boletin("a").each((_, el) => {
+    const texto = $boletin(el).text().toLowerCase();
+    const href = $boletin(el).attr("href");
+    if (href && (texto.includes("sumario boletín") || href.toLowerCase().includes("sumario"))) {
+      urlPdfSumario = new URL(href, urlBoletinHtml).href;
+      return false;
+    }
+  });
+
+  // Si no encuentra por texto exacto, buscamos el PDF que tenga formato de sumario o general de la página
   if (!urlPdfSumario) {
-    $("a").each((_, el) => {
-      const href = $(el).attr("href");
-      if (href) {
-        const urlAbsoluta = new URL(href, urlPortada).href;
-        // Los sumarios del BOJA suelen tener un patrón limpio de fecha o número sin ser disposiciones interiores larguísimas
-        if (urlAbsoluta.toLowerCase().endsWith(".pdf") && !urlAbsoluta.includes("ANUNCIO") && urlAbsoluta.length < 90) {
-          urlPdfSumario = urlAbsoluta;
-          return false;
-        }
+    $boletin("a").each((_, el) => {
+      const href = $boletin(el).attr("href");
+      if (href && href.toLowerCase().endsWith(".pdf") && !href.includes("ANUNCIO")) {
+        urlPdfSumario = new URL(href, urlBoletinHtml).href;
+        return false;
       }
     });
   }
 
   if (!urlPdfSumario) {
-    console.log("⚠️ No se ha podido localizar el PDF del sumario oficial.");
+    console.log("⚠️ No se ha encontrado el PDF del sumario.");
     return;
   }
 
-  // Limpiar posibles espacios en blanco en la URL por seguridad
-  urlPdfSumario = urlPdfSumario.trim().replace(/\s+/g, '%20');
-
   console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
 
-  // 2. Descargar y parsear el PDF del sumario
+  // 3. Descargar y parsear el PDF del sumario
   let parsedPdf;
   try {
     const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
@@ -197,7 +216,6 @@ async function ejecutar() {
     return;
   }
 
-  // Dividir el texto del PDF en bloques o líneas para analizarlos individualmente
   const textoCompleto = parsedPdf.text;
   const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
 
@@ -205,26 +223,20 @@ async function ejecutar() {
 
   const documentosProcesados = [];
 
-  // Recorremos el texto buscando coincidencias con nuestros sectores
+  // 4. Analizar líneas aplicando reglas de inclusión y exclusión por sector
   for (let i = 0; i < lineas.length; i++) {
     const lineaNorm = normalizar(lineas[i]);
 
     for (const [sector, reglas] of Object.entries(SECTORES)) {
-      // Verificar exclusiones
       const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
       if (tieneExclusion) continue;
 
-      // Verificar inclusiones
       const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
 
       if (coincide) {
-        // Buscamos si en las líneas cercanas hay un código de documento o enlace PDF asociado
-        // En el BOJA, los documentos individuales suelen enlazarse con su código numérico (ej: 10000562)
-        let urlPdfIndependiente = urlPdfSumario; // Por defecto el del sumario, o construimos si encontramos patrón
-
         documentosProcesados.push({
           titulo: lineas[i],
-          url_pdf: urlPdfSumario, // Apunta al sumario o documento oficial filtrado
+          url_pdf: urlPdfSumario,
           sector: sector
         });
         break;
@@ -235,7 +247,7 @@ async function ejecutar() {
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
 
-  // 3. Guardar en Supabase
+  // 5. Guardar en Supabase
   if (unicos.length > 0) {
     await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
       method: "POST",
@@ -248,7 +260,7 @@ async function ejecutar() {
     });
   }
 
-  // 4. Consultar usuarios y enviar correos mediante Resend
+  // 6. Consultar usuarios y enviar correos mediante Resend
   console.log("👥 Consultando usuarios suscritos...");
   const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
 
