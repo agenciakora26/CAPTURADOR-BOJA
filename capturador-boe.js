@@ -113,7 +113,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarBOE() {
-  console.log("🚀 Iniciando análisis preciso de la estructura del BOE...");
+  console.log("🚀 Iniciando análisis flexible del BOE por texto 'PDF (BOE'...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
   let documentos = [];
 
@@ -126,47 +126,44 @@ async function ejecutarBOE() {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Buscamos todos los enlaces de PDF que contienen BOE-A
-    $("a[href*='BOE-A-']").each((_, el) => {
-      const href = $(el).attr("href");
+    // Buscamos cualquier enlace cuyo texto comience o incluya "PDF (BOE" para ser totalmente agnósticos de la letra (A, B, E, etc.)
+    $("a").each((_, el) => {
       const textoEnlace = $(el).text();
+      const href = $(el).attr("href");
 
-      // Nos aseguramos de que sea el enlace al PDF
-      if (!href || (!href.includes(".pdf") && !textoEnlace.includes("PDF"))) return;
+      if (href && textoEnlace.includes("PDF (BOE")) {
+        const urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
 
-      const urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
+        // Localizamos el contenedor bloque donde está la noticia y el enlace
+        const contenedor = $(el).closest("div, p, li");
 
-      // Localizamos el contenedor de la disposición (suele ser un bloque con clase o un div/p contenedor)
-      const contenedor = $(el).closest("div, p, li");
-      
-      if (contenedor.length) {
-        // Clonamos el contenedor para limpiar los enlaces y botones y quedarnos solo con el texto del título
-        const clone = contenedor.clone();
-        clone.find("a, span, img").remove();
-        let tituloTexto = clone.text().replace(/\s+/g, " ").trim();
+        if (contenedor.length) {
+          const clone = contenedor.clone();
+          clone.find("a, span, img").remove();
+          let tituloTexto = clone.text().replace(/\s+/g, " ").trim();
 
-        // Si el contenedor directo no aísla bien el texto, buscamos el texto previo dentro de la caja
-        if (!tituloTexto || tituloTexto.length < 10) {
-          tituloTexto = contenedor.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
-        }
+          if (!tituloTexto || tituloTexto.length < 10) {
+            tituloTexto = contenedor.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
+          }
 
-        if (tituloTexto && tituloTexto.length > 10) {
-          const tituloNorm = normalizar(tituloTexto);
+          if (tituloTexto && tituloTexto.length > 10) {
+            const tituloNorm = normalizar(tituloTexto);
 
-          for (const [sector, reglas] of Object.entries(SECTORES)) {
-            const tieneExclusion = reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)));
-            if (tieneExclusion) continue;
+            for (const [sector, reglas] of Object.entries(SECTORES)) {
+              const tieneExclusion = reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)));
+              if (tieneExclusion) continue;
 
-            const coincide = reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)));
+              const coincide = reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)));
 
-            if (coincide) {
-              documentos.push({
-                titulo: tituloTexto,
-                url_pdf: urlPdfIndividual,
-                sector: sector,
-                origen: "BOE"
-              });
-              break;
+              if (coincide) {
+                documentos.push({
+                  titulo: tituloTexto,
+                  url_pdf: urlPdfIndividual,
+                  sector: sector,
+                  origen: "BOE"
+                });
+                break;
+              }
             }
           }
         }
