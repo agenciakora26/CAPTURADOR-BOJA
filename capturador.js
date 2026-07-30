@@ -211,7 +211,7 @@ async function ejecutar() {
       const numBoletin = partesUrl[5];
       const urlIndiceBoletin = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
 
-      console.log(`🔍 Analizando ${lineas.length} líneas y extrayendo enlaces incrustados...`);
+      console.log(`🔍 Analizando ${lineas.length} líneas y extrayendo información estructurada...`);
 
       for (let i = 0; i < lineas.length; i++) {
         const lineaNorm = normalizar(lineas[i]);
@@ -224,7 +224,9 @@ async function ejecutar() {
 
           if (coincide) {
             let urlPdfIndividual = urlIndiceBoletin;
+            let descripcionExtra = "";
 
+            // Buscamos el enlace real y una descripción informativa complementaria en las líneas siguientes
             for (let j = i; j < Math.min(i + 6, lineas.length); j++) {
               const matchTextoNum = lineas[j].match(/texto\s+n[uú]m\.?\s*(\d+)/i);
               if (matchTextoNum) {
@@ -237,8 +239,14 @@ async function ejecutar() {
               }
             }
 
+            // Capturamos el texto de las líneas inmediatamente posteriores si parece una descripción formal (ej. "Orden de...")
+            if (i + 1 < lineas.length && lineas[i + 1].length > 15 && !lineas[i + 1].toLowerCase().includes("texto num")) {
+              descripcionExtra = lineas[i + 1];
+            }
+
             documentosProcesados.push({
               titulo: lineas[i],
+              descripcion: descripcionExtra,
               url_pdf: urlPdfIndividual,
               sector: sector
             });
@@ -281,7 +289,7 @@ async function ejecutar() {
 
     console.log(`📧 Enviando correo de alerta a ${usuario.email}...`);
     
-    // Diseño HTML moderno, limpio y visualmente atractivo tipo tarjeta
+    // Diseño HTML corregido (eliminado el line-height conflictivo y añadido el bloque descriptivo profesional)
     const htmlCorreo = `
       <div style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f6f8; padding: 30px 10px; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
@@ -294,21 +302,29 @@ async function ejecutar() {
 
           <!-- Cuerpo principal -->
           <div style="padding: 30px;">
-            <p style="margin-top: 0; font-size: 16px; color: #2d3748;">Hola,</p>
-            <p style="font-size: 15px; color: #4a5568; line-height:.5;">Se han publicado <strong>${relevantes.length} nuevas disposiciones</strong> hoy que coinciden con los sectores a los que estás suscrito:</p>
+            <p style="margin-top: 0; font-size: 16px; color: #2d3748; line-height: 1.5;">Hola,</p>
+            <p style="font-size: 15px; color: #4a5568; line-height: 1.5; margin-bottom: 25px;">Se han publicado <strong>${relevantes.length} nuevas disposiciones</strong> hoy que coinciden con los sectores a los que estás suscrito:</p>
 
-            <div style="margin-top: 25px;">
+            <div>
               ${relevantes.map(r => {
                 const colorSector = SECTORES[r.sector]?.color || "#006b4f";
                 return `
-                  <div style="background-color: #f8fafc; border-left: 4px solid ${colorSector}; border: 1px solid #e2e8f0; border-left-width: 5px; border-radius: 6px; padding: 18px; margin-bottom: 20px;">
+                  <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 5px solid ${colorSector}; border-radius: 6px; padding: 18px; margin-bottom: 20px;">
                     <span style="display: inline-block; background-color: ${colorSector}; color: #ffffff; font-size: 11px; font-weight: bold; text-transform: uppercase; padding: 4px 10px; border-radius: 4px; margin-bottom: 10px; letter-spacing: 0.5px;">
                       ${r.sector}
                     </span>
+                    
+                    ${r.descripcion ? `
+                      <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #4a5568; line-height: 1.4;">
+                        📌 ${r.descripcion}
+                      </p>
+                    ` : ""}
+
                     <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: 500; color: #1a202c; line-height: 1.5;">
                       ${r.titulo}
                     </p>
-                    <a href="${r.url_pdf}" target="_blank" style="display: inline-block; background-color: #ffffff; color: ${colorSector}; border: 1px solid ${colorSector}; font-size: 13px; font-weight: bold; text-decoration: none; padding: 8px 16px; border-radius: 4px; transition: all 0.2s;">
+
+                    <a href="${r.url_pdf}" target="_blank" style="display: inline-block; background-color: #ffffff; color: ${colorSector}; border: 1px solid ${colorSector}; font-size: 13px; font-weight: bold; text-decoration: none; padding: 8px 16px; border-radius: 4px;">
                       📄 Ver documento oficial completo
                     </a>
                   </div>
@@ -316,7 +332,7 @@ async function ejecutar() {
               }).join("")}
             </div>
 
-            <p style="font-size: 14px; color: #718096; margin-top: 30px; border-top: 1px solid #edf2f7; padding-top: 20px;">
+            <p style="font-size: 14px; color: #718096; margin-top: 30px; border-top: 1px solid #edf2f7; padding-top: 20px; line-height: 1.4;">
               Este es un mensaje automático generado por tu plataforma de empleo y formación. Por favor, no respondas a este correo.
             </p>
           </div>
