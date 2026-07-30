@@ -1,17 +1,13 @@
 {
   "name": "capturador-boja",
   "version": "1.0.0",
-  "private": true,
-  "description": "Capturador automático de documentos del BOJA",
+  "description": "Automatizador BOJA",
   "main": "capturador.js",
   "scripts": {
     "start": "node capturador.js"
   },
-  "engines": {
-    "node": "20.x"
-  },
   "dependencies": {
-    "cheerio": "1.1.2",
-    "pdf-parse": "1.1.1"
+    "@supabase/supabase-js": "^2.0.0",
+    "resend": "^2.0.0"
   }
 }
