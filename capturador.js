@@ -206,9 +206,25 @@ async function ejecutar() {
         const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
 
         if (coincide) {
+          let urlPdfIndividual = urlPdfSumario; // Por defecto el sumario si no se localiza
+          
+          // Buscamos en las líneas siguientes el patrón "texto núm. XXXXX"
+          for (let j = i; j < Math.min(i + 6, lineas.length); j++) {
+            const matchTextoNum = lineas[j].match(/texto\s+n[uú]m\.?\s*(\d+)/i);
+            if (matchTextoNum) {
+              const numDisposicion = matchTextoNum[1];
+              const partesUrl = urlPdfSumario.split('/');
+              const anio = partesUrl[4];
+              const numBoletin = partesUrl[5];
+              
+              urlPdfIndividual = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/BOJA${anio.slice(-2)}-${numBoletin}-${numDisposicion.padStart(5, '0')}.pdf`;
+              break;
+            }
+          }
+
           documentosProcesados.push({
             titulo: lineas[i],
-            url_pdf: urlPdfSumario,
+            url_pdf: urlPdfIndividual,
             sector: sector
           });
           break;
