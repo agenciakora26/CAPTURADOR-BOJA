@@ -67,14 +67,13 @@ const SECTORES = {
       "profesores de ensenanza secundaria",
       "becas y ayudas al estudio",
       "formacion profesional para el empleo",
-      "universidades publicas de andalucia",
+      "universidades publicas",
       "oferta educativa"
     ],
     exclusion: []
   },
   "sanidad y bienestar social": {
     inulsion: [
-      "servicio andaluz de salud",
       "personal estatutario",
       "atencion a la dependencia",
       "subvenciones a entidades sociales",
@@ -86,7 +85,7 @@ const SECTORES = {
   },
   "subvenciones y ayudas generales": {
     inulsion: [
-      "incentivos economicos regionales",
+      "incentivos economicos",
       "ayudas a autonomos",
       "emprendimiento y creacion de empresas",
       "digitalizacion de pymes",
@@ -117,7 +116,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarBOE() {
-  console.log("🚀 Iniciando captura exclusiva del BOE...");
+  console.log("🚀 Iniciando captura estructurada del BOE...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
   let documentos = [];
 
@@ -130,41 +129,34 @@ async function ejecutarBOE() {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Como el BOE estructura su texto por bloques, recorrimos todos los enlaces de PDF para extraer su texto asociado
-    $("a").each((_, el) => {
+    // Recorremos los enlaces que apuntan a los PDFs individuales del BOE (ej. /diario_boe/pdfs/BOE-A-...)
+    $("a[href*='BOE-A-']").each((_, el) => {
       const href = $(el).attr("href");
-      const textoEnlace = $(el).text().trim();
+      if (!href || !href.includes(".pdf")) return;
 
-      if (href && (href.includes("/pdfs/BOE-A-") || textoEnlace.includes("PDF"))) {
-        let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
+      let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
 
-        // Extraemos el texto del bloque contenedor superior
-        const contenedor = $(el).closest("p, div, li, td");
-        let tituloTexto = "";
+      // El contenedor visual en el BOE suele ser un bloque que envuelve el texto explicativo y el enlace
+      const bloque = $(el).closest("p, div");
+      let textoBloque = bloque.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
 
-        if (contenedor.length) {
-          const clone = contenedor.clone();
-          clone.find("a, span, img").remove();
-          tituloTexto = clone.text().replace(/\s+/g, " ").trim();
-        }
+      if (textoBloque.length > 15) {
+        const textoNorm = normalizar(textoBloque);
 
-        if (!tituloTexto || tituloTexto.length < 15) {
-          tituloTexto = $(el).parent().text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
-        }
+        for (const [sector, reglas] of Object.entries(SECTORES)) {
+          const tieneExclusion = reglas.exclusion.some(ex => textoNorm.includes(normalizar(ex)));
+          if (tieneExclusion) continue;
 
-        if (tituloTexto && tituloTexto.length > 15) {
-          const tituloNorm = normalizar(tituloTexto);
-          for (const [sector, reglas] of Object.entries(SECTORES)) {
-            if (reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)))) continue;
-            if (reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)))) {
-              documentos.push({
-                titulo: tituloTexto,
-                url_pdf: urlPdfIndividual,
-                sector: sector,
-                origen: "BOE"
-              });
-              break;
-            }
+          const coincide = reglas.inulsion.some(inc => textoNorm.includes(normalizar(inc)));
+
+          if (coincide) {
+            documentos.push({
+              titulo: textoBloque,
+              url_pdf: urlPdfIndividual,
+              sector: sector,
+              origen: "BOE"
+            });
+            break;
           }
         }
       }
