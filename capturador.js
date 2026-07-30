@@ -134,29 +134,30 @@ async function ejecutar() {
     return;
   }
 
-  // 1. Obtener la URL del sumario HTML del día actual de forma robusta
+  // 1. Obtener la URL del sumario HTML del día actual de forma estricta
   const $portada = cheerio.load(htmlPortada);
   let urlIndice = null;
 
   $portada("a").each((_, el) => {
-    const texto = $portada(el).text().toLowerCase();
     const href = $portada(el).attr("href");
+    const texto = $portada(el).text().toLowerCase();
     
-    if (href && (texto.includes("sumario") || texto.includes("boletín") || href.includes("index.html"))) {
+    if (href && (texto.includes("sumario") || href.includes("/2026/"))) {
       const urlAbsoluta = new URL(href, urlPortada).href;
+      // Asegurarnos de que es una página web de índice (terminada en .html o sin extensión de pdf)
       if (!urlAbsoluta.toLowerCase().endsWith(".pdf")) {
         urlIndice = urlAbsoluta;
-        return false; // Rompe el bucle al encontrar el primero válido
+        return false; // Rompe al encontrar el primero
       }
     }
   });
 
   if (!urlIndice) {
-    console.log("⚠️ No se ha encontrado el enlace del sumario en la portada.");
+    console.log("⚠️ No se ha encontrado el enlace del sumario.");
     return;
   }
 
-  console.log(`🔗 Sumario detectado: ${urlIndice}`);
+  console.log(`🔗 Sumario detectado con éxito: ${urlIndice}`);
 
   let htmlSumario;
   try {
