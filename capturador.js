@@ -220,16 +220,20 @@ async function ejecutar() {
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
 
-  if (unicos.length > 0) {
-    await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify(unicos.map(d => ({
-        titulo: d.titulo,
-        url_pdf: d.url_pdf,
-        categoria: d.sector
-      })))
-    });
+  for (const d of unicos) {
+    try {
+      await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify({
+          titulo: d.titulo,
+          url_pdf: d.url_pdf,
+          categoria: d.sector
+        })
+      });
+    } catch (err) {
+      console.log(`⚠️ Aviso al guardar anuncio: ${err.message}`);
+    }
   }
 
   console.log("👥 Consultando usuarios suscritos...");
