@@ -6,7 +6,6 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
-// Tus 7 sectores con sus inclusiones y exclusiones
 const SECTORES = {
   "oposiciones y empleo": {
     inulsion: [
@@ -122,7 +121,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function ejecutar() {
   console.log("🚀 Iniciando capturador inteligente del BOJA...");
 
- const urlPortada = "https://www.juntadeandalucia.es/BOJA";
+  const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
   try {
     const res = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
@@ -139,7 +138,6 @@ async function ejecutar() {
   const $ = cheerio.load(htmlPortada);
   let urlsPdfSumarios = [];
 
-  // Buscamos estrictamente el enlace cuyo texto visible sea "sumario boletín"
   $("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
@@ -173,32 +171,9 @@ async function ejecutar() {
     console.log("⚠️ No se ha podido extraer ningún PDF de sumario boletín.");
     return;
   }
-  urlPdfSumario = urlPdfSumario.trim().replace(/\s+/g, '%20');
-  console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
-
-  // Descargar y parsear el PDF del sumario
-  let parsedPdf;
-  try {
-    const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-    if (!pdfRes.ok) {
-      console.log(`⚠️ No se pudo descargar el archivo PDF (HTTP ${pdfRes.status}).`);
-      return;
-    }
-    const buffer = Buffer.from(await pdfRes.arrayBuffer());
-    parsedPdf = await pdfParse(buffer);
-  } catch (err) {
-    console.log(`⚠️ Error al procesar el PDF del sumario: ${err.message}`);
-    return;
-  }
-
-  const textoCompleto = parsedPdf.text;
-  const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-
-  console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario...`);
 
   const documentosProcesados = [];
 
-  // Recorremos todos los sumarios encontrados (ordinario y extraordinarios si los hubiera)
   for (const urlPdfSumario of urlsPdfSumarios) {
     console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
 
@@ -241,6 +216,7 @@ async function ejecutar() {
       }
     }
   }
+
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
 
