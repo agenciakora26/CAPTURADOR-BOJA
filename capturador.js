@@ -207,6 +207,7 @@ async function capturarBOJA() {
 
 // --- CAPTURA BOE (Adaptada a tu estructura exacta) ---
 // --- CAPTURA BOE MEJORADA ---
+// --- CAPTURA BOE DEFINITIVA ---
 async function capturarBOE() {
   console.log("🚀 Iniciando captura del BOE desde la última edición...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
@@ -215,26 +216,36 @@ async function capturarBOE() {
   try {
     const res = await fetch(urlBoe, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
     if (!res.ok) {
-      console.log("⚠️ No se pudo acceder a la portada del BOE.");
+      console.log("⚠️ No se pudo acceder a la portada del BOE. Código HTTP:", res.status);
       return [];
     }
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Buscamos directamente cualquier enlace que lleve a un PDF del BOE (que contenga 'pdf.php?id=BOE-A')
+    // Recorremos todos los enlaces de la página para cazar cualquier referencia al BOE
     $("a").each((_, el) => {
       const href = $(el).attr("href");
-      
-      if (href && href.includes("pdf.php?id=BOE-A")) {
-        let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es/diario_boe/").href;
+      const textoEnlace = $(el).text().trim();
 
-        // El título en la estructura del BOE suele estar en el párrafo contenedor o en un elemento anterior cercano
-        let contenedor = $(el).closest("p");
-        if (contenedor.length === 0) {
-          contenedor = $(el).parent().parent();
+      // Buscamos si el enlace apunta a un documento del BOE (contiene BOE-A en su href o texto)
+      if (href && (href.includes("BOE-A-") || textoEnlace.includes("BOE-A-"))) {
+        let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es/diario_boe/").href;
+        
+        // Transformamos la URL a formato PDF directo si apunta a una vista detallada o HTML
+        if (urlPdfIndividual.includes("detallado.php")) {
+          urlPdfIndividual = urlPdfIndividual.replace("detallado.php", "pdf.php");
         }
 
-        let tituloTexto = contenedor.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
+        // Buscamos el texto descriptivo (título) en el contenedor superior o párrafo adyacente
+        let contenedor = $(el).closest("p, div, td");
+        let tituloTexto = contenedor.text().replace(/PDF|Otros formatos|BOE-A-[\d-]+/gi, "").replace(/\s+/g, " ").trim();
+
+        if (!tituloTexto || tituloTexto.length < 15) {
+          tituloTexto = $(el).parent().prev().text().replace(/\s+/g, " ").trim();
+        }
+        if (!tituloTexto || tituloTexto.length < 15) {
+          tituloTexto = textoEnlace; // Fallback al texto del propio enlace si lo hubiera
+        }
 
         if (tituloTexto && tituloTexto.length > 15) {
           const tituloNorm = normalizar(tituloTexto);
@@ -256,7 +267,7 @@ async function capturarBOE() {
   } catch (err) {
     console.log(`⚠️ Error al conectar con el BOE: ${err.message}`);
   }
-  
+
   const unicosBoe = Array.from(new Map(documentos.map(d => [d.titulo, d])).values());
   console.log(`🔍 BOE analizado. Encontrados relevantes: ${unicosBoe.length}`);
   return unicosBoe;
