@@ -1,5 +1,5 @@
 const cheerio = require("cheerio");
-const pdfParse = require("pdf-parse");
+const pdfjsLib = "pdfjs-dist/legacy/build/pdf.js" in require ? require("pdfjs-dist/legacy/build/pdf.js") : require("pdfjs-dist");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -119,7 +119,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutar() {
-  console.log("🚀 Iniciando capturador inteligente del BOJA...");
+  console.log("🚀 Iniciando capturador inteligente del BOJA en GitHub...");
 
   const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
@@ -144,7 +144,6 @@ async function ejecutar() {
     
     if (href && texto.includes("sumario boletín")) {
       let urlFinal = "";
-      
       if (href.includes("/eboja/")) {
         urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
       } else {
@@ -158,7 +157,6 @@ async function ejecutar() {
           urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
         }
       }
-
       if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
         urlsPdfSumarios.push(urlFinal);
       }
@@ -175,62 +173,81 @@ async function ejecutar() {
   const documentosProcesados = [];
 
   for (const urlPdfSumario of urlsPdfSumarios) {
-    console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
+    console.log(`📄 Descargando y leyendo hipervínculos del Sumario oficial: ${urlPdfSumario}`);
 
-    let parsedPdf;
     try {
       const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-      if (!pdfRes.ok) {
-        console.log(`⚠️ No se pudo descargar el archivo PDF (HTTP ${pdfRes.status}).`);
-        continue;
-      }
+      if (!pdfRes.ok) continue;
       const buffer = Buffer.from(await pdfRes.arrayBuffer());
-      parsedPdf = await pdfParse(buffer);
-    } catch (err) {
-      console.log(`⚠️ Error al procesar el PDF del sumario: ${err.message}`);
-      continue;
-    }
+      
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+      const pdfDoc = await loadingTask.promise;
 
-    const textoCompleto = parsedPdf.text;
-    const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      let lineasGlobales = [];
+      let enlacesGlobales = [];
 
-    const partesUrl = urlPdfSumario.split('/');
-    const anio = partesUrl[4];
-    const numBoletin = partesUrl[5];
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const textContent = await page.getTextContent();
+        const annotations = await page.getAnnotations();
 
-    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario...`);
+        let itemsPagina = textContent.items.map(item => item.str);
+        lineasGlobales.push(...itemsPagina);
+        enlacesGlobales.push(...annotations);
+      }
 
-    for (let i = 0; i < lineas.length; i++) {
-      const lineaNorm = normalizar(lineas[i]);
+      const textoUnido = lineasGlobales.join("\n");
+      const lineas = textoUnido.split("\n").map(l => l.trim()).filter(l => l.length > 0);
 
-      for (const [sector, reglas] of Object.entries(SECTORES)) {
-        const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
-        if (tieneExclusion) continue;
+      // Extraemos año y número de boletín de la URL del sumario
+      const partesUrl = urlPdfSumario.split('/');
+      const anio = partesUrl[4];
+      const numBoletin = partesUrl[5];
 
-        const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
+      // Enlace seguro por defecto: la página índice del BOJA de ese día (cero errores 404 ni verificaciones)
+      const urlIndiceBoletin = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
 
-        if (coincide) {
-          let urlPdfIndividual = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
-          
-          // Buscamos el número de texto asociado en las líneas cercanas del sumario
-          for (let j = i; j < Math.min(i + 6, lineas.length); j++) {
-            const matchTextoNum = lineas[j].match(/texto\s+n[uú]m\.?\s*(\d+)/i);
-            if (matchTextoNum) {
-              const numDisposicion = matchTextoNum[1];
-              // Generamos el enlace oficial de verificación del BOJA para esa disposición exacta
-              urlPdfIndividual = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/${numDisposicion}-verificacion`;
-              break;
+      console.log(`🔍 Analizando ${lineas.length} líneas y extrayendo enlaces incrustados...`);
+
+      for (let i = 0; i < lineas.length; i++) {
+        const lineaNorm = normalizar(lineas[i]);
+
+        for (const [sector, reglas] of Object.entries(SECTORES)) {
+          const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
+          if (tieneExclusion) continue;
+
+          const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
+
+          if (coincide) {
+            let urlPdfIndividual = urlIndiceBoletin; // Respaldo seguro por defecto
+
+            for (let j = i; j < Math.min(i + 6, lineas.length); j++) {
+              const matchTextoNum = lineas[j].match(/texto\s+n[uú]m\.?\s*(\d+)/i);
+              if (matchTextoNum) {
+                const numDisposicion = matchTextoNum[1];
+
+                // Buscamos estrictamente un enlace real que contenga el número y termine en .pdf (el documento oficial)
+                const enlaceReal = enlacesGlobales.find(ann => ann.url && ann.url.includes(numDisposicion) && ann.url.endsWith(".pdf"));
+                if (enlaceReal && enlaceReal.url) {
+                  urlPdfIndividual = enlaceReal.url;
+                }
+                break;
+              }
             }
-          }
 
-          documentosProcesados.push({
-            titulo: lineas[i],
-            url_pdf: urlPdfIndividual,
-            sector: sector
-          });
-          break;
+            documentosProcesados.push({
+              titulo: lineas[i],
+              url_pdf: urlPdfIndividual,
+              sector: sector
+            });
+            break;
+          }
         }
       }
+
+    } catch (err) {
+      console.log(`⚠️ Error al procesar el PDF con pdfjs: ${err.message}`);
+      continue;
     }
   }
 
