@@ -206,6 +206,7 @@ async function capturarBOJA() {
 }
 
 // --- CAPTURA BOE (Adaptada a tu estructura exacta) ---
+// --- CAPTURA BOE MEJORADA ---
 async function capturarBOE() {
   console.log("🚀 Iniciando captura del BOE desde la última edición...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
@@ -220,27 +221,20 @@ async function capturarBOE() {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Buscamos los enlaces de PDF que contienen el identificador BOE-A
+    // Buscamos directamente cualquier enlace que lleve a un PDF del BOE (que contenga 'pdf.php?id=BOE-A')
     $("a").each((_, el) => {
-      const textoEnlace = $(el).text().trim();
       const href = $(el).attr("href");
+      
+      if (href && href.includes("pdf.php?id=BOE-A")) {
+        let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es/diario_boe/").href;
 
-      if (href && (textoEnlace.includes("PDF (BOE-A-") || href.includes("pdf.php"))) {
-        let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es/diario_boe/").res || `https://www.boe.es${href.startsWith('/') ? '' : '/'}${href}`;
-
-        // Extraemos el texto superior (título de la disposición) del contenedor principal
-        const contenedor = $(el).closest("p, div, li");
-        let tituloTexto = "";
-
-        if (contenedor.length) {
-          const clone = contenedor.clone();
-          clone.find("a, span").remove();
-          tituloTexto = clone.text().replace(/\s+/g, " ").trim();
+        // El título en la estructura del BOE suele estar en el párrafo contenedor o en un elemento anterior cercano
+        let contenedor = $(el).closest("p");
+        if (contenedor.length === 0) {
+          contenedor = $(el).parent().parent();
         }
 
-        if (!tituloTexto || tituloTexto.length < 10) {
-          tituloTexto = $(el).parent().prev().text().replace(/\s+/g, " ").trim();
-        }
+        let tituloTexto = contenedor.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
 
         if (tituloTexto && tituloTexto.length > 15) {
           const tituloNorm = normalizar(tituloTexto);
@@ -262,7 +256,10 @@ async function capturarBOE() {
   } catch (err) {
     console.log(`⚠️ Error al conectar con el BOE: ${err.message}`);
   }
-  return Array.from(new Map(documentos.map(d => [d.titulo, d])).values());
+  
+  const unicosBoe = Array.from(new Map(documentos.map(d => [d.titulo, d])).values());
+  console.log(`🔍 BOE analizado. Encontrados relevantes: ${unicosBoe.length}`);
+  return unicosBoe;
 }
 
 async function ejecutar() {
