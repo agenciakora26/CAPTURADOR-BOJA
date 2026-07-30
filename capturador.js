@@ -198,26 +198,49 @@ async function ejecutar() {
 
   const documentosProcesados = [];
 
-  for (let i = 0; i < lineas.length; i++) {
-    const lineaNorm = normalizar(lineas[i]);
+  // Recorremos todos los sumarios encontrados (ordinario y extraordinarios si los hubiera)
+  for (const urlPdfSumario of urlsPdfSumarios) {
+    console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
 
-    for (const [sector, reglas] of Object.entries(SECTORES)) {
-      const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
-      if (tieneExclusion) continue;
+    let parsedPdf;
+    try {
+      const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
+      if (!pdfRes.ok) {
+        console.log(`⚠️ No se pudo descargar el archivo PDF (HTTP ${pdfRes.status}).`);
+        continue;
+      }
+      const buffer = Buffer.from(await pdfRes.arrayBuffer());
+      parsedPdf = await pdfParse(buffer);
+    } catch (err) {
+      console.log(`⚠️ Error al procesar el PDF del sumario: ${err.message}`);
+      continue;
+    }
 
-      const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
+    const textoCompleto = parsedPdf.text;
+    const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
 
-      if (coincide) {
-        documentosProcesados.push({
-          titulo: lineas[i],
-          url_pdf: urlPdfSumario,
-          sector: sector
-        });
-        break;
+    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario...`);
+
+    for (let i = 0; i < lineas.length; i++) {
+      const lineaNorm = normalizar(lineas[i]);
+
+      for (const [sector, reglas] of Object.entries(SECTORES)) {
+        const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
+        if (tieneExclusion) continue;
+
+        const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
+
+        if (coincide) {
+          documentosProcesados.push({
+            titulo: lineas[i],
+            url_pdf: urlPdfSumario,
+            sector: sector
+          });
+          break;
+        }
       }
     }
   }
-
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
 
