@@ -32,6 +32,7 @@ jobs:
           echo "Archivos del repositorio:"
           ls -la
           test -f capturador.js
+          test -f capturador-boe.js
           test -f package.json
 
       - name: Instalar dependencias
