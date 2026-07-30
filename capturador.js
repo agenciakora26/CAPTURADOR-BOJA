@@ -203,54 +203,62 @@ async function ejecutar() {
         enlacesGlobales.push(...annotations);
       }
 
-      const textoUnido = lineasGlobales.join("\n");
-      const lineas = textoUnido.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-
       const partesUrl = urlPdfSumario.split('/');
       const anio = partesUrl[4];
       const numBoletin = partesUrl[5];
       const urlIndiceBoletin = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
 
-      console.log(`🔍 Analizando ${lineas.length} líneas y extrayendo información estructurada...`);
+      console.log(`🔍 Agrupando líneas por bloques de anuncio ("texto núm.")...\n`);
 
-      for (let i = 0; i < lineas.length; i++) {
-        const lineaNorm = normalizar(lineas[i]);
+      // Recorremos las líneas buscando los bloques que terminan en "texto núm."
+      let bufferTituloLines = [];
+      
+      for (let i = 0; i < lineasGlobales.length; i++) {
+        const textoLinea = lineasGlobales[i].trim();
+        if (!textoLinea) continue;
 
-        for (const [sector, reglas] of Object.entries(SECTORES)) {
-          const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
-          if (tieneExclusion) continue;
+        const matchTextoNum = textoLinea.match(/texto\s+n[uú]m\.?\s*(\d+)/i);
 
-          const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
+        if (matchTextoNum) {
+          // ¡Encontramos el final de un anuncio! El texto acumulado antes de esta línea es el título completo.
+          const numDisposicion = matchTextoNum[1];
+          const tituloCompleto = bufferTituloLines.join(" ").replace(/\s+/g, " ").trim();
+          
+          if (tituloCompleto.length > 15) {
+            const tituloNorm = normalizar(tituloCompleto);
 
-          if (coincide) {
-            let urlPdfIndividual = urlIndiceBoletin;
-            let descripcionExtra = "";
+            // Comprobamos si encaja en algún sector
+            for (const [sector, reglas] of Object.entries(SECTORES)) {
+              const tieneExclusion = reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)));
+              if (tieneExclusion) continue;
 
-            // Buscamos el enlace real y una descripción informativa complementaria en las líneas siguientes
-            for (let j = i; j < Math.min(i + 6, lineas.length); j++) {
-              const matchTextoNum = lineas[j].match(/texto\s+n[uú]m\.?\s*(\d+)/i);
-              if (matchTextoNum) {
-                const numDisposicion = matchTextoNum[1];
+              const coincide = reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)));
+
+              if (coincide) {
+                // Buscamos el enlace PDF individual mediante las anotaciones
+                let urlPdfIndividual = urlIndiceBoletin;
                 const enlaceReal = enlacesGlobales.find(ann => ann.url && ann.url.includes(numDisposicion) && ann.url.endsWith(".pdf"));
                 if (enlaceReal && enlaceReal.url) {
                   urlPdfIndividual = enlaceReal.url;
                 }
+
+                documentosProcesados.push({
+                  titulo: tituloCompleto,
+                  url_pdf: urlPdfIndividual,
+                  sector: sector
+                });
                 break;
               }
             }
+          }
 
-            // Capturamos el texto de las líneas inmediatamente posteriores si parece una descripción formal (ej. "Orden de...")
-            if (i + 1 < lineas.length && lineas[i + 1].length > 15 && !lineas[i + 1].toLowerCase().includes("texto num")) {
-              descripcionExtra = lineas[i + 1];
-            }
-
-            documentosProcesados.push({
-              titulo: lineas[i],
-              descripcion: descripcionExtra,
-              url_pdf: urlPdfIndividual,
-              sector: sector
-            });
-            break;
+          // Reiniciamos el buffer para el siguiente anuncio
+          bufferTituloLines = [];
+        } else {
+          // Si no es la línea de "texto núm.", acumulamos la línea si parece parte del título de la disposición
+          // Ignoramos cabeceras repetitivas de páginas o fechas sueltas si fuera necesario
+          if (!textoLinea.startsWith("BOLETÍN OFICIAL") && !textoLinea.match(/^\d{1,2}\s+de\s+[a-z]+\s+de\s+\d{4}$/i)) {
+            bufferTituloLines.push(textoLinea);
           }
         }
       }
@@ -289,7 +297,6 @@ async function ejecutar() {
 
     console.log(`📧 Enviando correo de alerta a ${usuario.email}...`);
     
-    // Diseño HTML corregido (eliminado el line-height conflictivo y añadido el bloque descriptivo profesional)
     const htmlCorreo = `
       <div style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f6f8; padding: 30px 10px; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
@@ -310,17 +317,11 @@ async function ejecutar() {
                 const colorSector = SECTORES[r.sector]?.color || "#006b4f";
                 return `
                   <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 5px solid ${colorSector}; border-radius: 6px; padding: 18px; margin-bottom: 20px;">
-                    <span style="display: inline-block; background-color: ${colorSector}; color: #ffffff; font-size: 11px; font-weight: bold; text-transform: uppercase; padding: 4px 10px; border-radius: 4px; margin-bottom: 10px; letter-spacing: 0.5px;">
+                    <span style="display: inline-block; background-color: ${colorSector}; color: #ffffff; font-size: 11px; font-weight: bold; text-transform: uppercase; padding: 4px 10px; border-radius: 4px; margin-bottom: 12px; letter-spacing: 0.5px;">
                       ${r.sector}
                     </span>
-                    
-                    ${r.descripcion ? `
-                      <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #4a5568; line-height: 1.4;">
-                        📌 ${r.descripcion}
-                      </p>
-                    ` : ""}
 
-                    <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: 500; color: #1a202c; line-height: 1.5;">
+                    <p style="margin: 0 0 16px 0; font-size: 15px; font-weight: 500; color: #1a202c; line-height: 1.5;">
                       ${r.titulo}
                     </p>
 
