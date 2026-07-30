@@ -1,4 +1,5 @@
 const cheerio = require("cheerio");
+const pdfParse = require("pdf-parse");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -118,7 +119,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutar() {
-  console.log("🚀 Iniciando capturador web inteligente del BOJA...");
+  console.log("🚀 Iniciando capturador inteligente del BOJA...");
 
   const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
@@ -135,90 +136,94 @@ async function ejecutar() {
   }
 
   const $ = cheerio.load(htmlPortada);
-  let urlsWebSumarios = [];
+  let urlsPdfSumarios = [];
 
-  // Buscamos directamente los enlaces web al sumario del día de hoy
+  // Filtro estricto para capturar exclusivamente el PDF del sumario oficial de la portada
   $("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
     
-    if (href && (texto.includes("sumario") || texto.includes("boletín"))) {
+    if (href && texto.includes("sumario boletín")) {
       let urlFinal = "";
+      
       if (href.includes("/eboja/")) {
         urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
       } else {
-        urlFinal = new URL(href, "https://www.juntadeandalucia.es/eboja/").href;
+        const cleanHref = href.startsWith("/") ? href : `/${href}`;
+        const matchAnio = cleanHref.match(/BOJA(\d{2})-(\d+)-/);
+        if (matchAnio) {
+          const anioCompleto = `20${matchAnio[1]}`;
+          const numBoletin = parseInt(matchAnio[2], 10);
+          urlFinal = `https://www.juntadeandalucia.es/eboja/${anioCompleto}/${numBoletin}/${cleanHref.split('/').pop()}`;
+        } else {
+          urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
+        }
       }
 
-      // Aseguramos que apunte a la vista HTML del índice del sumario
-      if (urlFinal.endsWith(".pdf")) {
-        urlFinal = urlFinal.replace(".pdf", "/index.html");
-      } else if (!urlFinal.endsWith("index.html") && !urlFinal.endsWith("/")) {
-        urlFinal += "/index.html";
-      }
-
-      if (urlFinal && !urlsWebSumarios.includes(urlFinal)) {
-        urlsWebSumarios.push(urlFinal);
+      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
+        urlsPdfSumarios.push(urlFinal);
       }
     }
   });
 
-  // Si no encuentra enlaces específicos, construimos la ruta basada en la fecha actual
-  if (urlsWebSumarios.length === 0) {
-    const fechaHoy = new Date();
-    const anio = fechaHoy.getFullYear();
-    // Como alternativa de respaldo por si la portada cambia el formato de los enlaces
-    console.log("⚠️ Usando enlace de respaldo basado en la fecha actual.");
-  }
+  console.log(`📄 PDFs de sumarios oficiales detectados:`, urlsPdfSumarios);
 
-  console.log(`📄 Páginas web de sumarios detectadas:`, urlsWebSumarios);
+  if (urlsPdfSumarios.length === 0) {
+    console.log("⚠️ No se ha podido extraer ningún PDF de sumario boletín.");
+    return;
+  }
 
   const documentosProcesados = [];
 
-  for (const urlWebSumario of urlsWebSumarios) {
-    console.log(`🌐 Analizando contenido web del sumario: ${urlWebSumario}`);
+  for (const urlPdfSumario of urlsPdfSumarios) {
+    console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
 
-    let htmlSumario;
+    let parsedPdf;
     try {
-      const sumarioRes = await fetch(urlWebSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-      if (!sumarioRes.ok) continue;
-      htmlSumario = await sumarioRes.text();
+      const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
+      if (!pdfRes.ok) {
+        console.log(`⚠️ No se pudo descargar el archivo PDF (HTTP ${pdfRes.status}).`);
+        continue;
+      }
+      const buffer = Buffer.from(await pdfRes.arrayBuffer());
+      parsedPdf = await pdfParse(buffer);
     } catch (err) {
-      console.log(`⚠️ Error al descargar la página del sumario: ${err.message}`);
+      console.log(`⚠️ Error al procesar el PDF del sumario: ${err.message}`);
       continue;
     }
 
-    const $sumario = cheerio.load(htmlSumario);
+    const textoCompleto = parsedPdf.text;
+    const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
 
-    // Recorremos los bloques de anuncios de la página del BOJA
-    // La estructura típica del BOJA agrupa las disposiciones en listas o tablas con enlaces al texto oficial
-    $sumario("a").each((_, el) => {
-      const textoAnuncio = $sumario(el).text().trim();
-      let hrefAnuncio = $sumario(el).attr("href");
+    // Extraemos el año y número de boletín directamente de la URL oficial del sumario
+    const partesUrl = urlPdfSumario.split('/');
+    const anio = partesUrl[4];
+    const numBoletin = partesUrl[5];
+    
+    // Enlace web oficial y directo al boletín de ese día (evita cualquier error 404)
+    const urlWebBoletin = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/index.html`;
 
-      if (!hrefAnuncio || textoAnuncio.length < 15) return;
+    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario...`);
 
-      // Normalizamos la URL del documento individual (el enlace real que lleva al PDF/HTML del anuncio)
-      let urlDocumentoIndividual = new URL(hrefAnuncio, urlWebSumario).href;
-
-      const textoNorm = normalizar(textoAnuncio);
+    for (let i = 0; i < lineas.length; i++) {
+      const lineaNorm = normalizar(lineas[i]);
 
       for (const [sector, reglas] of Object.entries(SECTORES)) {
-        const tieneExclusion = reglas.exclusion.some(ex => textoNorm.includes(normalizar(ex)));
+        const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
         if (tieneExclusion) continue;
 
-        const coincide = reglas.inulsion.some(inc => textoNorm.includes(normalizar(inc)));
+        const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
 
         if (coincide) {
           documentosProcesados.push({
-            titulo: textoAnuncio,
-            url_pdf: urlDocumentoIndividual, // URL directa y limpia extraída de la web del BOJA
+            titulo: lineas[i],
+            url_pdf: urlWebBoletin,
             sector: sector
           });
           break;
         }
       }
-    });
+    }
   }
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
@@ -252,13 +257,13 @@ async function ejecutar() {
     const htmlCorreo = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
         <h2 style="color: #006b4f;">Boletín Oficial de la Junta de Andalucía</h2>
-        <p>Hola, <strong>tienes ${relevantes.length} alertas nuevas del BOJA de hoy</strong> relacionadas तुझ्या sectores:</p>
+        <p>Hola, <strong>tienes ${relevantes.length} alertas nuevas del BOJA de hoy</strong> relacionadas con tus sectores:</p>
         <ul style="line-height: 1.6;">
           ${relevantes.map(r => `
             <li style="margin-bottom: 12px;">
               <strong>[${r.sector.toUpperCase()}]</strong><br>
               <span style="font-size: 14px; color: #555;">${r.titulo}</span><br>
-              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Acceder al documento oficial completo</a>
+              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver edición oficial del BOJA de hoy</a>
             </li>
           `).join("")}
         </ul>
