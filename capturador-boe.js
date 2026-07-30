@@ -14,7 +14,8 @@ const SECTORES = {
       "plaza de personal laboral",
       "concurso-oposicion",
       "proceso selectivo",
-      "personal estatutario temporal"
+      "personal estatutario temporal",
+      "proteccion laboral"
     ],
     exclusion: [
       "nombramiento de funcionarios",
@@ -31,7 +32,7 @@ const SECTORES = {
       "turismo y artesania",
       "horarios comerciales",
       "plan de apoyo al sector hostelero",
-      "calidad turistica andaluza"
+      "calidad turistica"
     ],
     exclusion: []
   },
@@ -44,7 +45,7 @@ const SECTORES = {
       "subvenciones pac",
       "modernizacion de explotaciones agrarias",
       "incorporacion de jovenes agricultores",
-      "sector pesquero y acuicultura"
+      "sector pesquero"
     ],
     exclusion: []
   },
@@ -55,8 +56,7 @@ const SECTORES = {
       "suministros y servicios",
       "pliego de clausulas administrativas",
       "procedimiento abierto",
-      "adjudicacion de contrato",
-      "obras publicas de interes autonomico"
+      "adjudicacion de contrato"
     ],
     exclusion: []
   },
@@ -66,9 +66,8 @@ const SECTORES = {
       "cuerpo de maestros",
       "profesores de ensenanza secundaria",
       "becas y ayudas al estudio",
-      "formacion profesional para el empleo",
-      "universidades publicas",
-      "oferta educativa"
+      "formacion profesional",
+      "universidades"
     ],
     exclusion: []
   },
@@ -77,9 +76,8 @@ const SECTORES = {
       "personal estatutario",
       "atencion a la dependencia",
       "subvenciones a entidades sociales",
-      "centros de servicios sociales",
-      "prestaciones sociales publicas",
-      "concurso de traslado sanidad"
+      "prestaciones sociales",
+      "proteccion social"
     ],
     exclusion: []
   },
@@ -87,10 +85,9 @@ const SECTORES = {
     inulsion: [
       "incentivos economicos",
       "ayudas a autonomos",
-      "emprendimiento y creacion de empresas",
+      "emprendimiento",
       "digitalizacion de pymes",
-      "fomento del empleo autonomo",
-      "i+d+i empresarial"
+      "fomento del empleo"
     ],
     exclusion: []
   }
@@ -116,7 +113,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarBOE() {
-  console.log("🚀 Iniciando captura estructurada del BOE...");
+  console.log("🚀 Iniciando análisis preciso de la estructura del BOE...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
   let documentos = [];
 
@@ -129,34 +126,48 @@ async function ejecutarBOE() {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Recorremos los enlaces que apuntan a los PDFs individuales del BOE (ej. /diario_boe/pdfs/BOE-A-...)
+    // Buscamos todos los enlaces de PDF que contienen BOE-A
     $("a[href*='BOE-A-']").each((_, el) => {
       const href = $(el).attr("href");
-      if (!href || !href.includes(".pdf")) return;
+      const textoEnlace = $(el).text();
 
-      let urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
+      // Nos aseguramos de que sea el enlace al PDF
+      if (!href || (!href.includes(".pdf") && !textoEnlace.includes("PDF"))) return;
 
-      // El contenedor visual en el BOE suele ser un bloque que envuelve el texto explicativo y el enlace
-      const bloque = $(el).closest("p, div");
-      let textoBloque = bloque.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
+      const urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
 
-      if (textoBloque.length > 15) {
-        const textoNorm = normalizar(textoBloque);
+      // Localizamos el contenedor de la disposición (suele ser un bloque con clase o un div/p contenedor)
+      const contenedor = $(el).closest("div, p, li");
+      
+      if (contenedor.length) {
+        // Clonamos el contenedor para limpiar los enlaces y botones y quedarnos solo con el texto del título
+        const clone = contenedor.clone();
+        clone.find("a, span, img").remove();
+        let tituloTexto = clone.text().replace(/\s+/g, " ").trim();
 
-        for (const [sector, reglas] of Object.entries(SECTORES)) {
-          const tieneExclusion = reglas.exclusion.some(ex => textoNorm.includes(normalizar(ex)));
-          if (tieneExclusion) continue;
+        // Si el contenedor directo no aísla bien el texto, buscamos el texto previo dentro de la caja
+        if (!tituloTexto || tituloTexto.length < 10) {
+          tituloTexto = contenedor.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
+        }
 
-          const coincide = reglas.inulsion.some(inc => textoNorm.includes(normalizar(inc)));
+        if (tituloTexto && tituloTexto.length > 10) {
+          const tituloNorm = normalizar(tituloTexto);
 
-          if (coincide) {
-            documentos.push({
-              titulo: textoBloque,
-              url_pdf: urlPdfIndividual,
-              sector: sector,
-              origen: "BOE"
-            });
-            break;
+          for (const [sector, reglas] of Object.entries(SECTORES)) {
+            const tieneExclusion = reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)));
+            if (tieneExclusion) continue;
+
+            const coincide = reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)));
+
+            if (coincide) {
+              documentos.push({
+                titulo: tituloTexto,
+                url_pdf: urlPdfIndividual,
+                sector: sector,
+                origen: "BOE"
+              });
+              break;
+            }
           }
         }
       }
