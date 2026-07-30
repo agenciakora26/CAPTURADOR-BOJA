@@ -305,22 +305,20 @@ async function ejecutar() {
     });
   }
 
-  // Marcar como enviados en Supabase
-  const titulosEnviados = unicos.map(a => a.titulo);
-  if (titulosEnviados.length > 0) {
+  // Marcar como enviados en Supabase usando la URL del PDF
+  const urlsEnviadas = unicos.map(a => a.url_pdf);
+  if (urlsEnviadas.length > 0) {
     try {
-      await supabaseRequest("anuncios_boja?titulo=in.(" + titulosEnviados.map(t => `"${t}"`).join(",") + ")", {
-        method: "PATCH",
-        body: JSON.stringify({ enviado: true })
-      });
+      for (const url of urlsEnviadas) {
+        await supabaseRequest(`anuncios_boja?url_pdf=eq.${encodeURIComponent(url)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enviado: true })
+        });
+      }
     } catch (e) {
-      console.log("⚠️ No se pudieron marcar algunos registros como enviados.");
+      console.log("⚠️ Aviso menor al actualizar estado de envíos:", e.message);
     }
   }
-
-  console.log("✅ Proceso completo BOJA y BOE finalizado con éxito.");
-}
-
 ejecutar().catch((error) => {
   console.error("❌ Error crítico en el script:", error);
   process.exit(1);
