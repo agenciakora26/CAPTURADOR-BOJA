@@ -122,7 +122,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function ejecutar() {
   console.log("🚀 Iniciando capturador inteligente del BOJA...");
 
-  const urlPortada = "https://www.juntadeandalucia.es/BOJA";
+ const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
   try {
     const res = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
@@ -137,28 +137,59 @@ async function ejecutar() {
   }
 
   const $ = cheerio.load(htmlPortada);
-  let urlsSumarios = [];
+  let urlsPaginasBoletin = [];
 
-  // Recorremos todos los enlaces buscando específicamente los sumarios del día
+  // 1. Buscamos los enlaces que contengan "sumario boletín" en la portada
   $("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
     
-    if (href) {
+    if (href && texto.includes("sumario boletín")) {
       const urlAbsoluta = new URL(href, "https://www.juntadeandalucia.es").href;
-      // Filtramos para asegurarnos de que es un PDF de sumario y no una disposición individual larga
-      if (urlAbsoluta.toLowerCase().endsWith(".pdf") && (texto.includes("Sumario") || urlAbsoluta.includes("Sumario") || urlAbsoluta.includes("sumnario"))) {
-        if (!urlsSumarios.includes(urlAbsoluta)) {
-          urlsSumarios.push(urlAbsoluta);
-        }
+      if (!urlsPaginasBoletin.includes(urlAbsoluta)) {
+        urlsPaginasBoletin.push(urlAbsoluta);
       }
     }
   });
 
-  console.log(`📋 Sumarios detectados hoy:`, urlsSumarios);
+  console.log(`🔗 Páginas de "Sumario Boletín" detectadas:`, urlsPaginasBoletin);
 
-  if (urlsSumarios.length === 0) {
-    console.log("⚠️ No se han encontrado enlaces de sumarios en la portada.");
+  if (urlsPaginasBoletin.length === 0) {
+    console.log("⚠️ No se han encontrado enlaces de 'Sumario Boletín' en la portada.");
+    return;
+  }
+
+  let urlsPdfSumarios = [];
+
+  // 2. Entramos en cada una de esas páginas/hipervínculos para extraer el PDF definitivo
+  for (const urlPagina of urlsPaginasBoletin) {
+    try {
+      const resPagina = await fetch(urlPagina, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
+      if (!resPagina.ok) continue;
+      const htmlPagina = await resPagina.text();
+      const $pag = cheerio.load(htmlPagina);
+
+      // Buscamos el enlace al PDF dentro de esta página de sumario
+      $pag("a").each((_, el) => {
+        const hrefPdf = $pag(el).attr("href");
+        const textoPdf = $pag(el).text().toLowerCase();
+        
+        if (hrefPdf && hrefPdf.toLowerCase().endsWith(".pdf")) {
+          const urlPdfAbsoluta = new URL(hrefPdf, urlPagina).href;
+          if (!urlsPdfSumarios.includes(urlPdfAbsoluta)) {
+            urlsPdfSumarios.push(urlPdfAbsoluta);
+          }
+        }
+      });
+    } catch (err) {
+      console.log(`⚠️ Error al procesar la página ${urlPagina}: ${err.message}`);
+    }
+  }
+
+  console.log(`📄 PDFs de sumarios finales encontrados:`, urlsPdfSumarios);
+
+  if (urlsPdfSumarios.length === 0) {
+    console.log("⚠️ No se ha podido extraer ningún PDF de los sumarios.");
     return;
   }
   urlPdfSumario = urlPdfSumario.trim().replace(/\s+/g, '%20');
