@@ -121,8 +121,10 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutar() {
-  console.log("🚀 Iniciando capturador del BOJA...");
+  console.log("🚀 Iniciando capturador inteligente del BOJA...");
 
+  // Construir la fecha de hoy en formato YYYY y número de día/mes si hace falta, 
+  // o extraer el enlace exacto buscando la estructura del sumario de la fecha actual.
   const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
   try {
@@ -137,7 +139,7 @@ async function ejecutar() {
     return;
   }
 
-  // 1. Encontrar el enlace al PDF del Sumario en la portada
+  // 1. Encontrar el enlace oficial del sumario en la portada evitando PDFs internos de anuncios
   const $ = cheerio.load(htmlPortada);
   let urlPdfSumario = null;
 
@@ -145,28 +147,47 @@ async function ejecutar() {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
     
-    if (href && (texto.includes("sumario boletín") || texto.includes("sumario") || href.toLowerCase().endsWith(".pdf"))) {
+    if (href) {
       const urlAbsoluta = new URL(href, urlPortada).href;
-      if (urlAbsoluta.toLowerCase().includes(".pdf")) {
+      // Buscamos específicamente el enlace que contenga la palabra sumario o el patrón general del boletín del día
+      if (urlAbsoluta.toLowerCase().includes(".pdf") && (texto.includes("sumario") || urlAbsoluta.includes("000005") || urlAbsoluta.includes("sumario"))) {
         urlPdfSumario = urlAbsoluta;
-        return false; // Rompe el bucle al encontrar el PDF del sumario
+        return false; // Encontrado
       }
     }
   });
 
+  // Si por lo que sea el texto varía, cogemos el primer enlace PDF de la sección del día actual que tenga la estructura estándar del BOJA
   if (!urlPdfSumario) {
-    console.log("⚠️ No se ha encontrado el enlace al PDF del sumario en la portada.");
+    $("a").each((_, el) => {
+      const href = $(el).attr("href");
+      if (href) {
+        const urlAbsoluta = new URL(href, urlPortada).href;
+        // Los sumarios del BOJA suelen tener un patrón limpio de fecha o número sin ser disposiciones interiores larguísimas
+        if (urlAbsoluta.toLowerCase().endsWith(".pdf") && !urlAbsoluta.includes("ANUNCIO") && urlAbsoluta.length < 90) {
+          urlPdfSumario = urlAbsoluta;
+          return false;
+        }
+      }
+    });
+  }
+
+  if (!urlPdfSumario) {
+    console.log("⚠️ No se ha podido localizar el PDF del sumario oficial.");
     return;
   }
 
-  console.log(`📄 Descargando PDF del Sumario: ${urlPdfSumario}`);
+  // Limpiar posibles espacios en blanco en la URL por seguridad
+  urlPdfSumario = urlPdfSumario.trim().replace(/\s+/g, '%20');
+
+  console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
 
   // 2. Descargar y parsear el PDF del sumario
   let parsedPdf;
   try {
     const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
     if (!pdfRes.ok) {
-      console.log("⚠️ No se pudo descargar el archivo PDF del sumario.");
+      console.log(`⚠️ No se pudo descargar el archivo PDF (HTTP ${pdfRes.status}).`);
       return;
     }
     const buffer = Buffer.from(await pdfRes.arrayBuffer());
