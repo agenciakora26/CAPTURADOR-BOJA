@@ -112,7 +112,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarBOE() {
-  console.log("🚀 Iniciando extracción directa de títulos del BOE...");
+  console.log("🚀 Iniciando extracción mejorada del BOE...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
   let documentos = [];
 
@@ -135,26 +135,20 @@ async function ejecutarBOE() {
         encontradosCount++;
         const urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
 
-        // En la estructura del BOE, el bloque contenedor (por ejemplo, el div principal del anuncio) 
-        // contiene el título descriptivo arriba y los botones de formato abajo.
-        const caja = $(el).closest("div");
+        // En la estructura del BOE, subimos al contenedor principal del bloque de la disposición
+        const bloquePadre = $(el).closest("div").parent();
         
-        // Extraemos el texto de la caja eliminando las etiquetas de enlaces (como los botones de PDF y HTML)
-        const cajaClonada = caja.clone();
-        cajaClonada.find("a, span, img").remove();
-        let tituloTexto = cajaClonada.text().replace(/\s+/g, " ").trim();
-
-        // Si por lo que sea el clon se queda vacío, cogemos el texto previo al enlace dentro del párrafo contenedor
-        if (!tituloTexto || tituloTexto.length < 5) {
-          const parrafo = $(el).closest("p");
-          tituloTexto = parrafo.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
-        }
+        // Extraemos todo el texto del bloque padre y limpiamos los textos sobrantes de los enlaces
+        let tituloTexto = bloquePadre.text()
+          .replace(/PDF.*|Otros formatos.*/gi, "")
+          .replace(/\s+/g, " ")
+          .trim();
 
         if (encontradosCount <= 5 || (encontradosCount % 40 === 0)) {
-          console.log(`🔎 [Muestra BOE] Título: "${tituloTexto}"`);
+          console.log(`🔎 [Muestra BOE corregida] Título: "${tituloTexto}"`);
         }
 
-        if (tituloTexto && tituloTexto.length > 5) {
+        if (tituloTexto && tituloTexto.length > 10) {
           const tituloNorm = normalizar(tituloTexto);
 
           for (const [sector, reglas] of Object.entries(SECTORES)) {
