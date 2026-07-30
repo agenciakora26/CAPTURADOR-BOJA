@@ -122,7 +122,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function ejecutar() {
   console.log("🚀 Iniciando capturador inteligente del BOJA...");
 
-  const urlPortada = "https://www.juntadeandalucia.es/BOJA";
+const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
   try {
     const res = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
@@ -137,41 +137,29 @@ async function ejecutar() {
   }
 
   const $ = cheerio.load(htmlPortada);
-  let urlBoletinHtml = null;
+  let urlPdfSumario = null;
 
-  // 1. Encontrar la página HTML del boletín del día actual desde la portada
+  // Buscamos estrictamente el enlace cuyo texto contenga "sumario boletín" en la portada
   $("a").each((_, el) => {
-    const href = $(el).attr("href");
     const texto = $(el).text().toLowerCase();
+    const href = $(el).attr("href");
     
-    if (href) {
-      const urlAbsoluta = new URL(href, urlPortada).href;
-      if (!urlAbsoluta.toLowerCase().endsWith(".pdf") && (texto.includes("sumario") || texto.includes("boletín") || urlAbsoluta.includes("/2026/"))) {
-        urlBoletinHtml = urlAbsoluta;
-        return false;
-      }
+    if (href && texto.includes("sumario boletín")) {
+      // Resolvemos la URL correctamente respecto a la base del dominio principal
+      urlPdfSumario = new URL(href, "https://www.juntadeandalucia.es").href;
+      return false; // Rompe el bucle al encontrar el sumario exacto
     }
   });
 
-  if (!urlBoletinHtml) {
-    console.log("⚠️ No se ha podido localizar la página del boletín.");
+  if (!urlPdfSumario) {
+    console.log("⚠️ No se ha encontrado el enlace del 'Sumario boletín' en la portada.");
     return;
   }
 
-  console.log(`🔗 Página del boletín detectada: ${urlBoletinHtml}`);
+  // Limpiar espacios por seguridad
+  urlPdfSumario = urlPdfSumario.trim().replace(/\s+/g, '%20');
 
-  let htmlBoletin;
-  try {
-    const resBoletin = await fetch(urlBoletinHtml, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-    if (!resBoletin.ok) return;
-    htmlBoletin = await resBoletin.text();
-  } catch (err) {
-    console.log(`⚠️ Error al conectar con la página del boletín: ${err.message}`);
-    return;
-  }
-
-  const $boletin = cheerio.load(htmlBoletin);
-  let urlPdfSumario = null;
+  console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
 
   // 2. Buscar el PDF del Sumario dentro de la página del boletín
   $boletin("a").each((_, el) => {
