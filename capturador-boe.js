@@ -1,4 +1,4 @@
-const cheerio = require("cheerio");
+const cheerio = "cheerio" in globalThis ? require("cheerio") : require("cheerio");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -15,7 +15,8 @@ const SECTORES = {
       "concurso-oposicion",
       "proceso selectivo",
       "personal estatutario temporal",
-      "proteccion laboral"
+      "proteccion laboral",
+      "medidas urgentes"
     ],
     exclusion: [
       "nombramiento de funcionarios",
@@ -28,10 +29,9 @@ const SECTORES = {
     inulsion: [
       "subvencion hosteleria",
       "ayudas al comercio minorista",
-      "modernizacion de establecimientos comerciales",
+      "modernizacion de establecimientos",
       "turismo y artesania",
       "horarios comerciales",
-      "plan de apoyo al sector hostelero",
       "calidad turistica"
     ],
     exclusion: []
@@ -43,8 +43,7 @@ const SECTORES = {
       "sanidad animal",
       "sanidad vegetal",
       "subvenciones pac",
-      "modernizacion de explotaciones agrarias",
-      "incorporacion de jovenes agricultores",
+      "modernizacion de explotaciones",
       "sector pesquero"
     ],
     exclusion: []
@@ -54,7 +53,7 @@ const SECTORES = {
       "anuncio de licitacion",
       "contratacion de obras",
       "suministros y servicios",
-      "pliego de clausulas administrativas",
+      "pliego",
       "procedimiento abierto",
       "adjudicacion de contrato"
     ],
@@ -62,10 +61,10 @@ const SECTORES = {
   },
   "educacion y formacion": {
     inulsion: [
-      "convocatoria de plazas de profesorado",
+      "convocatoria de plazas",
+      "profesorado",
       "cuerpo de maestros",
-      "profesores de ensenanza secundaria",
-      "becas y ayudas al estudio",
+      "becas y ayudas",
       "formacion profesional",
       "universidades"
     ],
@@ -74,7 +73,7 @@ const SECTORES = {
   "sanidad y bienestar social": {
     inulsion: [
       "personal estatutario",
-      "atencion a la dependencia",
+      "dependencia",
       "subvenciones a entidades sociales",
       "prestaciones sociales",
       "proteccion social"
@@ -86,7 +85,7 @@ const SECTORES = {
       "incentivos economicos",
       "ayudas a autonomos",
       "emprendimiento",
-      "digitalizacion de pymes",
+      "digitalizacion",
       "fomento del empleo"
     ],
     exclusion: []
@@ -113,7 +112,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarBOE() {
-  console.log("🚀 Iniciando análisis flexible del BOE por texto 'PDF (BOE'...");
+  console.log("🚀 Iniciando rastreo optimizado del BOE...");
   const urlBoe = "https://www.boe.es/diario_boe/ultimo.php";
   let documentos = [];
 
@@ -126,49 +125,67 @@ async function ejecutarBOE() {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Buscamos cualquier enlace cuyo texto comience o incluya "PDF (BOE" para ser totalmente agnósticos de la letra (A, B, E, etc.)
+    let totalEnlacesPdfEncontrados = 0;
+
+    // Buscamos directamente cualquier etiqueta 'a' que contenga el texto del PDF oficial
     $("a").each((_, el) => {
       const textoEnlace = $(el).text();
       const href = $(el).attr("href");
 
       if (href && textoEnlace.includes("PDF (BOE")) {
+        totalEnlacesPdfEncontrados++;
         const urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
 
-        // Localizamos el contenedor bloque donde está la noticia y el enlace
-        const contenedor = $(el).closest("div, p, li");
+        // El título descriptivo en la estructura del BOE suele encontrarse en el elemento de bloque previo (p.ej. un párrafo anterior)
+        // Buscamos el texto analizando el contenedor padre o el hermano anterior
+        let contenedor = $(el).closest("div, p");
+        let tituloTexto = "";
 
         if (contenedor.length) {
+          // Extraemos el texto del bloque eliminando los botones de enlaces y formatos
           const clone = contenedor.clone();
-          clone.find("a, span, img").remove();
-          let tituloTexto = clone.text().replace(/\s+/g, " ").trim();
+          clone.find("a, span, img, strong").remove();
+          tituloTexto = clone.text().replace(/\s+/g, " ").trim();
 
-          if (!tituloTexto || tituloTexto.length < 10) {
+          // Si el texto queda muy corto, buscamos en el texto completo del bloque contenedor
+          if (tituloTexto.length < 15) {
             tituloTexto = contenedor.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
           }
+        }
 
-          if (tituloTexto && tituloTexto.length > 10) {
-            const tituloNorm = normalizar(tituloTexto);
+        // Método alternativo si el anterior no captura suficiente texto: buscar en el bloque padre general
+        if (!tituloTexto || tituloTexto.length < 15) {
+          const parentBlock = $(el).parent().parent();
+          tituloTexto = parentBlock.text().replace(/PDF.*|Otros formatos.*/gi, "").replace(/\s+/g, " ").trim();
+        }
 
-            for (const [sector, reglas] of Object.entries(SECTORES)) {
-              const tieneExclusion = reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)));
-              if (tieneExclusion) continue;
+        console.log(`🔎 [BOE Encontrado] Título extraído: "${tituloTexto.substring(0, 60)}..."`);
 
-              const coincide = reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)));
+        if (tituloTexto && tituloTexto.length > 10) {
+          const tituloNorm = normalizar(tituloTexto);
 
-              if (coincide) {
-                documentos.push({
-                  titulo: tituloTexto,
-                  url_pdf: urlPdfIndividual,
-                  sector: sector,
-                  origen: "BOE"
-                });
-                break;
-              }
+          for (const [sector, reglas] of Object.entries(SECTORES)) {
+            const tieneExclusion = reglas.exclusion.some(ex => tituloNorm.includes(normalizar(ex)));
+            if (tieneExclusion) continue;
+
+            const coincide = reglas.inulsion.some(inc => tituloNorm.includes(normalizar(inc)));
+
+            if (coincide) {
+              documentos.push({
+                titulo: tituloTexto,
+                url_pdf: urlPdfIndividual,
+                sector: sector,
+                origen: "BOE"
+              });
+              break;
             }
           }
         }
       }
     });
+
+    console.log(`📌 Total de enlaces de PDF oficiales analizados en el BOE: ${totalEnlacesPdfEncontrados}`);
+
   } catch (err) {
     console.log(`⚠️ Error al conectar con el BOE: ${err.message}`);
   }
