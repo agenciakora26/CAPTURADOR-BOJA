@@ -34,18 +34,48 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutar() {
-  console.log("🚀 Iniciando capturador simplificado del BOJA...");
+  console.log("🚀 Iniciando capturador inteligente del BOJA...");
 
-  // 1. Obtener fecha actual en formato YYYYMMDD
-  const hoy = new Date();
-  const anio = hoy.getFullYear();
-  const mes = String(hoy.getMonth() + 1).padStart(2, "0");
-  const dia = String(hoy.getDate()).padStart(2, "0");
-  const formatoFecha = `${anio}${mes}${dia}`;
-  const urlIndice = `${BASE_BOJA}/${formatoFecha}.html`;
+  const urlPortada = "https://www.juntadeandalucia.es/BOJA";
+  console.log(`📅 Consultando portada principal del BOJA: ${urlPortada}`);
 
-  console.log(`📅 Consultando índice del BOJA: ${urlIndice}`);
-  
+  let htmlPortada;
+  try {
+    const respuestaPortada = await fetch(urlPortada, {
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(15000)
+    });
+
+    if (!respuestaPortada.ok) {
+      console.log(`⚠️ No se puede acceder a la portada del BOJA (HTTP ${respuestaPortada.status}).`);
+      return;
+    }
+    htmlPortada = await respuestaPortada.text();
+  } catch (error) {
+    console.log(`⚠️ Error al conectar con la portada del BOJA: ${error.message}`);
+    return;
+  }
+
+  // Buscar el enlace del "Sumario boletín" en la portada de forma dinámica
+  const $portada = cheerio.load(htmlPortada);
+  let urlIndice = null;
+
+  $portada("a").each((_, el) => {
+    const texto = $portada(el).text();
+    const href = $portada(el).attr("href");
+    if (texto && texto.toLowerCase().includes("sumario boletín") && href) {
+      urlIndice = new URL(href, urlPortada).href;
+      return false; // Rompe el bucle al encontrarlo
+    }
+  });
+
+  if (!urlIndice) {
+    console.log("⚠️ No se ha encontrado el enlace del 'Sumario boletín' en la portada de hoy.");
+    return;
+  }
+
+  console.log(`🔗 Enlace del sumario detectado con éxito: ${urlIndice}`);
+
   let html;
   try {
     const respuesta = await fetch(urlIndice, {
@@ -54,12 +84,12 @@ async function ejecutar() {
     });
 
     if (!respuesta.ok) {
-      console.log(`⚠️ No hay BOJA disponible para hoy (HTTP ${respuesta.status}). Puede ser fin de semana o festivo.`);
+      console.log(`⚠️ No hay contenido disponible en el sumario (HTTP ${respuesta.status}).`);
       return;
     }
     html = await respuesta.text();
   } catch (error) {
-    console.log(`⚠️ Error al conectar con la web del BOJA: ${error.message}`);
+    console.log(`⚠️ Error al descargar el sumario del BOJA: ${error.message}`);
     return;
   }
 
