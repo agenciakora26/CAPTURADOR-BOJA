@@ -1,5 +1,5 @@
 const cheerio = require("cheerio");
-const pdfParse = require("pdf-parse");
+const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -144,7 +144,6 @@ async function ejecutar() {
     
     if (href && texto.includes("sumario boletín")) {
       let urlFinal = "";
-      
       if (href.includes("/eboja/")) {
         urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
       } else {
@@ -158,7 +157,6 @@ async function ejecutar() {
           urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
         }
       }
-
       if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
         urlsPdfSumarios.push(urlFinal);
       }
@@ -175,52 +173,94 @@ async function ejecutar() {
   const documentosProcesados = [];
 
   for (const urlPdfSumario of urlsPdfSumarios) {
-    console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
+    console.log(`📄 Descargando y analizando hipervínculos del Sumario oficial: ${urlPdfSumario}`);
 
-    let parsedPdf;
     try {
       const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-      if (!pdfRes.ok) {
-        console.log(`⚠️ No se pudo descargar el archivo PDF (HTTP ${pdfRes.status}).`);
-        continue;
-      }
+      if (!pdfRes.ok) continue;
       const buffer = Buffer.from(await pdfRes.arrayBuffer());
-      parsedPdf = await pdfParse(buffer);
-    } catch (err) {
-      console.log(`⚠️ Error al procesar el PDF del sumario: ${err.message}`);
-      continue;
-    }
+      
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+      const pdfDoc = await loadingTask.promise;
 
-    const textoCompleto = parsedPdf.text;
-    const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      let textoPaginas = [];
+      let enlacesPorPagina = [];
 
-    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario...`);
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const textContent = await page.getTextContent();
+        const annotations = await page.getAnnotations();
 
-    // Construimos la URL web del sumario del día (cambiando la extensión .pdf por .html o apuntando a la ruta del boletín)
-    // Ejemplo: de https://.../BOJA26-146.pdf a la visualización web del sumario del boletín
-    const partesUrl = urlPdfSumario.split('/');
-    const anio = partesUrl[4];
-    const numBoletinConPdf = partesUrl[5];
-    const urlWebBoletin = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletinConPdf}/index.html`;
+        // Extraer líneas de texto con coordenadas aproximadas
+        let lineasPagina = textContent.items.map(item => ({
+          str: item.str,
+          transform: item.transform // [scaleX, skewY, skewX, scaleY, x, y]
+        }));
 
-    for (let i = 0; i < lineas.length; i++) {
-      const lineaNorm = normalizar(lineas[i]);
+        textoPaginas.push(lineasPagina);
+        enlacesPorPagina.push(annotations);
+      }
 
-      for (const [sector, reglas] of Object.entries(SECTORES)) {
-        const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
-        if (tieneExclusion) continue;
+      // Procesamiento unificado de texto y enlaces anidados
+      let textoCompletoPlano = [];
+      let enlacesMapeados = [];
 
-        const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
+      for (let p = 0; p < pdfDoc.numPages; p++) {
+        const lineas = textoPaginas[p];
+        const annotations = enlacesPorPagina[p];
 
-        if (coincide) {
-          documentosProcesados.push({
-            titulo: lineas[i],
-            url_pdf: urlWebBoletin, // Apunta de forma segura a la página web oficial del sumario del BOJA de ese día
-            sector: sector
-          });
-          break;
+        // Unimos el texto linealmente para buscar coincidencias
+        let textoStr = lineas.map(l => l.str).join("\n");
+        let lineasArray = textoStr.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+
+        for (let i = 0; i < lineasArray.length; i++) {
+          const lineaNorm = normalizar(lineasArray[i]);
+
+          for (const [sector, reglas] of Object.entries(SECTORES)) {
+            const tieneExclusion = reglas.exclusion.some(ex => lineaNorm.includes(normalizar(ex)));
+            if (tieneExclusion) continue;
+
+            const coincide = reglas.inulsion.some(inc => lineaNorm.includes(normalizar(inc)));
+
+            if (coincide) {
+              // Buscamos el enlace "texto núm." más cercano en las anotaciones de la misma página o en líneas de texto próximas
+              let urlPdfIndividual = urlPdfSumario;
+
+              for (let j = i; j < Math.min(i + 6, lineasArray.length); j++) {
+                const matchTextoNum = lineasArray[j].match(/texto\s+n[uú]m\.?\s*(\d+)/i);
+                if (matchTextoNum) {
+                  const numDisposicion = matchTextoNum[1];
+                  
+                  // Buscamos en las anotaciones de la página un enlace que contenga ese número de disposición
+                  const enlaceEncontrado = annotations.find(ann => ann.url && ann.url.includes(numDisposicion));
+                  if (enlaceEncontrado && enlaceEncontrado.url) {
+                    urlPdfIndividual = enlaceEncontrado.url;
+                  } else {
+                    // Fallback inteligente si la anotación directa no expone la URL completa
+                    const partesUrl = urlPdfSumario.split('/');
+                    const anio = partesUrl[4];
+                    const numBoletin = partesUrl[5];
+                    // Patrón aproximado de la URL del BOJA si se conoce el patrón base
+                    urlPdfIndividual = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/`;
+                  }
+                  break;
+                }
+              }
+
+              documentosProcesados.push({
+                titulo: lineasArray[i],
+                url_pdf: urlPdfIndividual,
+                sector: sector
+              });
+              break;
+            }
+          }
         }
       }
+
+    } catch (err) {
+      console.log(`⚠️ Error al procesar anotaciones del PDF: ${err.message}`);
+      continue;
     }
   }
 
@@ -261,7 +301,7 @@ async function ejecutar() {
             <li style="margin-bottom: 12px;">
               <strong>[${r.sector.toUpperCase()}]</strong><br>
               <span style="font-size: 14px; color: #555;">${r.titulo}</span><br>
-              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver sumario oficial del día en el BOJA</a>
+              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver documento PDF oficial de este anuncio</a>
             </li>
           `).join("")}
         </ul>
