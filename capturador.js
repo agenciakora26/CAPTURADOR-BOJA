@@ -134,24 +134,25 @@ async function ejecutar() {
     return;
   }
 
-  // 1. Obtener la URL del sumario HTML del día actual dinámicamente
+  // 1. Obtener la URL del sumario HTML del día actual de forma robusta
   const $portada = cheerio.load(htmlPortada);
   let urlIndice = null;
 
   $portada("a").each((_, el) => {
-    const texto = $portada(el).text();
+    const texto = $portada(el).text().toLowerCase();
     const href = $portada(el).attr("href");
-    if (texto && texto.toLowerCase().includes("sumario boletín") && href) {
+    
+    if (href && (texto.includes("sumario") || texto.includes("boletín") || href.includes("index.html"))) {
       const urlAbsoluta = new URL(href, urlPortada).href;
       if (!urlAbsoluta.toLowerCase().endsWith(".pdf")) {
         urlIndice = urlAbsoluta;
-        return false;
+        return false; // Rompe el bucle al encontrar el primero válido
       }
     }
   });
 
   if (!urlIndice) {
-    console.log("⚠️ No se ha encontrado el enlace del 'Sumario boletín'.");
+    console.log("⚠️ No se ha encontrado el enlace del sumario en la portada.");
     return;
   }
 
