@@ -165,7 +165,6 @@ function evaluarYGuardar(texto, urlBase, seccion, destino) {
   
   console.log(`🔎 Evaluando texto (${textoLimpio.length} chars) [${seccion}]: "${textoLimpio.substring(0, 80)}..."`);
   
-  // Le pasamos la sección y el texto a la función clasificadora
   const sectorEncontrado = clasificarTexto(textoLimpio, seccion);
 
   if (sectorEncontrado) {
