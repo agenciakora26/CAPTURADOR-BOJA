@@ -214,8 +214,15 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-async function ejecutar() {
-  console.log("🚀 Iniciando capturador inteligente del BOJA...");
+// Asegúrate de que el flujo principal ejecute ambas llamadas:
+console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
+
+// 1. Ejecutar el capturador del BOJA (comprueba que esta función se esté llamando y esperando con await)
+await ejecutarCapturadorBoja(); 
+
+// 2. Ejecutar el capturador del BOE
+console.log("🚀 Iniciando extracción mejorada del BOE...");
+await ejecutarCapturadorBoe();
 
   const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
