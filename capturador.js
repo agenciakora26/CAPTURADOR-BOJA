@@ -364,13 +364,13 @@ $("a").each((_, el) => {
           continue;
         }
 
-        // 🛑 SALTAR TODA LA SECCIÓN DE NOMBRAMIENTOS
+        // 🛑 SALTAR TODA LA SECCIÓN DE NOMBRAMIENTOS (Único filtro de exclusión activo)
         if (seccionActual.toLowerCase().includes("nombramientos")) {
           parrafoActual = ""; 
           continue;
         }
 
-        // Detectar si empieza un nuevo anuncio
+        // Detectar si empieza un nuevo anuncio por su formato estándar (número o CVE)
         if (linea.match(/^[0-9]+\./) || linea.toLowerCase().includes("cve:")) {
           if (parrafoActual.length > 25) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
