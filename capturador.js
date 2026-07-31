@@ -299,6 +299,12 @@ $("a").each((_, el) => {
       for (let i = 0; i < lineas.length; i++) {
         const linea = lineas[i];
 
+        // Ignorar líneas del pie de página de la portada que no son anuncios
+        if (linea.includes("Depósito legal") || linea.includes("ISSN") || linea === "https://www.juntadeandalucia.es/eboja") {
+          continue;
+        }
+        const linea = lineas[i];
+
         // Detectar cabeceras de sección
         if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("consejería"))) {
           if (parrafoActual.length > 25) {
@@ -310,15 +316,15 @@ $("a").each((_, el) => {
         }
 
         // Si la línea contiene el "texto núm. XXXXX", extraemos ese número para formar la URL directa
+        // Si la línea contiene el "texto núm. XXXXX", podemos extraerlo y actualizar el enlace del anuncio actual que se está formando
         const matchTextoNum = linea.match(/texto\s+n[úu]m\.?\s*(\d+)/i);
         if (matchTextoNum) {
           const numTexto = matchTextoNum[1];
-          // Extraemos año y número de boletín de la URL del sumario actual (ej: /2026/147/)
           const matchRuta = urlPdfSumario.match(/\/(\d{4})\/(\d+)\//);
           if (matchRuta) {
             const anio = matchRuta[1];
             const numBoletin = matchRuta[2];
-            // Construimos la URL oficial directa para ese anuncio específico del BOJA
+            // Actualizamos la variable para que el párrafo que se guarde a continuación lleve su enlace exacto
             urlAnuncioEspecifica = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/BOJA${anio.slice(2)}-${numBoletin}-${numTexto}.pdf`;
           }
         }
@@ -328,10 +334,8 @@ $("a").each((_, el) => {
           if (parrafoActual.length > 25) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
-            urlAnuncioEspecifica = urlPdfSumario; // Reseteamos al sumario base para el siguiente
           }
         }
-
         parrafoActual += " " + linea;
       }
 
