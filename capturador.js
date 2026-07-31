@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
