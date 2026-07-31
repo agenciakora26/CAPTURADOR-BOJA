@@ -377,8 +377,16 @@ async function ejecutarCapturadorBoja() {
           urlAnuncioEspecifica = lineaObj.url;
         }
 
-        // Si la sección actual corresponde a nombramientos, saltamos y limpiamos de inmediato
-        if (seccionActual.toLowerCase().includes("nombramientos") || seccionActual.toLowerCase().includes("situaciones e incidencias")) {
+        // BLOQUEO TOTAL: Si la línea o la sección actual hablan de nombramientos o apartados 2.1, descartamos al instante
+        const textoMinus = linea.toLowerCase();
+        if (
+          textoMinus.includes("nombramientos") || 
+          textoMinus.includes("situaciones e incidencias") || 
+          textoMinus.includes("2.1.") || 
+          textoMinus.includes("2.1 nombramientos") ||
+          seccionActual.toLowerCase().includes("nombramientos") || 
+          seccionActual.toLowerCase().includes("2.1")
+        ) {
           parrafoActual = "";
           continue;
         }
@@ -412,11 +420,6 @@ async function ejecutarCapturadorBoja() {
             parrafoActual = "";
           }
           seccionActual = linea; 
-
-          // Si la nueva cabecera es de nombramientos, vaciamos el párrafo acumulado
-          if (seccionActual.toLowerCase().includes("nombramientos") || seccionActual.toLowerCase().includes("situaciones e incidencias")) {
-            parrafoActual = "";
-          }
           continue; 
         }
 
@@ -428,7 +431,7 @@ async function ejecutarCapturadorBoja() {
         }
       }
 
-      if (parrafoActual.length > 15 && !seccionActual.toLowerCase().includes("nombramientos") && !seccionActual.toLowerCase().includes("situaciones e incidencias")) {
+      if (parrafoActual.length > 15) {
         evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
       }
     } catch (err) {
