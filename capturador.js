@@ -1,5 +1,5 @@
-const cheerio = require("cheerio");
-const pdfParse = require("pdf-parse");
+import cheerio from "cheerio";
+import pdfParse from "pdf-parse";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -166,8 +166,8 @@ const SECTORES = {
       { texto: "flota pesquera", puntos: 6 },
       { texto: "acuicultura marina", puntos: 7 },
       { texto: "ayudas a la agricultura", puntos: 10 },
-      { texto: "subvenciones pac", points: 10 },
-      { texto: "sector pesquero y acuicultura", points: 9 }
+      { texto: "subvenciones pac", puntos: 10 },
+      { texto: "sector pesquero y acuicultura", puntos: 9 }
     ],
     medias: [
       { texto: "agricultura", puntos: 2 },
@@ -231,10 +231,10 @@ const SECTORES = {
       { texto: "valor estimado del contrato", puntos: 8 },
       { texto: "perfil de contratante", puntos: 8 },
       { texto: "expediente de contratacion", puntos: 6 },
-      { texto: "suministros y servicios", points: 8 },
-      { texto: "pliego de clausulas administrativas", points: 8 },
-      { texto: "adjudicacion de contrato", points: 8 },
-      { texto: "obras publicas de interes autonomico", points: 9 }
+      { texto: "suministros y servicios", puntos: 8 },
+      { texto: "pliego de clausulas administrativas", puntos: 8 },
+      { texto: "adjudicacion de contrato", puntos: 8 },
+      { texto: "obras publicas de interes autonomico", puntos: 9 }
     ],
     medias: [
       { texto: "licitacion", puntos: 4 },
@@ -285,8 +285,8 @@ const SECTORES = {
       { texto: "profesores de ensenanza secundaria", puntos: 6 },
       { texto: "personal docente", puntos: 5 },
       { texto: "universidades publicas", puntos: 5 },
-      { texto: "convocatoria de plazas de profesorado", points: 10 },
-      { texto: "universidades publicas de andalucia", points: 9 }
+      { texto: "convocatoria de plazas de profesorado", puntos: 10 },
+      { texto: "universidades publicas de andalucia", puntos: 9 }
     ],
     medias: [
       { texto: "educacion infantil", puntos: 3 },
@@ -338,10 +338,10 @@ const SECTORES = {
       { texto: "centros residenciales", puntos: 5 },
       { texto: "prestaciones sociales", puntos: 6 },
       { texto: "concurso de traslado", puntos: 6 },
-      { texto: "servicio andaluz de salud", points: 10 },
-      { texto: "personal estatutario", points: 9 },
-      { texto: "prestaciones sociales publicas", points: 8 },
-      { texto: "concurso de traslado sanidad", points: 9 }
+      { texto: "servicio andaluz de salud", puntos: 10 },
+      { texto: "personal estatutario", puntos: 9 },
+      { texto: "prestaciones sociales publicas", puntos: 8 },
+      { texto: "concurso de traslado sanidad", puntos: 9 }
     ],
     medias: [
       { texto: "sanidad", puntos: 2 },
@@ -397,9 +397,9 @@ const SECTORES = {
       { texto: "creacion de empresas", puntos: 6 },
       { texto: "incentivos economicos", puntos: 8 },
       { texto: "i+d+i empresarial", puntos: 7 },
-      { texto: "incentivos economicos regionales", points: 10 },
-      { texto: "ayudas a autonomos", points: 9 },
-      { texto: "emprendimiento y creacion de empresas", points: 9 }
+      { texto: "incentivos economicos regionales", puntos: 10 },
+      { texto: "ayudas a autonomos", puntos: 9 },
+      { texto: "emprendimiento y creacion de empresas", puntos: 9 }
     ],
     medias: [
       { texto: "subvencion", puntos: 2 },
@@ -529,12 +529,12 @@ async function ejecutar() {
     const res = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
     if (!res.ok) {
       console.log("⚠️ No se pudo acceder a la portada del BOJA.");
-      return;
+      return [];
     }
     htmlPortada = await res.text();
   } catch (error) {
     console.log(`⚠️ Error al conectar con la portada: ${error.message}`);
-    return;
+    return [];
   }
 
   const $ = cheerio.load(htmlPortada);
@@ -571,7 +571,7 @@ async function ejecutar() {
 
   if (urlsPdfSumarios.length === 0) {
     console.log("⚠️ No se ha podido extraer ningún PDF de sumario boletín.");
-    return;
+    return [];
   }
 
   const documentosProcesados = [];
@@ -604,7 +604,6 @@ async function ejecutar() {
     for (let i = 0; i < lineas.length; i++) {
       const linea = lineas[i];
 
-      // Detección heurística de posibles cabeceras de sección dentro del sumario del PDF
       if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("seccion"))) {
         seccionActual = linea;
       }
@@ -614,17 +613,9 @@ async function ejecutar() {
           const sectorEncontrado = clasificarTexto(tituloAcumulado, seccionActual);
 
           if (sectorEncontrado) {
-            const matchNum = linea.match(/(?:\d{4}\/\d+|\d+)/g);
-            let urlPdfEspecifico = urlPdfSumario;
-
-            if (matchNum && matchNum.length > 0) {
-              const anioActual = new Date().getFullYear();
-              urlPdfEspecifico = `https://www.juntadeandalucia.es/eboja/${anioActual}/${matchNum[matchNum.length - 1]}/surg.pdf`;
-            }
-
             documentosProcesados.push({
               titulo: tituloAcumulado,
-              url_pdf: urlPdfEspecifico,
+              url_pdf: urlPdfSumario,
               sector: sectorEncontrado
             });
           }
@@ -636,7 +627,7 @@ async function ejecutar() {
     }
   }
 
-  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
+  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
 
   for (const d of unicos) {
@@ -697,9 +688,7 @@ async function ejecutar() {
   }
 
   console.log("✅ Proceso completado con éxito.");
+  return unicos;
 }
 
-ejecutar().catch((error) => {
-  console.error("❌ Error crítico en el script:", error);
-  process.exit(1);
-});
+export { ejecutar as ejecutarBOJA };
