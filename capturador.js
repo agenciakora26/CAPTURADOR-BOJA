@@ -160,38 +160,89 @@ function normalizar(texto = "") {
   return texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
 
-function clasificarTexto(texto = "", seccion = "") {
-  const textoNorm = normalizar(texto);
+function evaluarYGuardar(texto, urlBase, seccion, destino) {
+  const textoLimpio = texto.replace(/\s+/g, " ").trim();
+  
+  console.log(`🔎 Evaluando texto (${textoLimpio.length} chars) [${seccion}]: "${textoLimpio.substring(0, 80)}..."`);
+  
+  // Le pasamos la sección y el texto a la función clasificadora
+  const sectorEncontrado = clasificarTexto(textoLimpio, seccion);
+
+  if (sectorEncontrado) {
+    console.log(`✅ ¡Anuncio clasificado en "${sectorEncontrado}"!`);
+    destino.push({
+      titulo: textoLimpio, 
+      url_pdf: urlBase,
+      sector: sectorEncontrado
+    });
+  } else {
+    console.log(`❌ Descartado (no alcanza umbral o no coincide con sectores).`);
+  }
+}
+
+function clasificarTexto(texto, seccion) {
+  // Unimos la cabecera (Consejería) y el texto para evaluar el contexto completo
+  const textoAnalizar = (seccion + " " + texto).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  
   let mejorSector = null;
-  let maxPuntuacion = -999;
+  let maxPuntuacion = 0;
 
-  for (const [nombreSector, reglas] of Object.entries(SECTORES)) {
-    const tieneExclusionAbsoluta = (reglas.excluirSiContiene || []).some(ex => textoNorm.includes(normalizar(ex)));
-    if (tieneExclusionAbsoluta) continue;
+  // Detectamos si es un decreto de estructura de los boletines extraordinarios
+  const esEstructura = textoAnalizar.includes("estructura organica") || textoAnalizar.includes("competencias");
 
+  for (const [sector, reglas] of Object.entries(SECTORES)) {
     let puntuacion = 0;
-    let tieneSenalPrincipal = false;
+    let descartar = false;
 
-    for (const fuerte of (reglas.fuertes || [])) {
-      if (textoNorm.includes(normalizar(fuerte.texto))) {
-        puntuacion += fuerte.puntos;
-        tieneSenalPrincipal = true;
+    // Comprobamos palabras excluyentes
+    if (reglas.excluirSiContiene) {
+      for (const exc of reglas.excluirSiContiene) {
+        if (textoAnalizar.includes(exc.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
+          descartar = true;
+          break;
+        }
       }
     }
 
-    for (const media of (reglas.medias || [])) {
-      if (textoNorm.includes(normalizar(media.texto))) {
-        puntuacion += media.puntos;
+    if (descartar) continue;
+
+    // Evaluamos palabras fuertes
+    if (reglas.fuertes) {
+      reglas.fuertes.forEach(r => {
+        if (textoAnalizar.includes(r.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
+          puntuacion += (r.puntos || r.points || 5);
+        }
+      });
+    }
+
+    // Evaluamos palabras medias
+    if (reglas.medias) {
+      reglas.medias.forEach(r => {
+        if (textoAnalizar.includes(r.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
+          puntuacion += (r.puntos || r.points || 2);
+        }
+      });
+    }
+    
+    // BONUS: Si es un decreto organizativo, buscamos si el nombre de la consejería coincide con tu sector
+    if (esEstructura) {
+      const nombreSectorLimpio = sector.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const seccionLimpia = seccion.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      
+      // Separamos el nombre del sector (ej: "agricultura y ganaderia" -> "agricultura", "ganaderia")
+      const palabrasClaveSector = nombreSectorLimpio.split(" y ");
+      for (const palabra of palabrasClaveSector) {
+        // Si la palabra clave (ej. Agricultura, Empleo, Sanidad) está en el nombre de la Consejería, aprueba directo
+        if (palabra.length > 3 && seccionLimpia.includes(palabra)) {
+          puntuacion += reglas.threshold; 
+        }
       }
     }
 
-    if (!tieneSenalPrincipal && puntuacion < (reglas.threshold || 3)) {
-      continue;
-    }
-
-    if (puntuacion >= (reglas.threshold || 3) && puntuacion > maxPuntuacion) {
+    // Guardamos el sector con mayor puntuación que supere su umbral
+    if (puntuacion >= reglas.threshold && puntuacion > maxPuntuacion) {
       maxPuntuacion = puntuacion;
-      mejorSector = nombreSector;
+      mejorSector = sector;
     }
   }
 
@@ -397,8 +448,10 @@ async function ejecutarCapturadorBoja() {
 
 function evaluarYGuardar(texto, urlBase, seccion, destino) {
   const textoLimpio = texto.replace(/\s+/g, " ").trim();
+  
   console.log(`🔎 Evaluando texto (${textoLimpio.length} chars) [${seccion}]: "${textoLimpio.substring(0, 80)}..."`);
   
+  // Le pasamos la sección y el texto a la función clasificadora
   const sectorEncontrado = clasificarTexto(textoLimpio, seccion);
 
   if (sectorEncontrado) {
