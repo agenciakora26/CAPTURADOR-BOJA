@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
-import { ejecutarCapturadorBoe } from "./capturador-boe.js";
+import { ejecutarBOE } from "./capturador-boe.js";[cite: 2]
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
@@ -218,11 +218,11 @@ async function supabaseRequest(endpoint, opciones = {}) {
 console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
 
 // 1. Ejecutar el capturador del BOJA
-await ejecutarCapturadorBoja();  
+await ejecutarBoja();  
 
 // 2. Ejecutar el capturador del BOE
 console.log("🚀 Iniciación de extracción mejorada del BOE...");
-await ejecutarCapturadorBoe();
+await ejecutarBoe();
 
 
 // Definimos la función completa donde vive toda la lógica del BOJA
