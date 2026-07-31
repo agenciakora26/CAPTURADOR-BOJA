@@ -2,9 +2,10 @@
   "name": "capturador-boja",
   "version": "1.0.0",
   "description": "Automatizador BOJA",
-  "main": "capturador.js",
+  "main": "enviar-resumen.js",
+  "type": "module",
   "scripts": {
-    "start": "node capturador.js"
+    "start": "node enviar-resumen.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.0.0",
