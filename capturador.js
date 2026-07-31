@@ -233,14 +233,38 @@ async function ejecutar() {
   // FILTRO ESTRICTO: Solo enlaces que contengan textualmente "sumario boletín" y extensión .pdf
 $("a").each((_, el) => {
     const texto = $(el).text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-    const href = $(el).attr("href");
+    const href = $(el).attr("href") || "";
     
-    // Buscamos cualquier enlace que sea un PDF y cuyo texto o ruta contenga la palabra "sumario"
-    if (href && href.endsWith(".pdf") && (texto.includes("sumario") || href.includes("sumario"))) {
-      let urlFinal = new URL(href, "https://www.juntadeandalucia.es/eboja/").href;
+    // Buscamos el enlace del sumario
+    if (href.endsWith(".pdf") && (texto.includes("sumario") || href.includes("sumario"))) {
+      if (href.includes("verificacion")) return;
+
+      let urlFinal = "";
       
-      // Filtramos explícitamente para descartar el de "verificacion" que no queremos
-      if (!urlFinal.includes("verificacion") && !urlsPdfSumarios.includes(urlFinal)) {
+      // Si el enlace ya viene completo con http, lo usamos
+      if (href.startsWith("http")) {
+        urlFinal = href;
+      } else {
+        // Limpiamos el href de cualquier barra o espacio inicial
+        const nombreArchivo = href.split("/").pop().trim();
+        
+        // Extraemos el año y el número de boletín directamente del nombre del archivo (ej. BOJA26-147-...)
+        const matchBoja = nombreArchivo.match(/BOJA(\d{2})-(\d+)-/i);
+        
+        if (matchBoja) {
+          const anio = `20${matchBoja[1]}`; // 26 -> 2026
+          const numBoletin = matchBoja[2]; // 147
+          
+          // Construimos la URL perfecta y exacta respetando la jerarquía de carpetas
+          urlFinal = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/${nombreArchivo}`;
+        } else {
+          // Fallback por si acaso usando la fecha actual
+          const anioActual = new Date().getFullYear();
+          urlFinal = `https://www.juntadeandalucia.es/eboja/${anioActual}/${nombreArchivo}`;
+        }
+      }
+
+      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
         urlsPdfSumarios.push(urlFinal);
       }
     }
