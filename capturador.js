@@ -217,12 +217,17 @@ async function supabaseRequest(endpoint, opciones = {}) {
 // Asegúrate de que el flujo principal ejecute ambas llamadas:
 console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
 
-// 1. Ejecutar el capturador del BOJA (comprueba que esta función se esté llamando y esperando con await)
-await ejecutarCapturadorBoja(); 
+// 1. Ejecutar el capturador del BOJA
+await ejecutarCapturadorBoja();  
 
 // 2. Ejecutar el capturador del BOE
-console.log("🚀 Iniciando extracción mejorada del BOE...");
+console.log("🚀 Iniciación de extracción mejorada del BOE...");
 await ejecutarCapturadorBoe();
+
+
+// Definimos la función completa donde vive toda la lógica del BOJA
+async function ejecutarCapturadorBoja() {
+  console.log("🚀 Iniciando capturador inteligente del BOJA...");
 
   const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
@@ -231,14 +236,15 @@ await ejecutarCapturadorBoe();
     if (!res.ok) return [];
     htmlPortada = await res.text();
   } catch (error) {
-    continue [];
+    console.error("Error al conectar con la portada del BOJA:", error);
+    return [];
   }
 
   const $ = cheerio.load(htmlPortada);
   let urlsPdfSumarios = [];
 
   // FILTRO ESTRICTO: Solo enlaces que contengan textualmente "sumario boletín" y extensión .pdf
-$("a").each((_, el) => {
+  $("a").each((_, el) => {
     const texto = $(el).text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
     const href = $(el).attr("href") || "";
     
@@ -277,10 +283,8 @@ $("a").each((_, el) => {
     }
   });
 
-  // Función auxiliar interna para evitar errores de ámbito
-  function matchBase(val) {
-    return val;
-  }
+  return urlsPdfSumarios;
+}
 
   console.log(`📄 PDFs de sumarios oficiales detectados:`, urlsPdfSumarios);
 
