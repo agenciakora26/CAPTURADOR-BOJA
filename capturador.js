@@ -8,436 +8,152 @@ const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
 const SECTORES = {
   "oposiciones y empleo": {
-    threshold: 8,
-    seccionesPreferidas: ["oposiciones, concursos y otras convocatorias"],
-    seccionesExcluidas: ["nombramientos, situaciones e incidencias"],
+    threshold: 4,
     fuertes: [
-      { texto: "se convoca proceso selectivo", puntos: 10 },
-      { texto: "convocatoria de pruebas selectivas", puntos: 10 },
-      { texto: "se convocan pruebas selectivas", puntos: 10 },
-      { texto: "convocatoria para el acceso", puntos: 9 },
-      { texto: "convocatoria para ingreso", puntos: 9 },
-      { texto: "convocatoria de concurso-oposicion", puntos: 10 },
-      { texto: "se convoca concurso-oposicion", puntos: 10 },
-      { texto: "creacion de una bolsa de trabajo", puntos: 10 },
-      { texto: "ampliacion de la bolsa de trabajo", puntos: 10 },
-      { texto: "se convoca la bolsa", puntos: 9 },
-      { texto: "bolsa extraordinaria", puntos: 9 },
-      { texto: "bolsa unica", puntos: 8 },
-      { texto: "oferta de empleo publico", puntos: 9 },
-      { texto: "sistema general de acceso libre", puntos: 8 },
-      { texto: "turno libre", puntos: 7 },
-      { texto: "oposicion libre", puntos: 9 },
-      { texto: "plazas de personal funcionario de carrera", puntos: 9 },
-      { texto: "plazas de personal laboral fijo", puntos: 9 },
-      { texto: "seleccion temporal", puntos: 8 },
-      { texto: "contratacion temporal", puntos: 7 },
-      { texto: "contratos laborales en el marco de proyectos", puntos: 7 },
-      { texto: "personal estatutario temporal", puntos: 8 }
-    ],
-    medias: [
-      { texto: "proceso selectivo", puntos: 4 },
-      { texto: "pruebas selectivas", puntos: 4 },
+      { texto: "oposicion", puntos: 5 },
       { texto: "concurso-oposicion", puntos: 5 },
       { texto: "bolsa de trabajo", puntos: 5 },
       { texto: "bolsa de empleo", puntos: 5 },
-      { texto: "aspirantes", puntos: 2 },
-      { texto: "personas admitidas y excluidas", puntos: 3 },
-      { texto: "tribunal calificador", puntos: 3 },
-      { texto: "bases de la convocatoria", puntos: 4 },
-      { texto: "plazo de presentacion de solicitudes", puntos: 4 },
-      { texto: "acceso libre", puntos: 4 },
-      { texto: "promocion interna", puntos: 2 },
-      { texto: "personal funcionario", puntos: 2 },
-      { texto: "personal laboral", puntos: 2 },
-      { texto: "personal estatutario", puntos: 2 },
-      { texto: "plazas vacantes", puntos: 2 },
-      { texto: "presentacion de solicitudes", puntos: 3 },
-      { texto: "tasa de examen", puntos: 3 }
+      { texto: "oferta de empleo publico", puntos: 5 },
+      { texto: "proceso selectivo", puntos: 4 },
+      { texto: "pruebas selectivas", puntos: 4 },
+      { texto: "personal funcionario", puntos: 4 },
+      { texto: "personal laboral", points: 4 },
+      { texto: "convocatoria", puntos: 3 }
     ],
-    combinaciones: [
-      { todos: ["convoca", "plaza", "acceso libre"], puntos: 7 },
-      { todos: ["convoca", "bolsa", "seleccion temporal"], puntos: 8 },
-      { todos: ["proceso selectivo", "presentacion de solicitudes"], puntos: 7 },
-      { todos: ["bases", "plazas", "oposicion"], puntos: 8 },
-      { todos: ["concurso", "creacion", "bolsa de trabajo"], puntos: 8 }
+    medias: [
+      { texto: "plaza", puntos: 2 },
+      { texto: "empleo", puntos: 2 },
+      { texto: "seleccion", puntos: 2 },
+      { texto: "aspirantes", points: 2 },
+      { texto: "turno libre", puntos: 3 },
+      { texto: "promocion interna", points: 2 },
+      { texto: "personal", points: 1 }
     ],
     negativas: [
-      { texto: "se nombra personal funcionario", puntos: -12 },
-      { texto: "se nombra personal estatutario fijo", puntos: -12 },
-      { texto: "nombramiento de funcionarios", puntos: -10 },
-      { texto: "adjudicacion de destinos", puntos: -10 },
-      { texto: "peticion de destino", puntos: -6 },
-      { texto: "toma de posesion", puntos: -10 },
-      { texto: "cese", puntos: -8 },
-      { texto: "declarar jubilacion", puntos: -10 },
-      { texto: "lista definitiva de personas que superan", puntos: -5 },
-      { texto: "personas seleccionadas", puntos: -4 },
-      { texto: "carrera profesional", puntos: -8 },
-      { texto: "evaluacion del desempeno", puntos: -7 },
-      { texto: "libre designacion", puntos: -4 },
-      { texto: "puesto de trabajo de caracter directivo", puntos: -5 },
-      { texto: "cargo intermedio", puntos: -5 }
+      { texto: "cese", puntos: -3 },
+      { texto: "jubilacion", puntos: -3 }
     ],
-    excluirSiContiene: [
-      "procedimiento disciplinario",
-      "expediente disciplinario",
-      "sentencia judicial",
-      "ejecucion de sentencia"
-    ]
+    excluirSiContiene: []
   },
   "hosteleria y comercio": {
-    threshold: 8,
+    threshold: 3,
     fuertes: [
-      { texto: "subvenciones destinadas al comercio minorista", puntos: 10 },
-      { texto: "ayudas al comercio minorista", puntos: 10 },
-      { texto: "subvenciones destinadas a establecimientos de hosteleria", puntos: 10 },
-      { texto: "ayudas al sector hostelero", puntos: 10 },
-      { texto: "sector de la hosteleria", puntos: 6 },
-      { texto: "sector del comercio minorista", puntos: 7 },
-      { texto: "modernizacion del comercio", puntos: 8 },
-      { texto: "modernizacion de establecimientos comerciales", puntos: 9 },
-      { texto: "establecimientos de restauracion", puntos: 7 },
-      { texto: "establecimientos hoteleros", puntos: 7 },
-      { texto: "municipio turistico", puntos: 7 },
-      { texto: "empresa turistica", puntos: 6 },
-      { texto: "registro de turismo", puntos: 6 },
-      { texto: "calidad turistica", puntos: 6 },
-      { texto: "subvencion hosteleria", puntos: 10 },
-      { texto: "turismo y artesania", puntos: 7 },
-      { texto: "plan de apoyo al sector hostelero", puntos: 10 },
-      { texto: "calidad turistica andaluza", puntos: 8 }
+      { texto: "hosteleria", puntos: 5 },
+      { texto: "comercio", puntos: 4 },
+      { texto: "turismo", puntos: 4 },
+      { texto: "restauracion", puntos: 4 },
+      { texto: "establecimientos comerciales", puntos: 5 },
+      { texto: "artesania", puntos: 4 }
     ],
     medias: [
-      { texto: "hosteleria", puntos: 3 },
-      { texto: "comercio minorista", puntos: 4 },
-      { texto: "establecimiento comercial", puntos: 3 },
-      { texto: "restauracion", puntos: 2 },
-      { texto: "alojamiento turistico", puntos: 3 },
-      { texto: "hotel", puntos: 1 },
-      { texto: "apartamento turistico", puntos: 3 },
-      { texto: "campamento de turismo", puntos: 3 },
-      { texto: "agencia de viajes", puntos: 3 },
-      { texto: "empresa de turismo activo", puntos: 3 },
-      { texto: "artesania", puntos: 3 },
-      { texto: "horarios comerciales", puntos: 5 },
-      { texto: "venta ambulante", puntos: 4 }
+      { texto: "hotel", points: 2 },
+      { texto: "bono turistico", points: 4 },
+      { texto: "ayudas", points: 2 },
+      { texto: "subvencion", points: 2 },
+      { texto: "mercado", points: 2 }
     ],
-    combinaciones: [
-      { todos: ["subvencion", "hosteleria"], puntos: 8 },
-      { todos: ["ayuda", "comercio minorista"], puntos: 8 },
-      { todos: ["convocatoria", "establecimientos comerciales"], puntos: 7 },
-      { todos: ["beneficiarios", "sector turistico"], puntos: 6 }
-    ],
-    negativas: [
-      { texto: "procedimiento sancionador", puntos: -10 },
-      { texto: "infraccion administrativa", puntos: -9 },
-      { texto: "hojas de reclamaciones", puntos: -5 },
-      { texto: "inspeccion de consumo", puntos: -6 },
-      { texto: "notificacion por comparecencia", puntos: -8 },
-      { texto: "no ha sido posible notificar", puntos: -10 },
-      { texto: "reintegro de subvenciones", puntos: -6 },
-      { texto: "devolucion de cantidades", puntos: -6 }
-    ],
-    excluirSiContiene: [
-      "expediente sancionador en materia de comercio",
-      "sancion en materia de turismo"
-    ]
+    negativas: [],
+    excluirSiContiene: []
   },
   "agricultura y ganaderia": {
-    threshold: 8,
+    threshold: 3,
     fuertes: [
-      { texto: "ayudas a las explotaciones agrarias", puntos: 10 },
-      { texto: "modernizacion de explotaciones agrarias", puntos: 10 },
-      { texto: "incorporacion de jovenes agricultores", puntos: 10 },
-      { texto: "politica agricola comun", puntos: 8 },
-      { texto: "pago basico", puntos: 7 },
-      { texto: "ayudas directas de la pac", puntos: 10 },
-      { texto: "desarrollo rural", puntos: 5 },
-      { texto: "produccion ecologica", puntos: 6 },
-      { texto: "agricultura ecologica", puntos: 7 },
-      { texto: "explotaciones ganaderas", puntos: 7 },
-      { texto: "sanidad animal", puntos: 6 },
-      { texto: "sanidad vegetal", puntos: 6 },
-      { texto: "seguros agrarios", puntos: 7 },
-      { texto: "regadios", puntos: 6 },
-      { texto: "sector pesquero", puntos: 7 },
-      { texto: "sector acuicola", puntos: 7 },
-      { texto: "flota pesquera", puntos: 6 },
-      { texto: "acuicultura marina", puntos: 7 },
-      { texto: "ayudas a la agricultura", puntos: 10 },
-      { texto: "subvenciones pac", puntos: 10 },
-      { texto: "sector pesquero y acuicultura", puntos: 9 }
+      { texto: "agricultura", puntos: 4 },
+      { texto: "ganaderia", puntos: 4 },
+      { texto: "pesca", points: 4 },
+      { texto: "explotaciones agrarias", points: 5 },
+      { texto: "pac", points: 4 },
+      { texto: "produccion ecologica", points: 4 },
+      { texto: "ayudas", points: 2 }
     ],
     medias: [
-      { texto: "agricultura", puntos: 2 },
-      { texto: "ganaderia", puntos: 2 },
-      { texto: "pesca", puntos: 2 },
-      { texto: "acuicultura", puntos: 3 },
-      { texto: "explotacion agraria", puntos: 3 },
-      { texto: "explotacion ganadera", puntos: 3 },
-      { texto: "agricultor", puntos: 2 },
-      { texto: "ganadero", puntos: 2 },
-      { texto: "olivar", puntos: 2 },
-      { texto: "vino", puntos: 1 },
-      { texto: "vinedo", puntos: 2 },
-      { texto: "apicultura", puntos: 3 },
-      { texto: "ovino", puntos: 2 },
-      { texto: "caprino", puntos: 2 },
-      { texto: "bovino", puntos: 2 },
-      { texto: "porcino", puntos: 2 },
-      { texto: "feader", puntos: 4 },
-      { texto: "fondo europeo agricola", puntos: 5 }
+      { texto: "agrario", points: 2 },
+      { texto: "rural", points: 2 },
+      { texto: "olivar", points: 3 },
+      { texto: "vinedo", points: 3 },
+      { texto: "subvencion", points: 2 }
     ],
-    combinaciones: [
-      { todos: ["convocatoria", "ayudas", "explotaciones agrarias"], puntos: 9 },
-      { todos: ["subvenciones", "jovenes agricultores"], puntos: 9 },
-      { todos: ["bases reguladoras", "sector pesquero"], puntos: 8 },
-      { todos: ["ayudas", "produccion ecologica"], puntos: 8 }
-    ],
-    negativas: [
-      { texto: "procedimiento sancionador", puntos: -12 },
-      { texto: "expediente sancionador", puntos: -12 },
-      { texto: "acto administrativo relativo", puntos: -6 },
-      { texto: "no ha sido posible notificar", puntos: -10 },
-      { texto: "notificacion por comparecencia", puntos: -10 },
-      { texto: "infraccion en materia de aguas", puntos: -8 },
-      { texto: "autorizacion ambiental", puntos: -5 },
-      { texto: "deslinde de via pecuaria", puntos: -5 }
-    ],
-    excluirSiContiene: [
-      "procedimiento sancionador en materia de agricultura",
-      "procedimiento sancionador en materia de ganaderia",
-      "procedimiento sancionador en materia de pesca",
-      "procedimiento sancionador en materia de sanidad vegetal"
-    ]
+    negativas: [],
+    excluirSiContiene: []
   },
   "licitaciones y obras": {
-    threshold: 8,
-    seccionesPreferidas: ["licitaciones publicas y adjudicaciones"],
+    threshold: 4,
     fuertes: [
-      { texto: "anuncio de licitacion", puntos: 10 },
-      { texto: "convocatoria de licitacion", puntos: 10 },
-      { texto: "procedimiento abierto", puntos: 8 },
-      { texto: "procedimiento abierto simplificado", puntos: 9 },
-      { texto: "contratacion de obras", puntos: 8 },
-      { texto: "contrato de obras", puntos: 7 },
-      { texto: "contrato de servicios", puntos: 6 },
-      { texto: "contrato de suministro", puntos: 6 },
-      { texto: "pliego de clausulas administrativas particulares", puntos: 8 },
-      { texto: "pliego de prescripciones tecnicas", puntos: 8 },
-      { texto: "presentacion de ofertas", puntos: 8 },
-      { texto: "presupuesto base de licitacion", puntos: 9 },
-      { texto: "valor estimado del contrato", puntos: 8 },
-      { texto: "perfil de contratante", puntos: 8 },
-      { texto: "expediente de contratacion", puntos: 6 },
-      { texto: "suministros y servicios", puntos: 8 },
-      { texto: "pliego de clausulas administrativas", puntos: 8 },
-      { texto: "adjudicacion de contrato", puntos: 8 },
-      { texto: "obras publicas de interes autonomico", puntos: 9 }
+      { texto: "licitacion", puntos: 5 },
+      { texto: "contratacion", points: 4 },
+      { texto: "contrato de obras", points: 5 },
+      { texto: "contrato de servicios", points: 4 },
+      { texto: "suministros", points: 4 },
+      { texto: "adjudicacion", points: 3 },
+      { texto: "pliego", points: 3 }
     ],
     medias: [
-      { texto: "licitacion", puntos: 4 },
-      { texto: "contratacion publica", puntos: 4 },
-      { texto: "adjudicatario", puntos: 2 },
-      { texto: "mesa de contratacion", puntos: 4 },
-      { texto: "oferta economica", puntos: 3 },
-      { texto: "criterios de adjudicacion", puntos: 4 },
-      { texto: "solvencia economica", puntos: 3 },
-      { texto: "solvencia tecnica", puntos: 3 },
-      { texto: "lote", puntos: 1 },
-      { texto: "canon", puntos: 1 }
+      { texto: "obras", points: 2 },
+      { texto: "servicio", points: 1 },
+      { texto: "procedimiento abierto", points: 3 }
     ],
-    combinaciones: [
-      { todos: ["contrato", "presentacion de ofertas"], puntos: 8 },
-      { todos: ["licitacion", "presupuesto base"], puntos: 8 },
-      { todos: ["proceso abierto", "valor estimado"], puntos: 8 }
-    ],
-    negativas: [
-      { texto: "formalizacion del contrato", puntos: -7 },
-      { texto: "adjudicacion del contrato", puntos: -5 },
-      { texto: "contrato ya adjudicado", puntos: -8 },
-      { texto: "prorroga del contrato", puntos: -10 },
-      { texto: "contrato de arrendamiento", puntos: -8 },
-      { texto: "adjudicacion directa", puntos: -6 },
-      { texto: "desierto el procedimiento", puntos: -5 },
-      { texto: "resolucion del contrato", puntos: -8 }
-    ],
-    excluirSiContiene: [
-      "prorroga del contrato de arrendamiento",
-      "formalizacion de la prorroga",
-      "resolucion de prorroga"
-    ]
+    negativas: [],
+    excluirSiContiene: []
   },
   "educacion y formacion": {
-    threshold: 8,
+    threshold: 3,
     fuertes: [
-      { texto: "becas y ayudas al estudio", puntos: 9 },
-      { texto: "convocatoria de becas", puntos: 9 },
-      { texto: "convocatoria de ayudas al estudio", puntos: 9 },
-      { texto: "formacion profesional para el empleo", puntos: 7 },
-      { texto: "subvenciones para planes de formacion", puntos: 8 },
-      { texto: "oferta educativa", puntos: 6 },
-      { texto: "oferta de ciclos formativos", puntos: 7 },
-      { texto: "admision del alumnado", puntos: 6 },
-      { texto: "escolarizacion del alumnado", puntos: 6 },
-      { texto: "cuerpo de maestros", puntos: 6 },
-      { texto: "profesores de ensenanza secundaria", puntos: 6 },
-      { texto: "personal docente", puntos: 5 },
-      { texto: "universidades publicas", puntos: 5 },
-      { texto: "convocatoria de plazas de profesorado", puntos: 10 },
-      { texto: "universidades publicas de andalucia", puntos: 9 }
+      { texto: "educacion", points: 4 },
+      { texto: "formacion profesional", points: 5 },
+      { texto: "becas", points: 5 },
+      { texto: "centros docentes", points: 4 },
+      { texto: "universidad", points: 4 },
+      { texto: "profesorado", points: 4 },
+      { texto: "alumnado", points: 3 }
     ],
     medias: [
-      { texto: "educacion infantil", puntos: 3 },
-      { texto: "educacion primaria", puntos: 3 },
-      { texto: "educacion secundaria", puntos: 3 },
-      { texto: "bachillerato", puntos: 3 },
-      { texto: "formacion profesional", puntos: 3 },
-      { texto: "centro docente", puntos: 2 },
-      { texto: "centros educativos", puntos: 2 },
-      { texto: "universidad", puntos: 2 },
-      { texto: "alumnado", puntos: 2 },
-      { texto: "profesorado", puntos: 2 },
-      { texto: "curso academico", puntos: 2 },
-      { texto: "matricula", puntos: 2 }
+      { texto: "ensenanza", points: 2 },
+      { texto: "curso", points: 2 },
+      { texto: "ayudas", points: 2 },
+      { texto: "subvenciones", points: 2 }
     ],
-    combinaciones: [
-      { todos: ["convocatoria", "becas"], puntos: 8 },
-      { todos: ["subvenciones", "planes de formacion"], puntos: 8 },
-      { todos: ["admision", "centros docentes"], puntos: 7 },
-      { todos: ["convoca", "plazas", "profesorado"], puntos: 8 }
-    ],
-    negativas: [
-      { texto: "reintegro de becas", puntos: -12 },
-      { texto: "cantidades indebidamente percibidas", puntos: -10 },
-      { texto: "procedimiento de reintegro", puntos: -10 },
-      { texto: "no ha sido posible notificar", puntos: -9 },
-      { texto: "autorizacion de centro docente privado", puntos: -5 },
-      { texto: "cambio de titularidad", puntos: -7 },
-      { texto: "extincion de la autorizacion", puntos: -7 },
-      { texto: "procedimiento sancionador", puntos: -9 }
-    ],
-    excluirSiContiene: [
-      "reintegro de becas y ayudas al estudio",
-      "declaracion de cantidades indebidamente percibidas"
-    ]
+    negativas: [],
+    excluirSiContiene: []
   },
   "sanidad y bienestar social": {
-    threshold: 8,
+    threshold: 3,
     fuertes: [
-      { texto: "prestacion de dependencia", puntos: 7 },
-      { texto: "atencion a la dependencia", puntos: 6 },
-      { texto: "renta minima de insercion social", puntos: 7 },
-      { texto: "ingreso minimo vital", puntos: 8 },
-      { texto: "subvenciones a entidades sociales", puntos: 9 },
-      { texto: "programas de interes general con cargo a la asignacion tributaria", puntos: 9 },
-      { texto: "centros de servicios sociales", puntos: 6 },
-      { texto: "ayuda a domicilio", puntos: 7 },
-      { texto: "personas con discapacidad", puntos: 5 },
-      { texto: "centros residenciales", puntos: 5 },
-      { texto: "prestaciones sociales", puntos: 6 },
-      { texto: "concurso de traslado", puntos: 6 },
-      { texto: "servicio andaluz de salud", puntos: 10 },
-      { texto: "personal estatutario", puntos: 9 },
-      { texto: "prestaciones sociales publicas", puntos: 8 },
-      { texto: "concurso de traslado sanidad", puntos: 9 }
+      { texto: "sanidad", points: 4 },
+      { texto: "servicio andaluz de salud", points: 5 },
+      { texto: "dependencia", points: 4 },
+      { texto: "servicios sociales", points: 4 },
+      { texto: "discapacidad", points: 4 },
+      { texto: "prestaciones", points: 3 }
     ],
     medias: [
-      { texto: "sanidad", puntos: 2 },
-      { texto: "hospital", puntos: 2 },
-      { texto: "centro de salud", puntos: 2 },
-      { texto: "atencion primaria", puntos: 3 },
-      { texto: "personal estatutario", puntos: 3 },
-      { texto: "dependencia", puntos: 2 },
-      { texto: "servicios sociales", puntos: 3 },
-      { texto: "discapacidad", puntos: 3 },
-      { texto: "entidades del tercer sector", puntos: 4 },
-      { texto: "inclusion social", puntos: 2 },
-      { texto: "familias", puntos: 1 }
+      { texto: "salud", points: 2 },
+      { texto: "social", points: 2 },
+      { texto: "atencion primaria", points: 3 },
+      { texto: "ayudas", points: 2 }
     ],
-    combinaciones: [
-      { todos: ["convocatoria", "subvenciones", "entidades sociales"], puntos: 9 },
-      { todos: ["ayudas", "personas con discapacidad"], puntos: 8 },
-      { todos: ["prestaciones", "dependencia"], puntos: 7 }
-    ],
-    negativas: [
-      { texto: "no ha sido posible notificar", puntos: -12 },
-      { texto: "notificacion por edicto", puntos: -10 },
-      { texto: "relacion de solicitantes", puntos: -6 },
-      { texto: "actos administrativos", puntos: -7 },
-      { texto: "procedimiento sancionador", puntos: -10 },
-      { texto: "expediente administrativo requerido", puntos: -8 },
-      { texto: "remision del expediente", puntos: -8 },
-      { texto: "reintegro de prestaciones", puntos: -8 },
-      { texto: "indebidamente percibidas", puntos: -10 }
-    ],
-    excluirSiContiene: [
-      "a los que no ha sido posible notificar",
-      "relacion de nif",
-      "relacion de solicitantes de reconocimiento de la situacion de dependencia"
-    ]
+    negativas: [],
+    excluirSiContiene: []
   },
   "subvenciones y ayudas generales": {
-    threshold: 9,
+    threshold: 3,
     fuertes: [
-      { texto: "se convocan subvenciones", puntos: 10 },
-      { texto: "se convocan ayudas", puntos: 10 },
-      { texto: "convocatoria de subvenciones", puntos: 10 },
-      { texto: "convocatoria de ayudas", puntos: 10 },
-      { texto: "bases reguladoras para la concesion de subvenciones", puntos: 9 },
-      { texto: "extracto de la convocatoria", puntos: 9 },
-      { texto: "en regimen de concurrencia competitiva", puntos: 6 },
-      { texto: "en regimen de concurrencia no competitiva", puntos: 6 },
-      { texto: "personas o entidades beneficiarias", puntos: 5 },
-      { texto: "plazo de presentacion de solicitudes", puntos: 5 },
-      { texto: "digitalizacion de pymes", puntos: 8 },
-      { texto: "fomento del empleo autonomo", puntos: 8 },
-      { texto: "ayudas a trabajadores autonomos", puntos: 9 },
-      { texto: "creacion de empresas", puntos: 6 },
-      { texto: "incentivos economicos", puntos: 8 },
-      { texto: "i+d+i empresarial", puntos: 7 },
-      { texto: "incentivos economicos regionales", puntos: 10 },
-      { texto: "ayudas a autonomos", puntos: 9 },
-      { texto: "emprendimiento y creacion de empresas", puntos: 9 }
+      { texto: "subvencion", points: 4 },
+      { texto: "subvenciones", points: 4 },
+      { texto: "ayudas", points: 4 },
+      { texto: "concesion", points: 3 },
+      { texto: "bases reguladoras", points: 4 },
+      { texto: "incentivos", points: 3 },
+      { texto: "autonomos", points: 4 }
     ],
     medias: [
-      { texto: "subvencion", puntos: 2 },
-      { texto: "ayuda", puntos: 1 },
-      { texto: "incentivo", puntos: 2 },
-      { texto: "beneficiarios", puntos: 2 },
-      { texto: "solicitudes", puntos: 1 },
-      { texto: "bases reguladoras", puntos: 3 },
-      { texto: "concurrencia competitiva", puntos: 4 },
-      { texto: "credito presupuestario", puntos: 3 },
-      { texto: "cuantia maxima", puntos: 3 },
-      { texto: "pymes", puntos: 3 },
-      { texto: "autonomos", puntos: 3 },
-      { texto: "emprendimiento", puntos: 3 }
+      { texto: "beneficiarios", points: 2 },
+      { texto: "solicitudes", points: 2 },
+      { texto: "fomento", points: 2 },
+      { texto: "emprendimiento", points: 3 }
     ],
-    combinaciones: [
-      { todos: ["convocatoria", "subvenciones", "solicitudes"], puntos: 9 },
-      { todos: ["bases reguladoras", "personas beneficiarias"], puntos: 7 },
-      { todos: ["extracto", "convocatoria", "subvenciones"], puntos: 9 },
-      { todos: ["ayudas", "autonomos", "plazo"], puntos: 8 }
-    ],
-    negativas: [
-      { texto: "reintegro de subvenciones", puntos: -12 },
-      { texto: "procedimiento de reintegro", puntos: -12 },
-      { texto: "indebidamente percibidas", puntos: -10 },
-      { texto: "concesion de subvenciones correspondiente al ejercicio", puntos: -4 },
-      { texto: "resolucion de concesion", puntos: -5 },
-      { texto: "relacion de beneficiarios", puntos: -6 },
-      { texto: "justificacion de subvenciones", puntos: -5 },
-      { texto: "perdida del derecho al cobro", puntos: -9 },
-      { texto: "no ha sido posible notificar", puntos: -10 },
-      { texto: "procedimiento sancionador", puntos: -10 }
-    ],
-    excluirSiContiene: [
-      "procedimiento de reintegro de subvenciones",
-      "acuerdo de inicio de reintegro",
-      "cantidades indebidamente percibidas"
-    ]
+    negativas: [],
+    excluirSiContiene: []
   }
 };
 
