@@ -575,7 +575,7 @@ async function ejecutarBOE() {
           url_pdf: d.url_pdf,
           categoria: d.sector,
           origen: "BOE",
-          en enviado: false
+          enviado: false
         })
       });
     } catch (err) {
