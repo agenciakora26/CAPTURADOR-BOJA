@@ -231,12 +231,13 @@ async function ejecutar() {
   let urlsPdfSumarios = [];
 
   // FILTRO ESTRICTO: Solo enlaces que contengan textualmente "sumario boletín" y extensión .pdf
-  $("a").each((_, el) => {
+ $("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
     
     if (href && texto.includes("sumario boletín") && href.endsWith(".pdf")) {
-      const urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
+      // Usamos explícitamente la base completa de eboja para que respete la estructura de carpetas
+      const urlFinal = new URL(href, "https://www.juntadeandalucia.es/eboja/").href;
       if (!urlsPdfSumarios.includes(urlFinal)) {
         urlsPdfSumarios.push(urlFinal);
       }
