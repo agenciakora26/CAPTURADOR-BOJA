@@ -366,18 +366,16 @@ async function ejecutarCapturadorBoja() {
 
       let seccionActual = "GENERAL";
       let parrafoActual = "";
+      // Iniciamos con el sumario, pero permitiremos que se actualice y persista el último enlace de anuncio válido
       let urlAnuncioEspecifica = urlPdfSumario;
 
       for (let i = 0; i < lineasConEnlaces.length; i++) {
         const lineaObj = lineasConEnlaces[i];
         const linea = lineaObj.texto;
 
-        // Actualizamos la URL específica solo si el enlace apunta a un anuncio real del BOJA y no al sumario general
-        if (lineaObj.url && lineaObj.url !== urlPdfSumario && lineaObj.url.includes("eboja")) {
+        // Si la línea actual trae un enlace válido incrustado y diferente al sumario, lo actualizamos y recordamos
+        if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
           urlAnuncioEspecifica = lineaObj.url;
-        } else {
-          // Si no hay enlace específico en esta línea, por seguridad mantenemos el PDF del sumario general o el último válido
-          urlAnuncioEspecifica = urlPdfSumario;
         }
 
         if (
@@ -413,7 +411,7 @@ async function ejecutarCapturadorBoja() {
         parrafoActual += " " + linea;
 
         if (parrafoActual.length > 120) {
-          evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
+          evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProsesados if (typeof documentosProcesados !== 'undefined' ? documentosProcesados : destino) ...); // Mantén tu variable destino original
           parrafoActual = "";
         }
       }
