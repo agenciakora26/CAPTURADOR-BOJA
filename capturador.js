@@ -372,8 +372,12 @@ async function ejecutarCapturadorBoja() {
         const lineaObj = lineasConEnlaces[i];
         const linea = lineaObj.texto;
 
-        if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
+        // Actualizamos la URL específica solo si el enlace apunta a un anuncio real del BOJA y no al sumario general
+        if (lineaObj.url && lineaObj.url !== urlPdfSumario && lineaObj.url.includes("eboja")) {
           urlAnuncioEspecifica = lineaObj.url;
+        } else {
+          // Si no hay enlace específico en esta línea, por seguridad mantenemos el PDF del sumario general o el último válido
+          urlAnuncioEspecifica = urlPdfSumario;
         }
 
         if (
@@ -417,7 +421,6 @@ async function ejecutarCapturadorBoja() {
       if (parrafoActual.length > 15) {
         evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
       }
-
     } catch (err) {
       console.log(`⚠️ Error procesando PDF de sumario: ${err.message}`);
     }
