@@ -326,7 +326,6 @@ async function ejecutarCapturadorBoja() {
           urlAnuncioEspecifica = lineaObj.url;
         }
 
-        // Ignorar líneas irrelevantes de cabeceras/pies de página institucionales
         if (
           linea.includes("Depósito legal") || 
           linea.includes("ISSN") || 
@@ -340,12 +339,10 @@ async function ejecutarCapturadorBoja() {
           continue;
         }
 
-        // Criterio de cabecera: Línea corta en mayúsculas que suele indicar Consejería u Órgano
         const esTodoMayusculas = (linea === linea.toUpperCase()) && /[A-ZÁÉÍÓÚÑ]/.test(linea);
         const esCabecera = linea.length > 3 && linea.length < 100 && esTodoMayusculas;
 
         if (esCabecera) {
-          // Si teníamos texto acumulado, lo guardamos antes de cambiar de consejería/sección
           if (parrafoActual.length > 15) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
@@ -354,23 +351,19 @@ async function ejecutarCapturadorBoja() {
           continue; 
         }
 
-        // Omitir sección de nombramientos si aplica
         if (seccionActual.toLowerCase().includes("nombramientos")) {
           parrafoActual = ""; 
           continue;
         }
 
-        // Acumulamos el texto del sumario del anuncio
         parrafoActual += " " + linea;
 
-        // Si el bloque acumulado ya tiene un tamaño considerable (ej. descripción completa), lo procesamos como un anuncio independiente
         if (parrafoActual.length > 120) {
           evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
           parrafoActual = "";
         }
       }
 
-      // Guardar cualquier resto que haya quedado al final del documento
       if (parrafoActual.length > 15) {
         evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
       }
@@ -401,6 +394,7 @@ async function ejecutarCapturadorBoja() {
 
   return unicos;
 }
+
 function evaluarYGuardar(texto, urlBase, seccion, destino) {
   const textoLimpio = texto.replace(/\s+/g, " ").trim();
   const sectorEncontrado = clasificarTexto(textoLimpio, seccion);
