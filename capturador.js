@@ -384,7 +384,7 @@ async function ejecutar() {
       </div>
     `;
 
-    await fetch("https://api.resend.com/emails", {
+await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { 
         Authorization: `Bearer ${RESEND_API_KEY}`, 
@@ -401,6 +401,6 @@ async function ejecutar() {
 
   console.log("✅ Proceso completado con éxito.");
   return unicos;
-}
+} // <-- Esta llave faltaba para cerrar la función 'ejecutar'
 
 export { ejecutar as ejecutarBOJA };
