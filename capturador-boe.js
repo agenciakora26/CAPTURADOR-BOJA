@@ -193,15 +193,12 @@ async function ejecutarBOE() {
     }
   }
 
-  // Consultar usuarios y enviar correos específicos del BOE
-  console.log("👥 Consultando usuarios suscritos para el BOE...");
-  const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
+  // RETORNAMOS LOS DOCUMENTOS DEL BOE
+  return unicos;
+}
 
-  for (const usuario of (usuarios || [])) {
-    const relevantes = unicos.filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
-    if (relevantes.length === 0) continue;
-
-    console.log(`📧 Enviando correo de alerta del BOE a ${usuario.email}...`);
+// Exportamos la función principal
+export { ejecutarBOE };
     
     const htmlCorreo = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
