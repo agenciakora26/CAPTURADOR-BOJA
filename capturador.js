@@ -364,16 +364,14 @@ async function ejecutarCapturadorBoja() {
         });
       }
 
-      let seccionActual = "GENERAL";
+     let seccionActual = "GENERAL";
       let parrafoActual = "";
-      // Iniciamos con el sumario, pero permitiremos que se actualice y persista el último enlace de anuncio válido
       let urlAnuncioEspecifica = urlPdfSumario;
 
       for (let i = 0; i < lineasConEnlaces.length; i++) {
         const lineaObj = lineasConEnlaces[i];
         const linea = lineaObj.texto;
 
-        // Si la línea actual trae un enlace válido incrustado y diferente al sumario, lo actualizamos y recordamos
         if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
           urlAnuncioEspecifica = lineaObj.url;
         }
@@ -411,7 +409,7 @@ async function ejecutarCapturadorBoja() {
         parrafoActual += " " + linea;
 
         if (parrafoActual.length > 120) {
-          evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProsesados if (typeof documentosProcesados !== 'undefined' ? documentosProcesados : destino) ...); // Mantén tu variable destino original
+          evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
           parrafoActual = "";
         }
       }
