@@ -1,4 +1,4 @@
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 import pdfParse from "pdf-parse";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
