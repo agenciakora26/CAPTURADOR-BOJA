@@ -303,7 +303,6 @@ $("a").each((_, el) => {
         if (linea.includes("Depósito legal") || linea.includes("ISSN") || linea === "https://www.juntadeandalucia.es/eboja") {
           continue;
         }
-        const linea = lineas[i];
 
         // Detectar cabeceras de sección
         if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("consejería"))) {
