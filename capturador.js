@@ -445,25 +445,7 @@ async function ejecutarCapturadorBoja() {
   return unicos;
 }
 
-function evaluarYGuardar(texto, urlBase, seccion, destino) {
-  const textoLimpio = texto.replace(/\s+/g, " ").trim();
-  
-  console.log(`🔎 Evaluando texto (${textoLimpio.length} chars) [${seccion}]: "${textoLimpio.substring(0, 80)}..."`);
-  
-  // Le pasamos la sección y el texto a la función clasificadora
-  const sectorEncontrado = clasificarTexto(textoLimpio, seccion);
 
-  if (sectorEncontrado) {
-    console.log(`✅ ¡Anuncio clasificado en "${sectorEncontrado}"!`);
-    destino.push({
-      titulo: textoLimpio, 
-      url_pdf: urlBase,
-      sector: sectorEncontrado
-    });
-  } else {
-    console.log(`❌ Descartado (no alcanza umbral o no coincide con sectores).`);
-  }
-}
 
 // Exportación única al final del archivo
 export { ejecutarCapturadorBoja as ejecutarBOJA };
