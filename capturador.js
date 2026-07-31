@@ -367,31 +367,51 @@ async function ejecutarCapturadorBoja() {
     let seccionActual = "GENERAL";
       let parrafoActual = "";
       let urlAnuncioEspecifica = urlPdfSumario;
+      let saltarSoloNombramientos = false;
 
       for (let i = 0; i < lineasConEnlaces.length; i++) {
         const lineaObj = lineasConEnlaces[i];
         const linea = lineaObj.texto;
+        const textoMinus = linea.toLowerCase();
+
+        // 1. Si detectamos que arranca específicamente el apartado 2.1 o la palabra nombramientos, activamos el salto exclusivo
+        if (
+          textoMinus.includes("2.1.") || 
+          textoMinus.includes("2.1 nombramientos") || 
+          textoMinus.includes("nombramientos, situaciones e incidencias")
+        ) {
+          saltarSoloNombramientos = true;
+          parrafoActual = "";
+          continue;
+        }
+
+        // 2. En cuanto el boletín cambia a cualquier otra sección o subapartado (2.2, 2.3, sección 3, etc.), 
+        // desactivamos el escudo y retomamos el análisis de inmediato.
+        if (
+          textoMinus.includes("2.2.") || 
+          textoMinus.includes("2.3.") || 
+          textoMinus.includes("3. ") || 
+          textoMinus.includes("otras disposiciones") || 
+          textoMinus.includes("oposiciones") || 
+          textoMinus.includes("concursos") ||
+          textoMinus.includes("personal funcionario") ||
+          textoMinus.includes("personal laboral")
+        ) {
+          saltarSoloNombramientos = false;
+        }
+
+        // Si el interruptor de exclusión del 2.1 está activo, nos saltamos estas líneas
+        if (saltarSoloNombramientos) {
+          parrafoActual = "";
+          continue;
+        }
 
         // Si la línea trae un enlace propio que no es el sumario general, lo guardamos
         if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
           urlAnuncioEspecifica = lineaObj.url;
         }
 
-        // BLOQUEO TOTAL: Si la línea o la sección actual hablan de nombramientos o apartados 2.1, descartamos al instante
-        const textoMinus = linea.toLowerCase();
-        if (
-          textoMinus.includes("nombramientos") || 
-          textoMinus.includes("situaciones e incidencias") || 
-          textoMinus.includes("2.1.") || 
-          textoMinus.includes("2.1 nombramientos") ||
-          seccionActual.toLowerCase().includes("nombramientos") || 
-          seccionActual.toLowerCase().includes("2.1")
-        ) {
-          parrafoActual = "";
-          continue;
-        }
-
-        // Ignoramos ruidos de cabeceras, pies, fechas sueltas y metadatos de "texto núm."
+        // Ignoramos ruidos habituales de cabeceras, pies y metadatos
         if (
           linea.includes("Depósito legal") || 
           linea.includes("ISSN") || 
@@ -407,7 +427,6 @@ async function ejecutarCapturadorBoja() {
           continue;
         }
 
-        // Limpiamos también si la línea trae suelto el fragmento de "texto núm. XXXX - X páginas" por dentro
         const lineaLimpiaTexto = linea.replace(/texto núm\.\s*\d+.*?(página[s]?)?/gi, "").trim();
         if (lineaLimpiaTexto.length === 0) continue;
 
@@ -431,7 +450,7 @@ async function ejecutarCapturadorBoja() {
         }
       }
 
-      if (parrafoActual.length > 15) {
+      if (parrafoActual.length > 15 && !saltarSoloNombramientos) {
         evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
       }
     } catch (err) {
