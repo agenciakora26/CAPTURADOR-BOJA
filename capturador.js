@@ -102,9 +102,9 @@ const SECTORES = {
       { texto: "modernizacion de establecimientos comerciales", puntos: 9 },
       { texto: "establecimientos de restauracion", puntos: 7 },
       { texto: "establecimientos hoteleros", puntos: 7 },
-      { texto: "municipio turistico de andalucia", puntos: 7 },
+      { texto: "municipio turistico", puntos: 7 },
       { texto: "empresa turistica", puntos: 6 },
-      { texto: "registro de turismo de andalucia", puntos: 6 },
+      { texto: "registro de turismo", puntos: 6 },
       { texto: "calidad turistica", puntos: 6 }
     ],
     medias: [
@@ -245,7 +245,7 @@ const SECTORES = {
     combinaciones: [
       { todos: ["contrato", "presentacion de ofertas"], puntos: 8 },
       { todos: ["licitacion", "presupuesto base"], puntos: 8 },
-      { todos: ["procedimiento abierto", "valor estimado"], puntos: 8 }
+      { todos: ["proceso abierto", "valor estimado"], puntos: 8 }
     ],
     negativas: [
       { texto: "formalizacion del contrato", puntos: -7 },
@@ -278,7 +278,7 @@ const SECTORES = {
       { texto: "cuerpo de maestros", puntos: 6 },
       { texto: "profesores de ensenanza secundaria", puntos: 6 },
       { texto: "personal docente", puntos: 5 },
-      { texto: "universidades publicas de andalucia", puntos: 5 }
+      { texto: "universidades publicas", puntos: 5 }
     ],
     medias: [
       { texto: "educacion infantil", puntos: 3 },
@@ -318,11 +318,10 @@ const SECTORES = {
   "sanidad y bienestar social": {
     threshold: 8,
     fuertes: [
-      { texto: "servicio andaluz de salud", puntos: 5 },
       { texto: "prestacion de dependencia", puntos: 7 },
       { texto: "atencion a la dependencia", puntos: 6 },
       { texto: "renta minima de insercion social", puntos: 7 },
-      { texto: "ingreso minimo de solidaridad", puntos: 7 },
+      { texto: "ingreso minimo vital", puntos: 8 },
       { texto: "subvenciones a entidades sociales", puntos: 9 },
       { texto: "programas de interes general con cargo a la asignacion tributaria", puntos: 9 },
       { texto: "centros de servicios sociales", puntos: 6 },
@@ -333,7 +332,6 @@ const SECTORES = {
       { texto: "concurso de traslado", puntos: 6 }
     ],
     medias: [
-      { texto: "sas", puntos: 2 },
       { texto: "sanidad", puntos: 2 },
       { texto: "hospital", puntos: 2 },
       { texto: "centro de salud", puntos: 2 },
@@ -349,8 +347,7 @@ const SECTORES = {
     combinaciones: [
       { todos: ["convocatoria", "subvenciones", "entidades sociales"], puntos: 9 },
       { todos: ["ayudas", "personas con discapacidad"], puntos: 8 },
-      { todos: ["prestaciones", "dependencia"], puntos: 7 },
-      { todos: ["servicio andaluz de salud", "convoca"], puntos: 5 }
+      { todos: ["prestaciones", "dependencia"], puntos: 7 }
     ],
     negativas: [
       { texto: "no ha sido posible notificar", puntos: -12 },
@@ -379,14 +376,14 @@ const SECTORES = {
       { texto: "bases reguladoras para la concesion de subvenciones", puntos: 9 },
       { texto: "extracto de la convocatoria", puntos: 9 },
       { texto: "en regimen de concurrencia competitiva", puntos: 6 },
-      { texto: "en regimen de concurrencia non competitiva", puntos: 6 },
+      { texto: "en regimen de concurrencia no competitiva", puntos: 6 },
       { texto: "personas o entidades beneficiarias", puntos: 5 },
       { texto: "plazo de presentacion de solicitudes", puntos: 5 },
       { texto: "digitalizacion de pymes", puntos: 8 },
       { texto: "fomento del empleo autonomo", puntos: 8 },
       { texto: "ayudas a trabajadores autonomos", puntos: 9 },
       { texto: "creacion de empresas", puntos: 6 },
-      { texto: "incentivos economicos regionales", puntos: 8 },
+      { texto: "incentivos economicos", puntos: 8 },
       { texto: "i+d+i empresarial", puntos: 7 }
     ],
     medias: [
@@ -440,23 +437,19 @@ function clasificarTexto(texto = "", seccion = "") {
   let maxPuntuacion = -999;
 
   for (const [nombreSector, reglas] of Object.entries(SECTORES)) {
-    // Verificar exclusiones absolutas en el texto
     const tieneExclusionAbsoluta = (reglas.excluirSiContiene || []).some(ex => textoNorm.includes(normalizar(ex)));
     if (tieneExclusionAbsoluta) continue;
 
-    // Verificar secciones excluidas
     const seccionExcluida = (reglas.seccionesExcluidas || []).some(secEx => seccionNorm.includes(normalizar(secEx)));
     if (seccionExcluida) continue;
 
     let puntuacion = 0;
     let tieneSenalPrincipal = false;
 
-    // Bonificación o comprobación de sección preferida
     if (reglas.seccionesPreferidas && reglas.seccionesPreferidas.some(secPref => seccionNorm.includes(normalizar(secPref)))) {
       puntuacion += 2;
     }
 
-    // Evaluar palabras fuertes
     for (const fuerte of (reglas.fuertes || [])) {
       if (textoNorm.includes(normalizar(fuerte.texto))) {
         puntuacion += fuerte.puntos;
@@ -464,14 +457,12 @@ function clasificarTexto(texto = "", seccion = "") {
       }
     }
 
-    // Evaluar palabras medias
     for (const media of (reglas.medias || [])) {
       if (textoNorm.includes(normalizar(media.texto))) {
         puntuacion += media.puntos;
       }
     }
 
-    // Evaluar combinaciones
     for (const comb of (reglas.combinaciones || [])) {
       const cumpleTodas = comb.todos.every(t => textoNorm.includes(normalizar(t)));
       if (cumpleTodas) {
@@ -480,14 +471,12 @@ function clasificarTexto(texto = "", seccion = "") {
       }
     }
 
-    // Evaluar negativas
     for (const neg of (reglas.negativas || [])) {
       if (textoNorm.includes(normalizar(neg.texto))) {
         puntuacion += neg.puntos;
       }
     }
 
-    // Si no hay ninguna señal fuerte o combinación que valide el contenido, descartamos sumar por acumulación débil
     if (!tieneSenalPrincipal && puntuacion < (reglas.threshold || 8)) {
       continue;
     }
@@ -592,20 +581,13 @@ async function ejecutar() {
     const textoCompleto = parsedPdf.text;
     const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
 
-    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario...`);
-
-    let seccionActual = "";
+    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario con el nuevo motor de puntuación...`);
 
     for (let i = 0; i < lineas.length; i++) {
       const lineaTexto = lineas[i];
-      const lineaNorm = normalizar(lineaTexto);
-
-      // Detectar cambios de sección de manera inteligente en el sumario oficial
-      if (lineaTexto.toUpperCase() === lineaTexto && lineaTexto.length > 5 && !lineaTexto.includes(".")) {
-        seccionActual = lineaTexto;
-      }
-
-      const sectorEncontrado = clasificarTexto(lineaTexto, seccionActual);
+      
+      // Aplicar el nuevo motor de clasificación por puntuación manteniendo el enlace al sumario PDF
+      const sectorEncontrado = clasificarTexto(lineaTexto, "");
 
       if (sectorEncontrado) {
         documentosProcesados.push({
