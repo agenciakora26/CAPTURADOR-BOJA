@@ -364,7 +364,7 @@ async function ejecutarCapturadorBoja() {
         });
       }
 
-     let seccionActual = "GENERAL";
+    let seccionActual = "GENERAL";
       let parrafoActual = "";
       let urlAnuncioEspecifica = urlPdfSumario;
 
@@ -375,6 +375,12 @@ async function ejecutarCapturadorBoja() {
         // Si la línea trae un enlace propio que no es el sumario general, lo guardamos
         if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
           urlAnuncioEspecifica = lineaObj.url;
+        }
+
+        // Si la sección actual corresponde a nombramientos, saltamos y limpiamos de inmediato
+        if (seccionActual.toLowerCase().includes("nombramientos") || seccionActual.toLowerCase().includes("situaciones e incidencias")) {
+          parrafoActual = "";
+          continue;
         }
 
         // Ignoramos ruidos de cabeceras, pies, fechas sueltas y metadatos de "texto núm."
@@ -406,12 +412,12 @@ async function ejecutarCapturadorBoja() {
             parrafoActual = "";
           }
           seccionActual = linea; 
-          continue; 
-        }
 
-        if (seccionActual.toLowerCase().includes("nombramientos")) {
-          parrafoActual = ""; 
-          continue;
+          // Si la nueva cabecera es de nombramientos, vaciamos el párrafo acumulado
+          if (seccionActual.toLowerCase().includes("nombramientos") || seccionActual.toLowerCase().includes("situaciones e incidencias")) {
+            parrafoActual = "";
+          }
+          continue; 
         }
 
         parrafoActual += " " + lineaLimpiaTexto;
@@ -422,14 +428,13 @@ async function ejecutarCapturadorBoja() {
         }
       }
 
-      if (parrafoActual.length > 15) {
+      if (parrafoActual.length > 15 && !seccionActual.toLowerCase().includes("nombramientos") && !seccionActual.toLowerCase().includes("situaciones e incidencias")) {
         evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
       }
     } catch (err) {
       console.log(`⚠️ Error procesando PDF de sumario: ${err.message}`);
     }
   }
-
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes totales encontrados en el BOJA: ${unicos.length}`);
 
