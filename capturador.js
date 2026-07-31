@@ -354,31 +354,36 @@ $("a").each((_, el) => {
           continue;
         }
 
-        // Detectar cabeceras de sección
-        if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("consejería") || linea.toLowerCase().includes("autoridades"))) {
+        // Comprobamos si la línea está enteramente en mayúsculas (y tiene tamaño de cabecera)
+        const esTodoMayusculas = (linea === linea.toUpperCase()) && /[A-ZÁÉÍÓÚÑ]/.test(linea);
+        const esCabecera = linea.length > 3 && linea.length < 120 && esTodoMayusculas;
+
+        if (esCabecera) {
+          // Si teníamos un anuncio pendiente de evaluar, lo guardamos antes de cambiar de sección
           if (parrafoActual.length > 25) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
           }
-          seccionActual = linea;
-          continue;
+          seccionActual = linea; // Actualizamos la consejería/entidad activa
+          continue; // Saltamos la línea en mayúsculas para que no contamine el texto del anuncio
         }
 
-        // 🛑 SALTAR TODA LA SECCIÓN DE NOMBRAMIENTOS (Único filtro de exclusión activo)
+        // 🛑 SALTAR TODA LA SECCIÓN DE NOMBRAMIENTOS
         if (seccionActual.toLowerCase().includes("nombramientos")) {
           parrafoActual = ""; 
           continue;
         }
 
-        // Detectar si empieza un nuevo anuncio por su formato estándar (número o CVE)
-        if (linea.match(/^[0-9]+\./) || linea.toLowerCase().includes("cve:")) {
+        // Acumulamos el texto del anuncio (que al tener minúsculas pasará por aquí)
+        parrafoActual += " " + linea;
+
+        // Si la línea actual contiene la referencia de páginas o texto, cerramos y evaluamos el anuncio
+        if (linea.toLowerCase().includes("texto núm.") || linea.toLowerCase().includes("páginas")) {
           if (parrafoActual.length > 25) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
           }
         }
-
-        parrafoActual += " " + linea;
       }
 
       // Guardar el último párrafo si queda pendiente
