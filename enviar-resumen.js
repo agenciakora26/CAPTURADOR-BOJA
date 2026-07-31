@@ -110,6 +110,7 @@ async function iniciarProcesoGlobal() {
   console.log("✅ Proceso unificado completado con éxito.");
 }
 
+// Ejecución de la función principal
 iniciarProcesoGlobal().catch(err => {
   console.error("❌ Error crítico en el proceso global:", err);
   process.exit(1);
