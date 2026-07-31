@@ -312,36 +312,32 @@ async function ejecutar() {
     const textoCompleto = parsedPdf.text;
     const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
 
-    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario con el sistema de puntuación avanzado...`);
+    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario con el sistema flexible...`);
 
     let seccionActual = "";
-    let tituloAcumulado = "";
 
     for (let i = 0; i < lineas.length; i++) {
       const linea = lineas[i];
 
-      if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("seccion"))) {
+      // Detección de posibles cabeceras de sección
+      if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("consejería") || linea.toLowerCase().includes("seccion"))) {
         seccionActual = linea;
+        continue;
       }
 
-      if (linea.toLowerCase().includes("text núm") || linea.toLowerCase().includes("text num")) {
-        if (tituloAcumulado.length > 15) {
-          const sectorEncontrado = clasificarTexto(tituloAcumulado, seccionActual);
+      // Evaluamos directamente cada línea o titular significativo que tenga una longitud mínima
+      if (linea.length > 20) {
+        const sectorEncontrado = clasificarTexto(linea, seccionActual);
 
-          if (sectorEncontrado) {
-            documentosProcesados.push({
-              titulo: tituloAcumulado,
-              url_pdf: urlPdfSumario,
-              sector: sectorEncontrado
-            });
-          }
+        if (sectorEncontrado) {
+          documentosProcesados.push({
+            titulo: linea,
+            url_pdf: urlPdfSumario,
+            sector: sectorEncontrado
+          });
         }
-        tituloAcumulado = "";
-      } else {
-        tituloAcumulado += (tituloAcumulado ? " " : "") + linea;
       }
     }
-  }
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
