@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
-import { ejecutarBOE } from "./capturador-boe.js";
+export { ejecutarCapturadorBoja as ejecutarBOJA }
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
