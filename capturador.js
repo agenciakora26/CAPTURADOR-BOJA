@@ -231,17 +231,14 @@ async function ejecutarCapturadorBoja() {
   const $ = cheerio.load(htmlPortada);
   let urlsPdfSumarios = [];
 
-  // FILTRO ESTRICTO: Solo enlaces que contengan textualmente "sumario boletín" y extensión .pdf
   $("a").each((_, el) => {
     const texto = $(el).text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
     const href = $(el).attr("href") || "";
     
-    // Buscamos el enlace del sumario
     if (href.endsWith(".pdf") && (texto.includes("sumario") || href.includes("sumario"))) {
       if (href.includes("verificacion")) return;
 
       let urlFinal = "";
-      
       if (href.startsWith("http")) {
         urlFinal = href;
       } else {
@@ -317,6 +314,11 @@ async function ejecutarCapturadorBoja() {
         });
       }
 
+      console.log(`🔍 Líneas totales extraídas del PDF del sumario: ${lineasConEnlaces.length}`);
+      if (lineasConEnlaces.length > 0) {
+        console.log(`📝 Muestra de las primeras 15 líneas leídas:`, lineasConEnlaces.slice(0, 15).map(l => l.texto));
+      }
+
       let seccionActual = "";
       let parrafoActual = "";
       let urlAnuncioEspecifica = urlPdfSumario;
@@ -390,7 +392,6 @@ async function ejecutarCapturadorBoja() {
 
   return unicos;
 }
-
 function evaluarYGuardar(texto, urlBase, seccion, destino) {
   const textoLimpio = texto.replace(/\s+/g, " ").trim();
   const sectorEncontrado = clasificarTexto(textoLimpio, seccion);
