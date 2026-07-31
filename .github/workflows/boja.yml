@@ -33,17 +33,17 @@ jobs:
           ls -la
           test -f capturador.js
           test -f capturador-boe.js
+          test -f enviar-resumen.js
           test -f package.json
 
       - name: Instalar dependencias
         run: npm install --no-audit --no-fund
 
-      - name: Ejecutar capturador BOJA y BOE
+      - name: Ejecutar resumen unificado BOJA y BOE
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TZ: Europe/Madrid
         run: |
-          node capturador.js
-          node capturador-boe.js
+          node enviar-resumen.js
