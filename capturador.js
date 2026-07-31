@@ -403,4 +403,4 @@ await fetch("https://api.resend.com/emails", {
   return unicos;
 } // <-- Esta llave faltaba para cerrar la función 'ejecutar'
 
-export { ejecutar as ejecutarBOJA };
+module.exports = { ejecutarBOJA: ejecutar };
