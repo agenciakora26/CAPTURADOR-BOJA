@@ -525,9 +525,6 @@ async function ejecutarBOE() {
       const textoEnlace = $(el).text();
       const href = $(el).attr("href");
 
-      // Opcional: si en el BOE detectas títulos de sección por etiquetas específicas de cabecera puedes asignarlo aquí, 
-      // si no, se evalúa directamente el bloque de texto con el motor de pesos.
-
       if (href && textoEnlace.includes("PDF (BOE")) {
         encontradosCount++;
         const urlPdfIndividual = href.startsWith("http") ? href : new URL(href, "https://www.boe.es").href;
@@ -559,7 +556,13 @@ async function ejecutarBOE() {
     console.log(`⚠️ Error al conectar con el BOE: ${err.message}`);
   }
 
-  const unicos = Array.from(new Map(documentos.map(d => [d.titulo, d])).values());
+  // FILTRO ROBUSTO DE DUPLICADOS: Garantiza que no se repita ningún anuncio basándose en la URL del PDF o el título exacto
+  const unicos = documentos.filter((documento, index, self) =>
+    index === self.findIndex((t) => (
+      t.url_pdf === documento.url_pdf || t.titulo === documento.titulo
+    ))
+  );
+
   console.log(`🎯 Anuncios relevantes encontrados en el BOE: ${unicos.length}`);
 
   for (const d of unicos) {
@@ -572,7 +575,7 @@ async function ejecutarBOE() {
           url_pdf: d.url_pdf,
           categoria: d.sector,
           origen: "BOE",
-          enviado: false
+          en enviado: false
         })
       });
     } catch (err) {
@@ -582,5 +585,4 @@ async function ejecutarBOE() {
 
   return unicos;
 }
-
 export { ejecutarBOE };
