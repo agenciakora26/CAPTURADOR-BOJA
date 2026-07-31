@@ -399,8 +399,10 @@ await fetch("https://api.resend.com/emails", {
     });
   }
 
+  // ... (todo tu código anterior) ...
+
   console.log("✅ Proceso completado con éxito.");
   return unicos;
-} // <-- Esta llave faltaba para cerrar la función 'ejecutar'
+}
 
-module.exports = { ejecutarBOJA: ejecutar };
+export { ejecutar as ejecutarBOJA };
