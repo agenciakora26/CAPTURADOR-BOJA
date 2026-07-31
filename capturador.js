@@ -314,12 +314,7 @@ async function ejecutarCapturadorBoja() {
         });
       }
 
-      console.log(`🔍 Líneas totales extraídas del PDF del sumario: ${lineasConEnlaces.length}`);
-      if (lineasConEnlaces.length > 0) {
-        console.log(`📝 Muestra de las primeras 15 líneas leídas:`, lineasConEnlaces.slice(0, 15).map(l => l.texto));
-      }
-
-      let seccionActual = "";
+      let seccionActual = "GENERAL";
       let parrafoActual = "";
       let urlAnuncioEspecifica = urlPdfSumario;
 
@@ -331,15 +326,27 @@ async function ejecutarCapturadorBoja() {
           urlAnuncioEspecifica = lineaObj.url;
         }
 
-        if (linea.includes("Depósito legal") || linea.includes("ISSN") || linea === "https://www.juntadeandalucia.es/eboja") {
+        // Ignorar líneas irrelevantes de cabeceras/pies de página institucionales
+        if (
+          linea.includes("Depósito legal") || 
+          linea.includes("ISSN") || 
+          linea.includes("Sumario") || 
+          linea.includes("Extraordinario") || 
+          linea.includes("Boletín Oficial") ||
+          linea === "https://www.juntadeandalucia.es/eboja" ||
+          linea === "Junta de Andalucía" ||
+          linea === "BOJA"
+        ) {
           continue;
         }
 
+        // Criterio de cabecera: Línea corta en mayúsculas que suele indicar Consejería u Órgano
         const esTodoMayusculas = (linea === linea.toUpperCase()) && /[A-ZÁÉÍÓÚÑ]/.test(linea);
-        const esCabecera = linea.length > 3 && linea.length < 120 && esTodoMayusculas;
+        const esCabecera = linea.length > 3 && linea.length < 100 && esTodoMayusculas;
 
         if (esCabecera) {
-          if (parrafoActual.length > 25) {
+          // Si teníamos texto acumulado, lo guardamos antes de cambiar de consejería/sección
+          if (parrafoActual.length > 15) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
           }
@@ -347,22 +354,24 @@ async function ejecutarCapturadorBoja() {
           continue; 
         }
 
+        // Omitir sección de nombramientos si aplica
         if (seccionActual.toLowerCase().includes("nombramientos")) {
           parrafoActual = ""; 
           continue;
         }
 
+        // Acumulamos el texto del sumario del anuncio
         parrafoActual += " " + linea;
 
-        if (linea.toLowerCase().includes("texto núm.") || linea.toLowerCase().includes("páginas")) {
-          if (parrafoActual.length > 25) {
-            evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
-            parrafoActual = "";
-          }
+        // Si el bloque acumulado ya tiene un tamaño considerable (ej. descripción completa), lo procesamos como un anuncio independiente
+        if (parrafoActual.length > 120) {
+          evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
+          parrafoActual = "";
         }
       }
 
-      if (parrafoActual.length > 25) {
+      // Guardar cualquier resto que haya quedado al final del documento
+      if (parrafoActual.length > 15) {
         evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
       }
 
