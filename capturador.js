@@ -283,15 +283,15 @@ async function ejecutarCapturadorBoja() {
     }
   });
 
-  return urlsPdfSumarios;
-}
-
   console.log(`📄 PDFs de sumarios oficiales detectados:`, urlsPdfSumarios);
 
   if (urlsPdfSumarios.length === 0) {
     console.log("⚠️ No se ha encontrado el PDF de sumario boletín oficial.");
     return [];
   }
+
+  return urlsPdfSumarios;
+}
 
   const documentosProcesados = [];
 
