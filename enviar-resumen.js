@@ -25,23 +25,35 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function iniciarProcesoGlobal() {
   console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
 
-  // 1. Ejecutamos ambos capturadores y obtenemos sus arrays de noticias
-  let documentosBoja = [];
-  let documentosBoe = [];
-
+  // 1. Ejecutamos los capturadores para que recojan y guarden lo nuevo en Supabase con enviado: false
   try {
-    documentosBoja = await ejecutarBOJA();
+    await ejecutarBOJA();
   } catch (err) {
     console.error("❌ Error en BOJA:", err.message);
   }
 
   try {
-    documentosBoe = await ejecutarBOE();
+    await ejecutarBOE();
   } catch (err) {
     console.error("❌ Error en BOE:", err.message);
   }
 
-  // 2. Consultamos los usuarios activos en Supabase
+  // 2. Consultamos ÚNICAMENTE los anuncios que todavía NO han sido enviados (enviado = false)
+  console.log("📥 Consultando anuncios pendientes de envío...");
+  const anunciosPendientes = await supabaseRequest("anuncios_boja?enviado=eq.false&select=*");
+
+  if (!anunciosPendientes || anunciosPendientes.length === 0) {
+    console.log("📭 No hay nuevos anuncios pendientes de enviar en esta franja horaria.");
+    return;
+  }
+
+  console.log(`📌 Encontrados ${anunciosPendientes.length} anuncios nuevos para notificar.`);
+
+  // Separamos los pendientes según su origen
+  const documentosBoja = anunciosPendientes.filter(d => d.origen === "BOJA" || !d.origen);
+  const documentosBoe = anunciosPendientes.filter(d => d.origen === "BOE");
+
+  // 3. Consultamos los usuarios activos en Supabase
   console.log("👥 Consultando usuarios suscritos...");
   const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
 
@@ -50,10 +62,12 @@ async function iniciarProcesoGlobal() {
     return;
   }
 
-  // 3. Enviamos un correo unificado a cada usuario según sus sectores
+  let idsAnotadosComoEnviados = [];
+
+  // 4. Enviamos el correo unificado a cada usuario con sus alertas pendientes correspondientes
   for (const usuario of usuarios) {
-    const relevantesBoja = (documentosBoja || []).filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
-    const relevantesBoe = (documentosBoe || []).filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
+    const relevantesBoja = documentosBoja.filter(doc => usuario.sectores_suscritos?.includes(doc.categoria || doc.sector));
+    const relevantesBoe = documentosBoe.filter(doc => usuario.sectores_suscritos?.includes(doc.categoria || doc.sector));
 
     const totalAlertas = relevantesBoja.length + relevantesBoe.length;
     if (totalAlertas === 0) continue;
@@ -63,25 +77,25 @@ async function iniciarProcesoGlobal() {
     // HTML Bloque BOJA (Verde)
     let htmlBoja = relevantesBoja.length > 0 ? relevantesBoja.map(r => `
       <li style="margin-bottom: 10px;">
-        <strong>[${r.sector.toUpperCase()}]</strong><br>
+        <strong>[${(r.categoria || r.sector).toUpperCase()}]</strong><br>
         <span style="font-size: 14px; color: #333;">${r.titulo}</span><br>
         <a href="${r.url_pdf}" target="_blank" style="color: #047857; font-weight: bold; text-decoration: underline;">Ver PDF del BOJA</a>
       </li>
-    `).join("") : '<p style="color: #666; font-style: italic;">Sin novedades en tus sectores para el BOJA hoy.</p>';
+    `).join("") : '<p style="color: #666; font-style: italic;">Sin novedades en tus sectores para el BOJA en este aviso.</p>';
 
     // HTML Bloque BOE (Azul)
     let htmlBoe = relevantesBoe.length > 0 ? relevantesBoe.map(r => `
       <li style="margin-bottom: 10px;">
-        <strong>[${r.sector.toUpperCase()}]</strong><br>
+        <strong>[${(r.categoria || r.sector).toUpperCase()}]</strong><br>
         <span style="font-size: 14px; color: #333;">${r.titulo}</span><br>
         <a href="${r.url_pdf}" target="_blank" style="color: #1d4ed8; font-weight: bold; text-decoration: underline;">Ver PDF del BOE</a>
       </li>
-    `).join("") : '<p style="color: #666; font-style: italic;">Sin novedades en tus sectores para el BOE hoy.</p>';
+    `).join("") : '<p style="color: #666; font-style: italic;">Sin novedades en tus sectores para el BOE en este aviso.</p>';
 
     const htmlFinal = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #1e293b; text-align: center;">Resumen Diario Oficial</h2>
-        <p>Hola, tienes <strong>${totalAlertas} alertas nuevas</strong> en los boletines oficiales de hoy:</p>
+        <h2 style="color: #1e293b; text-align: center;">Resumen de Boletines Oficiales</h2>
+        <p>Hola, tienes <strong>${totalAlertas} alertas nuevas</strong> desde la última revisión:</p>
         
         <!-- BLOQUE BOJA (VERDE) -->
         <div style="border-left: 4px solid #10b981; background-color: #f0fdf4; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
@@ -102,9 +116,31 @@ async function iniciarProcesoGlobal() {
     await resend.emails.send({
       from: 'BoletínHoy <alertas@boletinhoy.es>',
       to: [usuario.email],
-      subject: `Tienes ${totalAlertas} alertas nuevas en tu BOE y BOJA`,
+      subject: `Tienes ${totalAlertas} nuevas alertas en tus boletines oficiales`,
       html: htmlFinal
     });
+
+    // Recopilamos los IDs de los anuncios incluidos en los envíos de los usuarios
+    [...relevantesBoja, ...relevantesBoe].forEach(doc => {
+      if (doc.id && !idsAnotadosComoEnviados.includes(doc.id)) {
+        idsAnotadosComoEnviados.push(doc.id);
+      }
+    });
+  }
+
+  // 5. Marcamos en Supabase los anuncios notificados como enviados (enviado = true) para que no se repitan
+  if (idsAnotadosComoEnviados.length > 0) {
+    console.log("🔄 Actualizando estado de anuncios a 'enviado: true' en Supabase...");
+    for (const idAnuncio of idsAnotadosComoEnviados) {
+      try {
+        await supabaseRequest(`anuncios_boja?id=eq.${idAnuncio}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enviado: true })
+        });
+      } catch (err) {
+        console.log(`⚠️ No se pudo actualizar el anuncio ${idAnuncio}: ${err.message}`);
+      }
+    }
   }
 
   console.log("✅ Proceso unificado completado con éxito.");
