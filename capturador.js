@@ -403,13 +403,7 @@ const SECTORES = {
       { texto: "reintegro de subvenciones", puntos: -12 },
       { texto: "procedimiento de reintegro", puntos: -12 },
       { texto: "indebidamente percibidas", puntos: -10 },
-      { texto: "concesion de subvenciones correspondiente al ejercicio", puntos: -4 },
-      { texto: "resolucion de concesion", puntos: -5 },
-      { texto: "relacion de beneficiarios", puntos: -6 },
-      { texto: "justificacion de subvenciones", puntos: -5 },
-      { texto: "perdida del derecho al cobro", puntos: -9 },
-      { texto: "no ha sido posible notificar", puntos: -10 },
-      { texto: "procedimiento sancionador", puntos: -10 }
+      { texto: "concesion de subvenciones correspondiente al ejercicio", [-4]: true } // clean below
     ],
     excluirSiContiene: [
       "procedimiento de reintegro de subvenciones",
@@ -418,6 +412,20 @@ const SECTORES = {
     ]
   }
 };
+
+// Limpieza correcta de negativas de subvenciones
+SECTORES["subvenciones y ayudas generales"].negativas = [
+  { texto: "reintegro de subvenciones", puntos: -12 },
+  { texto: "procedimiento de reintegro", puntos: -12 },
+  { texto: "indebidamente percibidas", puntos: -10 },
+  { texto: "concesion de subvenciones correspondiente al ejercicio", puntos: -4 },
+  { texto: "resolucion de concesion", puntos: -5 },
+  { texto: "relacion de beneficiarios", puntos: -6 },
+  { texto: "justificacion de subvenciones", puntos: -5 },
+  { texto: "perdida del derecho al cobro", puntos: -9 },
+  { texto: "no ha sido posible notificar", puntos: -10 },
+  { texto: "procedimiento sancionador", puntos: -10 }
+];
 
 function normalizar(texto = "") {
   return texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -499,7 +507,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutar() {
-  console.log("🚀 Iniciando capturador del BOJA (Estrategia mixta: Web + Enlaces HTML del sumario)...");
+  console.log("🚀 Iniciando capturador del BOJA (Estructura de sumario web con enlace en text núm.)...");
 
   const urlSumario = "https://www.juntadeandalucia.es/eboja.html";
   let documentosProcesados = [];
@@ -513,109 +521,116 @@ async function ejecutar() {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    let enlacesDisposiciones = [];
+    let seccionActual = "";
 
-    // 1. Recorremos los enlaces de la página del sumario que apuntan a las disposiciones individuales en HTML
-    $("a").each((_, el) => {
-      const href = $(el).attr("href");
-      const textoEnlace = $(el).text().trim();
+    // Recorremos los elementos principales de la página para capturar la estructura del sumario
+    $("h2, h3, p, div").each((_, el) => {
+      const textoEl = $(el).text().trim();
+      const claseEl = $(el).attr("class") || "";
 
-      // Buscamos enlaces internos típicos de disposiciones del BOJA (ej: conteniendo año/número o extensión html)
-      if (href && (href.includes(".html") || href.includes("/")) && textoEnlace.length > 15) {
-        const urlDisposicion = href.startsWith("http") ? href : new URL(href, "https://www.juntadeandalucia.es").href;
+      // Detectar cabeceras de sección si las hay
+      if ($(el).is("h2") || $(el).is("h3") || claseEl.includes("seccion") || claseEl.includes("cabecera")) {
+        if (textoEl.length > 3 && textoEl.length < 150) {
+          seccionActual = textoEl;
+        }
+      }
+
+      // Buscamos párrafos u ocultos que contengan el texto del anuncio
+      if (textoEl.length > 20) {
+        // Buscamos si en este bloque o en sus proximidades hay un enlace del tipo "text num" o PDF asociado
+        let urlPdfEspecifico = "";
         
-        // Filtramos para asegurar que es una URL de disposición del BOJA y no menús genéricos
-        if (urlDisposicion.includes("eboja") && !enlacesDisposiciones.includes(urlDisposicion)) {
-          enlacesDisposiciones.push(urlDisposicion);
+        // Buscamos dentro del elemento o hermanos cercanos un enlace que contenga .pdf o texto de disposición/text núm
+        $(el).find("a").each((_, a) => {
+          const href = $(a).attr("href");
+          const aText = $(a).text().toLowerCase();
+          if (href && (href.toLowerCase().includes(".pdf") || aText.includes("text") || aText.includes("num") || aText.includes("núm"))) {
+            urlPdfEspecifico = href.startsWith("http") ? href : new URL(href, "https://www.juntadeandalucia.es").href;
+          }
+        });
+
+        // Si el elemento actual no lo tiene, miramos el siguiente hermano (donde suele estar el "text núm")
+        if (!urlPdfEspecifico) {
+          const siguiente = $(el).next();
+          siguiente.find("a").each((_, a) => {
+            const href = $(a).attr("href");
+            const aText = $(a).text().toLowerCase();
+            if (href && (href.toLowerCase().includes(".pdf") || aText.includes("text") || aText.includes("num") || aText.includes("núm"))) {
+              urlPdfEspecifico = href.startsWith("http") ? href : new URL(href, "https://www.juntadeandalucia.es").href;
+            }
+          });
+        }
+
+        // Si encontramos un enlace válido de tipo PDF / disposición
+        if (urlPdfEspecifico) {
+          const sectorEncontrado = clasificarTexto(textoEl, seccionActual);
+          if (sectorEncontrado) {
+            documentosProcesados.push({
+              titulo: textoEl.substring(0, 300), // Limitar longitud del título si es muy extenso
+              url_pdf: urlPdfEspecifico,
+              sector: sectorEncontrado,
+              origen: "BOJA"
+            });
+          }
         }
       }
     });
 
-    console.log(`📌 Enlaces HTML de disposiciones encontrados en el sumario: ${enlacesDisposiciones.length}`);
+    console.log(`📌 Anuncios extraídos directamente del sumario web: ${documentosProcesados.length}`);
 
-    // Si por lo que sea la estructura web cambiase y no encontrara enlaces directos, intentamos extraer también mediante el PDF del sumario clásico como respaldo
-    if (enlacesDisposiciones.length === 0) {
-      console.log("🔄 Buscando respaldo mediante PDF de sumario...");
-      let urlPdfSumario = "";
+    // Si la estructura directa no arroja resultados, aplicamos la estrategia robusta basada en enlaces de disposiciones o respaldo de PDF de sumario
+    if (documentosProcesados.length === 0) {
+      let enlacesDisposiciones = [];
       $("a").each((_, el) => {
         const href = $(el).attr("href");
-        if (href && href.toLowerCase().endsWith(".pdf") && (href.includes("sumario") || $(el).text().toLowerCase().includes("sumario"))) {
-          urlPdfSumario = href.startsWith("http") ? href : new URL(href, "https://www.juntadeandalucia.es").href;
+        const textoEnlace = $(el).text().trim();
+        if (href && (href.includes(".html") || href.includes("/")) && textoEnlace.length > 15) {
+          const urlDisposicion = href.startsWith("http") ? href : new URL(href, "https://www.juntadeandalucia.es").href;
+          if (urlDisposicion.includes("eboja") && !enlacesDisposiciones.includes(urlDisposicion)) {
+            enlacesDisposiciones.push(urlDisposicion);
+          }
         }
       });
 
-      if (urlPdfSumario) {
-        const resPdf = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(20000) });
-        if (resPdf.ok) {
-          const bufferPdf = Buffer.from(await resPdf.arrayBuffer());
-          const parsedPdf = await pdfParse(bufferPdf);
-          const lineas = parsedPdf.text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      for (const urlDisp of enlacesDisposiciones) {
+        try {
+          const resDisp = await fetch(urlDisp, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(6000) });
+          if (!resDisp.ok) continue;
+          const htmlDisp = await resDisp.text();
+          const $disp = cheerio.load(htmlDisp);
 
-          for (const linea of lineas) {
-            const sectorEncontrado = clasificarTexto(linea, "");
+          let tituloTexto = $disp("h1").first().text().trim() || $disp("title").text().trim();
+          let urlPdfEspecifico = "";
+
+          $disp("a").each((_, elA) => {
+            const hrefA = $disp(elA).attr("href");
+            const textA = $disp(elA).text().toLowerCase();
+            if (hrefA && (hrefA.toLowerCase().endsWith(".pdf") || textA.includes("text") || textA.includes("num") || textA.includes("núm"))) {
+              urlPdfEspecifico = hrefA.startsWith("http") ? hrefA : new URL(hrefA, "https://www.juntadeandalucia.es").href;
+            }
+          });
+
+          if (!urlPdfEspecifico) {
+            const matchAnioNum = urlDisp.match(/(\d{4})\/(\d+)/);
+            if (matchAnioNum) {
+              urlPdfEspecifico = `https://www.juntadeandalucia.es/eboja/${matchAnioNum[1]}/${matchAnioNum[2]}/surg.pdf`;
+            }
+          }
+
+          if (tituloTexto && urlPdfEspecifico) {
+            const sectorEncontrado = clasificarTexto(tituloTexto, "");
             if (sectorEncontrado) {
-              const matchCodigoAnio = linea.match(/(\d{4})\/(\d+)/);
-              let urlPdfEspecifico = urlPdfSumario;
-              if (matchCodigoAnio) {
-                urlPdfEspecifico = `https://www.juntadeandalucia.es/eboja/${matchCodigoAnio[1]}/${matchCodigoAnio[2]}/surg.pdf`;
-              }
               documentosProcesados.push({
-                titulo: linea,
+                titulo: tituloTexto,
                 url_pdf: urlPdfEspecifico,
                 sector: sectorEncontrado,
                 origen: "BOJA"
               });
             }
           }
+        } catch (e) {
+          // Ignorar errores individuales
         }
-      }
-    }
-
-    // 2. Visitamos cada enlace HTML individual para extraer su título real y su enlace PDF específico (/surg.pdf o similar)
-    for (const urlDisp of enlacesDisposiciones) {
-      try {
-        const resDisp = await fetch(urlDisp, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(8000) });
-        if (!resDisp.ok) continue;
-        const htmlDisp = await resDisp.text();
-        const $disp = cheerio.load(htmlDisp);
-
-        let tituloTexto = $disp("h1").first().text().trim() || $disp("title").text().trim() || $disp(".titulo-disposicion").text().trim();
-        let urlPdfEspecifico = "";
-
-        // Buscamos el enlace al PDF específico de esta disposición concreta dentro de su página
-        $disp("a").each((_, elA) => {
-          const hrefA = $disp(elA).attr("href");
-          const textA = $disp(elA).text();
-          if (hrefA && (hrefA.toLowerCase().endsWith(".pdf") || textA.toLowerCase().includes("pdf"))) {
-            urlPdfEspecifico = hrefA.startsWith("http") ? hrefA : new URL(hrefA, "https://www.juntadeandalucia.es").href;
-          }
-        });
-
-        // Si no encontramos etiqueta <a> de PDF pero la URL cumple el estándar del BOJA, lo construimos o lo derivamos
-        if (!urlPdfEspecifico) {
-          const matchAnioNum = urlDisp.match(/(\d{4})\/(\d+)/);
-          if (matchAnioNum) {
-            urlPdfEspecifico = `https://www.juntadeandalucia.es/eboja/${matchAnioNum[1]}/${matchAnioNum[2]}/surg.pdf`;
-          } else {
-            urlPdfEspecifico = urlDisp;
-          }
-        }
-
-        if (tituloTexto && urlPdfEspecifico) {
-          let seccionTexto = $disp(".seccion, .cabecera-disposicion, h2, .subtitulo").first().text().trim();
-          const sectorEncontrado = clasificarTexto(tituloTexto, seccionTexto);
-
-          if (sectorEncontrado) {
-            documentosProcesados.push({
-              titulo: tituloTexto,
-              url_pdf: urlPdfEspecifico, // ¡Enlace individual y específico garantizado!
-              sector: sectorEncontrado,
-              origen: "BOJA"
-            });
-          }
-        }
-      } catch (errDisp) {
-        // Ignorar errores puntuales de una disposición individual para no romper el bucle
       }
     }
 
@@ -623,8 +638,8 @@ async function ejecutar() {
     console.log(`⚠️ Error al conectar con el sumario del BOJA: ${err.message}`);
   }
 
-  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes encontrados con PDF específico: ${unicos.length}`);
+  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
+  console.log(`🎯 Anuncios relevantes finales con enlace de disposición: ${unicos.length}`);
 
   for (const d of unicos) {
     try {
