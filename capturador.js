@@ -338,6 +338,7 @@ async function ejecutar() {
         }
       }
     }
+  } // <-- AQUÍ FALTABA ESTA LLAVE DE CIERRE DEL BUCLE FOR DE SUMARIOS
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
@@ -357,7 +358,6 @@ async function ejecutar() {
       console.log(`⚠️ Aviso al guardar anuncio: ${err.message}`);
     }
   }
-
 
   console.log(`🎯 Anuncios relevantes encontrados en el BOJA: ${unicos.length}`);
   return unicos;
