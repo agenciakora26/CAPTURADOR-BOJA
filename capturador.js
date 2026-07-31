@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 import { ejecutarBOE } from "./capturador-boe.js";
-import { ejecutarBOJA } from "./capturador-boja.js"; // Asegúrate de que el nombre del archivo de boja sea correcto (ej: capturador-boja.js)
+
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
