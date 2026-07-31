@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import pdfParse from "pdf-parse";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -18,17 +18,17 @@ const SECTORES = {
       { texto: "proceso selectivo", puntos: 4 },
       { texto: "pruebas selectivas", puntos: 4 },
       { texto: "personal funcionario", puntos: 4 },
-      { texto: "personal laboral", points: 4 },
+      { texto: "personal laboral", puntos: 4 },
       { texto: "convocatoria", puntos: 3 }
     ],
     medias: [
       { texto: "plaza", puntos: 2 },
       { texto: "empleo", puntos: 2 },
       { texto: "seleccion", puntos: 2 },
-      { texto: "aspirantes", points: 2 },
+      { texto: "aspirantes", puntos: 2 },
       { texto: "turno libre", puntos: 3 },
-      { texto: "promocion interna", points: 2 },
-      { texto: "personal", points: 1 }
+      { texto: "promocion interna", puntos: 2 },
+      { texto: "personal", puntos: 1 }
     ],
     negativas: [
       { texto: "cese", puntos: -3 },
@@ -47,8 +47,8 @@ const SECTORES = {
       { texto: "artesania", puntos: 4 }
     ],
     medias: [
-      { texto: "hotel", points: 2 },
-      { texto: "bono turistico", points: 4 },
+      { texto: "hotel", puntos: 2 },
+      { texto: "bono turistico", puntos: 4 },
       { texto: "ayudas", points: 2 },
       { texto: "subvencion", points: 2 },
       { texto: "mercado", points: 2 }
@@ -61,7 +61,7 @@ const SECTORES = {
     fuertes: [
       { texto: "agricultura", puntos: 4 },
       { texto: "ganaderia", puntos: 4 },
-      { texto: "pesca", points: 4 },
+      { texto: "pesca", puntos: 4 },
       { texto: "explotaciones agrarias", points: 5 },
       { texto: "pac", points: 4 },
       { texto: "produccion ecologica", points: 4 },
@@ -82,7 +82,7 @@ const SECTORES = {
     fuertes: [
       { texto: "licitacion", puntos: 5 },
       { texto: "contratacion", points: 4 },
-      { texto: "contrato de obras", points: 5 },
+      { texto: "contrato de obras", puntos: 5 },
       { texto: "contrato de servicios", points: 4 },
       { texto: "suministros", points: 4 },
       { texto: "adjudicacion", points: 3 },
@@ -177,10 +177,6 @@ function clasificarTexto(texto = "", seccion = "") {
     let puntuacion = 0;
     let tieneSenalPrincipal = false;
 
-    if (reglas.seccionesPreferidas && reglas.seccionesPreferidas.some(secPref => seccionNorm.includes(normalizar(secPref)))) {
-      puntuacion += 2;
-    }
-
     for (const fuerte of (reglas.fuertes || [])) {
       if (textoNorm.includes(normalizar(fuerte.texto))) {
         puntuacion += fuerte.puntos;
@@ -194,25 +190,17 @@ function clasificarTexto(texto = "", seccion = "") {
       }
     }
 
-    for (const comb of (reglas.combinaciones || [])) {
-      const cumpleTodas = comb.todos.every(t => textoNorm.includes(normalizar(t)));
-      if (cumpleTodas) {
-        puntuacion += comb.puntos;
-        tieneSenalPrincipal = true;
-      }
-    }
-
     for (const neg of (reglas.negativas || [])) {
       if (textoNorm.includes(normalizar(neg.texto))) {
         puntuacion += neg.puntos;
       }
     }
 
-    if (!tieneSenalPrincipal && puntuacion < (reglas.threshold || 8)) {
+    if (!tieneSenalPrincipal && puntuacion < (reglas.threshold || 3)) {
       continue;
     }
 
-    if (puntuacion >= (reglas.threshold || 8) && puntuacion > maxPuntuacion) {
+    if (puntuacion >= (reglas.threshold || 3) && puntuacion > maxPuntuacion) {
       maxPuntuacion = puntuacion;
       mejorSector = nombreSector;
     }
@@ -237,7 +225,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutar() {
-  console.log("🚀 Iniciando capturador inteligente del BOJA...");
+  console.log("🚀 Iniciando capturador inteligente del BOJA (v2 con PDFJS)...");
 
   const urlPortada = "https://www.juntadeandalucia.es/BOJA";
   let htmlPortada;
@@ -262,7 +250,6 @@ async function ejecutar() {
     
     if (href && texto.includes("sumario boletín")) {
       let urlFinal = "";
-      
       if (href.includes("/eboja/")) {
         urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
       } else {
@@ -276,7 +263,6 @@ async function ejecutar() {
           urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
         }
       }
-
       if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
         urlsPdfSumarios.push(urlFinal);
       }
@@ -293,55 +279,103 @@ async function ejecutar() {
   const documentosProcesados = [];
 
   for (const urlPdfSumario of urlsPdfSumarios) {
-    console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
+    console.log(`📄 Descargando y analizando hipervínculos del Sumario oficial: ${urlPdfSumario}`);
 
-    let parsedPdf;
     try {
-      const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-      if (!pdfRes.ok) {
-        console.log(`⚠️ No se pudo descargar el archivo PDF (HTTP ${pdfRes.status}).`);
-        continue;
-      }
+      const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(20000) });
+      if (!pdfRes.ok) continue;
       const buffer = Buffer.from(await pdfRes.arrayBuffer());
-      parsedPdf = await pdfParse(buffer);
-    } catch (err) {
-      console.log(`⚠️ Error al procesar el PDF del sumario: ${err.message}`);
-      continue;
-    }
+      
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+      const pdfDoc = await loadingTask.promise;
 
-    const textoCompleto = parsedPdf.text;
-    const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      let seccionActual = "";
 
-    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario con el sistema flexible...`);
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const textContent = await page.getTextContent();
+        const annotations = await page.getAnnotations();
 
-    let seccionActual = "";
+        // Mapear anotaciones de enlaces para relacionarlas por coordenadas o posición
+        let enlacesPagina = [];
+        if (annotations) {
+          for (const ann of annotations) {
+            if (ann.url) {
+              enlacesPagina.push({
+                url: ann.url,
+                rect: ann.rect // [x1, y1, x2, y2]
+              });
+            }
+          }
+        }
 
-    for (let i = 0; i < lineas.length; i++) {
-      const linea = lineas[i];
+        // Agrupar texto por líneas/párrafos aproximados usando la coordenada Y
+        let itemsPorLinea = {};
+        for (const item of textContent.items) {
+          if (!item.str || !item.str.trim()) continue;
+          let y = Math.round(item.transform[5] / 5) * 5; // Agrupación vertical flexible
+          if (!itemsPorLinea[y]) itemsPorLinea[y] = [];
+          itemsPorLinea[y].push(item);
+        }
 
-      // Detección de posibles cabeceras de sección
-      if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("consejería") || linea.toLowerCase().includes("seccion"))) {
-        seccionActual = linea;
-        continue;
-      }
+        // Ordenar de arriba a abajo (coordenada Y suele ir de abajo a arriba en PDF, invertimos o recorremos lógicamente)
+        const coordenadasY = Object.keys(itemsPorLinea).sort((a, b) => Number(b) - Number(a));
 
-      // Evaluamos directamente cada línea o titular significativo que tenga una longitud mínima
-      if (linea.length > 20) {
-        const sectorEncontrado = clasificarTexto(linea, seccionActual);
+        let parrafoAcumulado = "";
+        let enlaceAsociado = urlPdfSumario; // fallback al sumario si no encuentra enlace específico
 
-        if (sectorEncontrado) {
-          documentosProcesados.push({
-            titulo: linea,
-            url_pdf: urlPdfSumario,
-            sector: sectorEncontrado
-          });
+        for (const y of coordenadasY) {
+          const lineaItems = itemsPorLinea[y];
+          const textoLinea = lineaItems.map(it => it.str).join(" ").trim();
+
+          // Detectar posibles cabeceras de sección
+          if (textoLinea.length > 5 && textoLinea.length < 120 && (textoLinea === textoLinea.toUpperCase() || textoLinea.toLowerCase().includes("consejería"))) {
+            if (parrafoAcumulado.length > 20) {
+              procesarParrafo(parrafoAcumulado, enlaceAsociado, seccionActual, documentosProcesados);
+              parrafoAcumulado = "";
+            }
+            seccionActual = textoLinea;
+            continue;
+          }
+
+          // Buscar si esta línea coincide con algún enlace de "text núm." en las coordenadas del PDF
+          const itemX = lineaItems[0].transform[4];
+          const itemYCoord = lineaItems[0].transform[5];
+          const enlaceEncontrado = enlacesPagina.find(e => 
+            itemX >= e.rect[0] - 20 && itemX <= e.rect[2] + 20 &&
+            itemYCoord >= e.rect[1] - 10 && itemYCoord <= e.rect[3] + 10
+          );
+
+          if (enlaceEncontrado) {
+            if (parrafoAcumulado.length > 20) {
+              procesarParrafo(parrafoAcumulado, enlaceAsociado, seccionActual, documentosProcesados);
+              parrafoAcumulado = "";
+            }
+            enlaceAsociado = enlaceEncontrado.url;
+          }
+
+          // Si la línea empieza un nuevo texto o continúa el párrafo
+          if (textoLinea.match(/^[0-9]+\./) || textoLinea.toLowerCase().includes("cve:")) {
+            if (parrafoAcumulado.length > 20) {
+              procesarParrafo(parrafoAcumulado, enlaceAsociado, seccionActual, documentosProcesados);
+              parrafoAcumulado = "";
+            }
+          }
+
+          parrafoAcumulado += " " + textoLinea;
+        }
+
+        if (parrafoAcumulado.length > 20) {
+          procesarParrafo(parrafoAcumulado, enlaceAsociado, seccionActual, documentosProcesados);
         }
       }
+    } catch (err) {
+      console.log(`⚠️ Error procesando PDF con pdfjs: ${err.message}`);
     }
-  } // <-- AQUÍ FALTABA ESTA LLAVE DE CIERRE DEL BUCLE FOR DE SUMARIOS
+  }
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
+  console.log(`🎯 Anuncios relevantes totales encontrados: ${unicos.length}`);
 
   for (const d of unicos) {
     try {
@@ -359,8 +393,20 @@ async function ejecutar() {
     }
   }
 
-  console.log(`🎯 Anuncios relevantes encontrados en el BOJA: ${unicos.length}`);
   return unicos;
+}
+
+function procesarParrafo(texto, urlPdf, seccion, arrayDestino) {
+  const textoLimio = texto.replace(/\s+/g, " ").trim();
+  const sectorEncontrado = clasificarTexto(textoLimio, seccion);
+
+  if (sectorEncontrado && textoLimio.length > 25) {
+    arrayDestino.push({
+      titulo: textoLimio, // Párrafo completo
+      url_pdf: urlPdf,     // Enlace específico de la anotación del PDF ("text núm...")
+      sector: sectorEncontrado
+    });
+  }
 }
 
 export { ejecutar as ejecutarBOJA };
