@@ -294,6 +294,7 @@ $("a").each((_, el) => {
       const lineas = parsedPdf.text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
       let seccionActual = "";
       let parrafoActual = "";
+      let urlAnuncioEspecifica = urlPdfSumario; // Por defecto el sumario
 
       for (let i = 0; i < lineas.length; i++) {
         const linea = lineas[i];
@@ -301,18 +302,33 @@ $("a").each((_, el) => {
         // Detectar cabeceras de sección
         if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("consejería"))) {
           if (parrafoActual.length > 25) {
-            evaluarYGuardar(parrafoActual, urlPdfSumario, seccionActual, documentosProcesados);
+            evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
           }
           seccionActual = linea;
           continue;
         }
 
-        // Si la línea empieza un nuevo anuncio numerado o código CVE
+        // Si la línea contiene el "texto núm. XXXXX", extraemos ese número para formar la URL directa
+        const matchTextoNum = linea.match(/texto\s+n[úu]m\.?\s*(\d+)/i);
+        if (matchTextoNum) {
+          const numTexto = matchTextoNum[1];
+          // Extraemos año y número de boletín de la URL del sumario actual (ej: /2026/147/)
+          const matchRuta = urlPdfSumario.match(/\/(\d{4})\/(\d+)\//);
+          if (matchRuta) {
+            const anio = matchRuta[1];
+            const numBoletin = matchRuta[2];
+            // Construimos la URL oficial directa para ese anuncio específico del BOJA
+            urlAnuncioEspecifica = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/BOJA${anio.slice(2)}-${numBoletin}-${numTexto}.pdf`;
+          }
+        }
+
+        // Si empieza un nuevo anuncio o código CVE
         if (linea.match(/^[0-9]+\./) || linea.toLowerCase().includes("cve:")) {
           if (parrafoActual.length > 25) {
-            evaluarYGuardar(parrafoActual, urlPdfSumario, seccionActual, documentosProcesados);
+            evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
+            urlAnuncioEspecifica = urlPdfSumario; // Reseteamos al sumario base para el siguiente
           }
         }
 
@@ -320,7 +336,7 @@ $("a").each((_, el) => {
       }
 
       if (parrafoActual.length > 25) {
-        evaluarYGuardar(parrafoActual, urlPdfSumario, seccionActual, documentosProcesados);
+        evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
       }
 
     } catch (err) {
