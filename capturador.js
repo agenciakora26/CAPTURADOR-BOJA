@@ -355,12 +355,18 @@ $("a").each((_, el) => {
         }
 
         // Detectar cabeceras de sección
-        if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("consejería"))) {
+        if (linea.length > 5 && linea.length < 100 && (linea === linea.toUpperCase() || linea.toLowerCase().includes("consejería") || linea.toLowerCase().includes("autoridades"))) {
           if (parrafoActual.length > 25) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
           }
           seccionActual = linea;
+          continue;
+        }
+
+        // 🛑 SALTAR TODA LA SECCIÓN DE NOMBRAMIENTOS
+        if (seccionActual.toLowerCase().includes("nombramientos")) {
+          parrafoActual = ""; 
           continue;
         }
 
