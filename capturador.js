@@ -1,5 +1,5 @@
-const cheerio = require("cheerio");
-const pdfParse = require("pdf-parse");
+import cheerio from "cheerio";
+import pdfParse from "pdf-parse";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
