@@ -358,50 +358,8 @@ async function ejecutar() {
     }
   }
 
-  console.log("👥 Consultando usuarios suscritos...");
-  const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
 
-  for (const usuario of (usuarios || [])) {
-    const relevantes = unicos.filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
-    if (relevantes.length === 0) continue;
-
-    console.log(`📧 Enviando correo de alerta a ${usuario.email}...`);
-    
-    const htmlCorreo = `
-      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-        <h2 style="color: #006b4f;">Boletín Oficial de la Junta de Andalucía</h2>
-        <p>Hola, <strong>tienes ${relevantes.length} alertas nuevas del BOJA de hoy</strong> relacionadas con tus sectores:</p>
-        <ul style="line-height: 1.6;">
-          ${relevantes.map(r => `
-            <li style="margin-bottom: 12px;">
-              <strong>[${r.sector.toUpperCase()}]</strong><br>
-              <span style="font-size: 14px; color: #555;">${r.titulo}</span><br>
-              <a href="${r.url_pdf}" target="_blank" style="color: #008f6a; font-weight: bold; text-decoration: underline;">Ver documento PDF oficial en el BOJA</a>
-            </li>
-          `).join("")}
-        </ul>
-        <p style="font-size: 12px; color: #888; margin-top: 20px;">Mensaje automático de tu plataforma de empleo y formación.</p>
-      </div>
-    `;
-
-await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { 
-        Authorization: `Bearer ${RESEND_API_KEY}`, 
-        "Content-Type": "application/json" 
-      },
-      body: JSON.stringify({
-        from: "BoletínHoy <alertas@boletinhoy.es>",
-        to: [usuario.email],
-        subject: `🔔 Tienes ${relevantes.length} alertas nuevas del BOJA de hoy`,
-        html: htmlCorreo
-      })
-    });
-  }
-
-  // ... (todo tu código anterior) ...
-
-  console.log("✅ Proceso completado con éxito.");
+  console.log(`🎯 Anuncios relevantes encontrados en el BOJA: ${unicos.length}`);
   return unicos;
 }
 
