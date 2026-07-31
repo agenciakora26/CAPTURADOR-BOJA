@@ -231,7 +231,7 @@ await ejecutarCapturadorBoe();
     if (!res.ok) return [];
     htmlPortada = await res.text();
   } catch (error) {
-    return [];
+    continue [];
   }
 
   const $ = cheerio.load(htmlPortada);
