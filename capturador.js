@@ -236,9 +236,17 @@ async function ejecutar() {
     const href = $(el).attr("href");
     
     if (href && texto.includes("sumario boletín") && href.endsWith(".pdf")) {
-      // Usamos explícitamente la base completa de eboja para que respete la estructura de carpetas
-      const urlFinal = new URL(href, "https://www.juntadeandalucia.es/eboja/").href;
-      if (!urlsPdfSumarios.includes(urlFinal)) {
+      let urlFinal = "";
+      // Si el href ya contiene la estructura de eboja con año/número, lo unimos directamente a la base web principal
+      if (href.startsWith("/eboja/") || href.startsWith("eboja/")) {
+        const cleanHref = href.startsWith("/") ? href : `/${href}`;
+        urlFinal = `https://www.juntadeandalucia.es${cleanHref}`;
+      } else {
+        // Por si viene en ruta relativa pura
+        urlFinal = new URL(href, "https://www.juntadeandalucia.es/eboja/").href;
+      }
+
+      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
         urlsPdfSumarios.push(urlFinal);
       }
     }
