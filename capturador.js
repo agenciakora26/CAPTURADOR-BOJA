@@ -372,22 +372,30 @@ async function ejecutarCapturadorBoja() {
         const lineaObj = lineasConEnlaces[i];
         const linea = lineaObj.texto;
 
+        // Si la línea trae un enlace propio que no es el sumario general, lo guardamos
         if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
           urlAnuncioEspecifica = lineaObj.url;
         }
 
+        // Ignoramos ruidos de cabeceras, pies, fechas sueltas y metadatos de "texto núm."
         if (
           linea.includes("Depósito legal") || 
           linea.includes("ISSN") || 
           linea.includes("Sumario") || 
           linea.includes("Extraordinario") || 
           linea.includes("Boletín Oficial") ||
+          linea.startsWith("texto núm.") ||
+          linea.includes("sumario - página") ||
           linea === "https://www.juntadeandalucia.es/eboja" ||
           linea === "Junta de Andalucía" ||
           linea === "BOJA"
         ) {
           continue;
         }
+
+        // Limpiamos también si la línea trae suelto el fragmento de "texto núm. XXXX - X páginas" por dentro
+        const lineaLimpiaTexto = linea.replace(/texto núm\.\s*\d+.*?(página[s]?)?/gi, "").trim();
+        if (lineaLimpiaTexto.length === 0) continue;
 
         const esTodoMayusculas = (linea === linea.toUpperCase()) && /[A-ZÁÉÍÓÚÑ]/.test(linea);
         const esCabecera = linea.length > 3 && linea.length < 100 && esTodoMayusculas;
@@ -406,7 +414,7 @@ async function ejecutarCapturadorBoja() {
           continue;
         }
 
-        parrafoActual += " " + linea;
+        parrafoActual += " " + lineaLimpiaTexto;
 
         if (parrafoActual.length > 120) {
           evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
