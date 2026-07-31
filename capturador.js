@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import pdfParse from "pdf-parse";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -289,17 +289,67 @@ $("a").each((_, el) => {
       const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(20000) });
       if (!pdfRes.ok) continue;
       const buffer = Buffer.from(await pdfRes.arrayBuffer());
-      const parsedPdf = await pdfParse(buffer);
+      
+      // Cargamos el PDF con pdfjs-dist para poder extraer texto y enlaces reales
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+      const pdfDocument = await loadingTask.promise;
 
-      const lineas = parsedPdf.text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      let lineasConEnlaces = [];
+
+      // Recorremos todas las páginas del PDF del sumario
+      for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+        const page = await pdfDocument.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const annotations = await page.getAnnotations();
+
+        // Mapeamos los elementos de texto con sus posiciones (x, y) y su contenido
+        const items = textContent.items.map(item => ({
+          str: item.str.trim(),
+          x: item.transform[4],
+          y: item.transform[5]
+        })).filter(item => item.str.length > 0);
+
+        // Mapeamos las anotaciones de tipo enlace (las URLs reales que puso la Junta)
+        const links = annotations
+          .filter(annot => annot.subtype === "Link" && annot.url)
+          .map(annot => ({
+            url: annot.url,
+            x: annot.rect[0],
+            y: annot.rect[1]
+          }));
+
+        // Unimos cada línea de texto con su enlace correspondiente según su posición en la página
+        items.forEach(item => {
+          let urlAsociada = urlPdfSumario; // Por defecto el sumario si no encuentra enlace exacto
+          
+          // Buscamos si hay un enlace en las coordenadas aproximadas de este texto
+          const matchLink = links.find(l => Math.abs(l.y - item.y) < 10 && Math.abs(l.x - item.x) < 100);
+          if (matchLink) {
+            urlAsociada = matchLink.url;
+          }
+
+          lineasConEnlaces.push({
+            texto: item.str,
+            url: urlAsociada
+          });
+        });
+      }
+
       let seccionActual = "";
       let parrafoActual = "";
-      let urlAnuncioEspecifica = urlPdfSumario; // Por defecto el sumario
+      let urlAnuncioEspecifica = urlPdfSumario;
 
-      for (let i = 0; i < lineas.length; i++) {
-        const linea = lineas[i];
+      // Procesamos el listado de líneas unidas a sus URLs
+      for (let i = 0; i < lineasConEnlaces.length; i++) {
+        const lineaObj = lineasConEnlaces[i];
+        const linea = lineaObj.texto;
 
-        // Ignorar líneas del pie de página de la portada que no son anuncios
+        // Si esta línea tiene un enlace específico que no es el del sumario general, lo guardamos
+        if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
+          urlAnuncioEspecifica = lineaObj.url;
+        }
+
+        // Ignorar líneas del pie de página de la portada
         if (linea.includes("Depósito legal") || linea.includes("ISSN") || linea === "https://www.juntadeandalucia.es/eboja") {
           continue;
         }
@@ -314,30 +364,18 @@ $("a").each((_, el) => {
           continue;
         }
 
-        // Si la línea contiene el "texto núm. XXXXX", extraemos ese número para formar la URL directa
-        // Si la línea contiene el "texto núm. XXXXX", podemos extraerlo y actualizar el enlace del anuncio actual que se está formando
-        const matchTextoNum = linea.match(/texto\s+n[úu]m\.?\s*(\d+)/i);
-        if (matchTextoNum) {
-          const numTexto = matchTextoNum[1];
-          const matchRuta = urlPdfSumario.match(/\/(\d{4})\/(\d+)\//);
-          if (matchRuta) {
-            const anio = matchRuta[1];
-            const numBoletin = matchRuta[2];
-            // Actualizamos la variable para que el párrafo que se guarde a continuación lleve su enlace exacto
-            urlAnuncioEspecifica = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/BOJA${anio.slice(2)}-${numBoletin}-${numTexto}.pdf`;
-          }
-        }
-
-        // Si empieza un nuevo anuncio o código CVE
+        // Detectar si empieza un nuevo anuncio
         if (linea.match(/^[0-9]+\./) || linea.toLowerCase().includes("cve:")) {
           if (parrafoActual.length > 25) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
           }
         }
+
         parrafoActual += " " + linea;
       }
 
+      // Guardar el último párrafo si queda pendiente
       if (parrafoActual.length > 25) {
         evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
       }
