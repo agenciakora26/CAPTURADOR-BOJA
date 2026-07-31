@@ -3,8 +3,8 @@ name: Automatizador BOJA
 on:
   workflow_dispatch:
   schedule:
-    # Se ejecuta cada 30 minutos entre las 6:00 y las 13:00 (hora UTC/servidor) de lunes a viernes
-    - cron: "0,30 6-13 * * 1-5"
+    # Se ejecuta a las 07:00 UTC (9:00 hora española en verano) de lunes a sábado (1-6)
+    - cron: "0 7 * * 1-6"
 
 permissions:
   contents: read
