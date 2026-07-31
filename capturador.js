@@ -235,12 +235,12 @@ $("a").each((_, el) => {
     const texto = $(el).text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
     const href = $(el).attr("href");
     
-    // Detectamos si el texto comienza con "sumario boletin" (así el número de detrás no importa)
-    if (href && texto.startsWith("sumario boletin")) {
-      // Resolvemos el enlace tomando como base la propia URL del boletín o la Sede Electrónica
-      const urlFinal = new URL(href, "https://www.juntadeandalucia.es/eboja/").href;
+    // Buscamos cualquier enlace que sea un PDF y cuyo texto o ruta contenga la palabra "sumario"
+    if (href && href.endsWith(".pdf") && (texto.includes("sumario") || href.includes("sumario"))) {
+      let urlFinal = new URL(href, "https://www.juntadeandalucia.es/eboja/").href;
       
-      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
+      // Filtramos explícitamente para descartar el de "verificacion" que no queremos
+      if (!urlFinal.includes("verificacion") && !urlsPdfSumarios.includes(urlFinal)) {
         urlsPdfSumarios.push(urlFinal);
       }
     }
