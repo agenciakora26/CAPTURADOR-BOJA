@@ -232,13 +232,13 @@ async function ejecutar() {
 
   // FILTRO ESTRICTO: Solo enlaces que contengan textualmente "sumario boletín" y extensión .pdf
 $("a").each((_, el) => {
-    // Normalizamos el texto quitando tildes y pasando a minúsculas
-    const texto = $(el).text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const texto = $(el).text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
     const href = $(el).attr("href");
     
-    // Comprobamos que el texto contenga ambas palabras juntas/cercanas
-    if (href && texto.includes("sumario") && texto.includes("boletin")) {
-      const urlFinal = new URL(href, "https://www.juntadeandalucia.es/BOJA").href;
+    // Detectamos si el texto comienza con "sumario boletin" (así el número de detrás no importa)
+    if (href && texto.startsWith("sumario boletin")) {
+      // Resolvemos el enlace tomando como base la propia URL del boletín o la Sede Electrónica
+      const urlFinal = new URL(href, "https://www.juntadeandalucia.es/eboja/").href;
       
       if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
         urlsPdfSumarios.push(urlFinal);
