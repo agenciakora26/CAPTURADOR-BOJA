@@ -239,14 +239,11 @@ async function ejecutar() {
     }
   }
 
-  console.log("👥 Consultando usuarios suscritos...");
-  const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
+  // AQUÍ ESTÁ EL CAMBIO CLAVE: Devolvemos los datos y exportamos la función
+  return unicos;
+}
 
-  for (const usuario of (usuarios || [])) {
-    const relevantes = unicos.filter(doc => usuario.sectores_suscritos?.includes(doc.sector));
-    if (relevantes.length === 0) continue;
-
-    console.log(`📧 Enviando correo de alerta a ${usuario.email}...`);
+export { ejecutar as ejecutarBOJA };
     
     const htmlCorreo = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
