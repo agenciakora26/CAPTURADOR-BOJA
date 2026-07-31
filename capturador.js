@@ -290,9 +290,6 @@ async function ejecutarCapturadorBoja() {
     return [];
   }
 
-  return urlsPdfSumarios;
-}
-
   const documentosProcesados = [];
 
   for (const urlPdfSumario of urlsPdfSumarios) {
@@ -442,4 +439,4 @@ function evaluarYGuardar(texto, urlBase, seccion, destino) {
   }
 }
 
-export { ejecutar as ejecutarBOJA };
+export { ejecutarCapturadorBoja as ejecutarBOJA };
