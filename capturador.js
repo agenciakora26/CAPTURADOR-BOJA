@@ -21,7 +21,7 @@ const SECTORES = {
       { texto: "convocatoria", puntos: 3 }
     ],
     medias: [
-      { texto: "plaza", puntos: 2 },
+      { texto: "plaza", points: 2 },
       { texto: "empleo", points: 2 },
       { texto: "seleccion", points: 2 },
       { texto: "aspirantes", points: 2 },
@@ -33,7 +33,7 @@ const SECTORES = {
       { texto: "cese", puntos: -3 },
       { texto: "jubilacion", puntos: -3 }
     ],
-    excluirSiContiene: []
+    excluirSiContiene: ["nombramiento"]
   },
   "hosteleria y comercio": {
     threshold: 3,
@@ -53,7 +53,7 @@ const SECTORES = {
       { texto: "mercado", points: 2 }
     ],
     negativas: [],
-    excluirSiContiene: []
+    excluirSiContiene: ["nombramiento"]
   },
   "agricultura y ganaderia": {
     threshold: 3,
@@ -74,7 +74,7 @@ const SECTORES = {
       { texto: "subvencion", points: 2 }
     ],
     negativas: [],
-    excluirSiContiene: []
+    excluirSiContiene: ["nombramiento"]
   },
   "licitaciones y obras": {
     threshold: 4,
@@ -93,7 +93,7 @@ const SECTORES = {
       { texto: "procedimiento abierto", points: 3 }
     ],
     negativas: [],
-    excluirSiContiene: []
+    excluirSiContiene: ["nombramiento"]
   },
   "educacion y formacion": {
     threshold: 3,
@@ -113,7 +113,7 @@ const SECTORES = {
       { texto: "subvenciones", points: 2 }
     ],
     negativas: [],
-    excluirSiContiene: []
+    excluirSiContiene: ["nombramiento"]
   },
   "sanidad y bienestar social": {
     threshold: 3,
@@ -132,7 +132,7 @@ const SECTORES = {
       { texto: "ayudas", points: 2 }
     ],
     negativas: [],
-    excluirSiContiene: []
+    excluirSiContiene: ["nombramiento"]
   },
   "subvenciones y ayudas generales": {
     threshold: 3,
@@ -152,7 +152,7 @@ const SECTORES = {
       { texto: "emprendimiento", points: 3 }
     ],
     negativas: [],
-    excluirSiContiene: []
+    excluirSiContiene: ["nombramiento"]
   }
 };
 
