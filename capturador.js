@@ -1,6 +1,5 @@
 import * as cheerio from "cheerio";
 import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
-export { ejecutarCapturadorBoja as ejecutarBOJA }
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -163,7 +162,6 @@ function normalizar(texto = "") {
 
 function clasificarTexto(texto = "", seccion = "") {
   const textoNorm = normalizar(texto);
-  const seccionNorm = normalizar(seccion);
   let mejorSector = null;
   let maxPuntuacion = -999;
 
@@ -215,17 +213,6 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-// Asegúrate de que el flujo principal ejecute ambas llamadas:
-console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
-
-// 1. Ejecutar el capturador del BOJA
-await ejecutarBOJA();  
-
-// 2. Ejecutar el capturador del BOE
-console.log("🚀 Iniciación de extracción mejorada del BOE...");
-await ejecutarBoe();
-
-
 // Definimos la función completa donde vive toda la lógica del BOJA
 async function ejecutarCapturadorBoja() {
   console.log("🚀 Iniciando capturador inteligente del BOJA...");
@@ -255,24 +242,17 @@ async function ejecutarCapturadorBoja() {
 
       let urlFinal = "";
       
-      // Si el enlace ya viene completo con http, lo usamos
       if (href.startsWith("http")) {
         urlFinal = href;
       } else {
-        // Limpiamos el href de cualquier barra o espacio inicial
         const nombreArchivo = href.split("/").pop().trim();
-        
-        // Extraemos el año y el número de boletín directamente del nombre del archivo (ej. BOJA26-147-...)
         const matchBoja = nombreArchivo.match(/BOJA(\d{2})-(\d+)-/i);
         
         if (matchBoja) {
-          const anio = `20${matchBoja[1]}`; // 26 -> 2026
-          const numBoletin = matchBoja[2]; // 147
-          
-          // Construimos la URL perfecta y exacta respetando la jerarquía de carpetas
+          const anio = `20${matchBoja[1]}`; 
+          const numBoletin = matchBoja[2]; 
           urlFinal = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/${nombreArchivo}`;
         } else {
-          // Fallback por si acaso usando la fecha actual
           const anioActual = new Date().getFullYear();
           urlFinal = `https://www.juntadeandalucia.es/eboja/${anioActual}/${nombreArchivo}`;
         }
@@ -299,26 +279,22 @@ async function ejecutarCapturadorBoja() {
       if (!pdfRes.ok) continue;
       const buffer = Buffer.from(await pdfRes.arrayBuffer());
       
-      // Cargamos el PDF con pdfjs-dist para poder extraer texto y enlaces reales
       const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
       const pdfDocument = await loadingTask.promise;
 
       let lineasConEnlaces = [];
 
-      // Recorremos todas las páginas del PDF del sumario
       for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
         const page = await pdfDocument.getPage(pageNum);
         const textContent = await page.getTextContent();
         const annotations = await page.getAnnotations();
 
-        // Mapeamos los elementos de texto con sus posiciones (x, y) y su contenido
         const items = textContent.items.map(item => ({
           str: item.str.trim(),
           x: item.transform[4],
           y: item.transform[5]
         })).filter(item => item.str.length > 0);
 
-        // Mapeamos las anotaciones de tipo enlace (las URLs reales que puso la Junta)
         const links = annotations
           .filter(annot => annot.subtype === "Link" && annot.url)
           .map(annot => ({
@@ -327,11 +303,8 @@ async function ejecutarCapturadorBoja() {
             y: annot.rect[1]
           }));
 
-        // Unimos cada línea de texto con su enlace correspondiente según su posición en la página
         items.forEach(item => {
-          let urlAsociada = urlPdfSumario; // Por defecto el sumario si no encuentra enlace exacto
-          
-          // Buscamos si hay un enlace en las coordenadas aproximadas de este texto
+          let urlAsociada = urlPdfSumario; 
           const matchLink = links.find(l => Math.abs(l.y - item.y) < 10 && Math.abs(l.x - item.x) < 100);
           if (matchLink) {
             urlAsociada = matchLink.url;
@@ -348,45 +321,37 @@ async function ejecutarCapturadorBoja() {
       let parrafoActual = "";
       let urlAnuncioEspecifica = urlPdfSumario;
 
-      // Procesamos el listado de líneas unidas a sus URLs
       for (let i = 0; i < lineasConEnlaces.length; i++) {
         const lineaObj = lineasConEnlaces[i];
         const linea = lineaObj.texto;
 
-        // Si esta línea tiene un enlace específico que no es el del sumario general, lo guardamos
         if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
           urlAnuncioEspecifica = lineaObj.url;
         }
 
-        // Ignorar líneas del pie de página de la portada
         if (linea.includes("Depósito legal") || linea.includes("ISSN") || linea === "https://www.juntadeandalucia.es/eboja") {
           continue;
         }
 
-        // Comprobamos si la línea está enteramente en mayúsculas (y tiene tamaño de cabecera)
         const esTodoMayusculas = (linea === linea.toUpperCase()) && /[A-ZÁÉÍÓÚÑ]/.test(linea);
         const esCabecera = linea.length > 3 && linea.length < 120 && esTodoMayusculas;
 
         if (esCabecera) {
-          // Si teníamos un anuncio pendiente de evaluar, lo guardamos antes de cambiar de sección
           if (parrafoActual.length > 25) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
             parrafoActual = "";
           }
-          seccionActual = linea; // Actualizamos la consejería/entidad activa
-          continue; // Saltamos la línea en mayúsculas para que no contamine el texto del anuncio
+          seccionActual = linea; 
+          continue; 
         }
 
-        // 🛑 SALTAR TODA LA SECCIÓN DE NOMBRAMIENTOS
         if (seccionActual.toLowerCase().includes("nombramientos")) {
           parrafoActual = ""; 
           continue;
         }
 
-        // Acumulamos el texto del anuncio (que al tener minúsculas pasará por aquí)
         parrafoActual += " " + linea;
 
-        // Si la línea actual contiene la referencia de páginas o texto, cerramos y evaluamos el anuncio
         if (linea.toLowerCase().includes("texto núm.") || linea.toLowerCase().includes("páginas")) {
           if (parrafoActual.length > 25) {
             evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
@@ -395,7 +360,6 @@ async function ejecutarCapturadorBoja() {
         }
       }
 
-      // Guardar el último párrafo si queda pendiente
       if (parrafoActual.length > 25) {
         evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
       }
@@ -433,11 +397,12 @@ function evaluarYGuardar(texto, urlBase, seccion, destino) {
 
   if (sectorEncontrado) {
     destino.push({
-      titulo: textoLimpio, // Párrafo completo evaluado
+      titulo: textoLimpio, 
       url_pdf: urlBase,
       sector: sectorEncontrado
     });
   }
 }
 
+// Exportación única al final del archivo
 export { ejecutarCapturadorBoja as ejecutarBOJA };
