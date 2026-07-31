@@ -231,19 +231,23 @@ async function ejecutar() {
   let urlsPdfSumarios = [];
 
   // FILTRO ESTRICTO: Solo enlaces que contengan textualmente "sumario boletín" y extensión .pdf
- $("a").each((_, el) => {
+$("a").each((_, el) => {
     const texto = $(el).text().toLowerCase();
     const href = $(el).attr("href");
     
     if (href && texto.includes("sumario boletín") && href.endsWith(".pdf")) {
       let urlFinal = "";
-      // Si el href ya contiene la estructura de eboja con año/número, lo unimos directamente a la base web principal
-      if (href.startsWith("/eboja/") || href.startsWith("eboja/")) {
-        const cleanHref = href.startsWith("/") ? href : `/${href}`;
-        urlFinal = `https://www.juntadeandalucia.es${cleanHref}`;
+      // Si el enlace ya empieza por el año (ej. "2026/147/...") o trae ruta relativa
+      if (!href.startsWith("http")) {
+        const cleanHref = href.startsWith("/") ? href.slice(1) : href;
+        // Si no incluye ya 'eboja/', se lo inyectamos asegurando la estructura completa con año y número
+        if (!cleanHref.startsWith("eboja/")) {
+          urlFinal = `https://www.juntadeandalucia.es/eboja/${cleanHref}`;
+        } else {
+          urlFinal = `https://www.juntadeandalucia.es/${cleanHref}`;
+        }
       } else {
-        // Por si viene en ruta relativa pura
-        urlFinal = new URL(href, "https://www.juntadeandalucia.es/eboja/").href;
+        urlFinal = href;
       }
 
       if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
