@@ -1,5 +1,4 @@
 import * as cheerio from "cheerio";
-import pdfParse from "pdf-parse";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
@@ -9,12 +8,8 @@ const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 const SECTORES = {
   "oposiciones y empleo": {
     threshold: 8,
-    seccionesPreferidas: [
-      "oposiciones, concursos y otras convocatorias"
-    ],
-    seccionesExcluidas: [
-      "nombramientos, situaciones e incidencias"
-    ],
+    seccionesPreferidas: ["oposiciones, concursos y otras convocatorias"],
+    seccionesExcluidas: ["nombramientos, situaciones e incidencias"],
     fuertes: [
       { texto: "se convoca proceso selectivo", puntos: 10 },
       { texto: "convocatoria de pruebas selectivas", puntos: 10 },
@@ -210,9 +205,7 @@ const SECTORES = {
   },
   "licitaciones y obras": {
     threshold: 8,
-    seccionesPreferidas: [
-      "licitaciones publicas y adjudicaciones"
-    ],
+    seccionesPreferidas: ["licitaciones publicas y adjudicaciones"],
     fuertes: [
       { texto: "anuncio de licitacion", puntos: 10 },
       { texto: "convocatoria de licitacion", puntos: 10 },
@@ -506,102 +499,80 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutar() {
-  console.log("🚀 Iniciando capturador inteligente del BOJA...");
+  console.log("🚀 Iniciando capturador del BOJA con enlaces directos a PDFs individuales...");
 
-  const urlPortada = "https://www.juntadeandalucia.es/BOJA";
-  let htmlPortada;
+  const urlSumario = "https://www.juntadeandalucia.es/eboja.html";
+  let documentosProcesados = [];
+
   try {
-    const res = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
+    const res = await fetch(urlSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
     if (!res.ok) {
-      console.log("⚠️ No se pudo acceder a la portada del BOJA.");
-      return;
+      console.log("⚠️ No se pudo acceder al sumario del BOJA.");
+      return [];
     }
-    htmlPortada = await res.text();
-  } catch (error) {
-    console.log(`⚠️ Error al conectar con la portada: ${error.message}`);
-    return;
-  }
+    const html = await res.text();
+    const $ = cheerio.load(html);
 
-  const $ = cheerio.load(htmlPortada);
-  let urlsPdfSumarios = [];
+    let enlacesDisposiciones = [];
 
-  $("a").each((_, el) => {
-    const texto = $(el).text().toLowerCase();
-    const href = $(el).attr("href");
-    
-    if (href && texto.includes("sumario boletín")) {
-      let urlFinal = "";
-      
-      if (href.includes("/eboja/")) {
-        urlFinal = new URL(href, "https://www.juntadeandalucia.es").href;
-      } else {
-        const cleanHref = href.startsWith("/") ? href : `/${href}`;
-        const matchAnio = cleanHref.match(/BOJA(\d{2})-(\d+)-/);
-        if (matchAnio) {
-          const anioCompleto = `20${matchAnio[1]}`;
-          const numBoletin = parseInt(matchAnio[2], 10);
-          urlFinal = `https://www.juntadeandalucia.es/eboja/${anioCompleto}/${numBoletin}/${cleanHref.split('/').pop()}`;
-        } else {
-          urlFinal = new URL(cleanHref, "https://www.juntadeandalucia.es/eboja/").href;
+    // Recorremos los enlaces del sumario web del BOJA para capturar cada disposición individual
+    $("a").each((_, el) => {
+      const href = $(el).attr("href");
+      const textoEnlace = $(el).text().trim();
+
+      if (href && (href.includes(".html") || href.includes(".pdf")) && textoEnlace.length > 10) {
+        const urlDisposicion = href.startsWith("http") ? href : new URL(href, "https://www.juntadeandalucia.es").href;
+        if (!enlacesDisposiciones.includes(urlDisposicion)) {
+          enlacesDisposiciones.push(urlDisposicion);
         }
       }
+    });
 
-      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
-        urlsPdfSumarios.push(urlFinal);
-      }
-    }
-  });
+    console.log(`📌 Enlaces de disposiciones encontrados en la web del sumario: ${enlacesDisposiciones.length}`);
 
-  console.log(`📄 PDFs de sumarios oficiales detectados:`, urlsPdfSumarios);
+    // Visitamos cada disposición individual para extraer su título real y su enlace PDF específico
+    for (const urlDisp of enlacesDisposiciones) {
+      try {
+        const resDisp = await fetch(urlDisp, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(10000) });
+        if (!resDisp.ok) continue;
+        const htmlDisp = await resDisp.text();
+        const $disp = cheerio.load(htmlDisp);
 
-  if (urlsPdfSumarios.length === 0) {
-    console.log("⚠️ No se ha podido extraer ningún PDF de sumario boletín.");
-    return;
-  }
+        let tituloTexto = $disp("h1").first().text().trim() || $disp("title").text().trim();
+        let urlPdfEspecifico = "";
 
-  const documentosProcesados = [];
-
-  for (const urlPdfSumario of urlsPdfSumarios) {
-    console.log(`📄 Descargando PDF del Sumario oficial: ${urlPdfSumario}`);
-
-    let parsedPdf;
-    try {
-      const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-      if (!pdfRes.ok) {
-        console.log(`⚠️ No se pudo descargar el archivo PDF (HTTP ${pdfRes.status}).`);
-        continue;
-      }
-      const buffer = Buffer.from(await pdfRes.arrayBuffer());
-      parsedPdf = await pdfParse(buffer);
-    } catch (err) {
-      console.log(`⚠️ Error al procesar el PDF del sumario: ${err.message}`);
-      continue;
-    }
-
-    const textoCompleto = parsedPdf.text;
-    const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-
-    console.log(`🔍 Analizando ${lineas.length} líneas de texto del sumario con el nuevo motor de puntuación...`);
-
-    for (let i = 0; i < lineas.length; i++) {
-      const lineaTexto = lineas[i];
-      
-      // Aplicar el nuevo motor de clasificación por puntuación manteniendo el enlace al sumario PDF
-      const sectorEncontrado = clasificarTexto(lineaTexto, "");
-
-      if (sectorEncontrado) {
-        documentosProcesados.push({
-          titulo: lineaTexto,
-          url_pdf: urlPdfSumario,
-          sector: sectorEncontrado,
-          origen: "BOJA"
+        $disp("a").each((_, elA) => {
+          const hrefA = $disp(elA).attr("href");
+          const textA = $disp(elA).text();
+          if (hrefA && (hrefA.toLowerCase().endsWith(".pdf") || textA.toLowerCase().includes("pdf"))) {
+            urlPdfEspecifico = hrefA.startsWith("http") ? hrefA : new URL(hrefA, "https://www.juntadeandalucia.es").href;
+          }
         });
+
+        if (tituloTexto && urlPdfEspecifico) {
+          let seccionTexto = $disp(".seccion, .cabecera-disposicion, h2").first().text().trim();
+          const sectorEncontrado = clasificarTexto(tituloTexto, seccionTexto);
+
+          if (sectorEncontrado) {
+            documentosProcesados.push({
+              titulo: tituloTexto,
+              url_pdf: urlPdfEspecifico, // ¡Aquí va el PDF específico de la disposición!
+              sector: sectorEncontrado,
+              origen: "BOJA"
+            });
+          }
+        }
+      } catch (errDisp) {
+        // Ignorar fallos puntuales de red en disposiciones individuales
       }
     }
+
+  } catch (err) {
+    console.log(`⚠️ Error al conectar con el sumario del BOJA: ${err.message}`);
   }
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes encontrados: ${unicos.length}`);
+  console.log(`🎯 Anuncios relevantes encontrados con PDF específico: ${unicos.length}`);
 
   for (const d of unicos) {
     try {
@@ -617,7 +588,7 @@ async function ejecutar() {
         })
       });
     } catch (err) {
-      console.log(`⚠️ Aviso al guardar anuncio: ${err.message}`);
+      console.log(`⚠️ Aviso al guardar anuncio del BOJA: ${err.message}`);
     }
   }
 
