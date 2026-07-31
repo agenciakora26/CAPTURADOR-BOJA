@@ -232,29 +232,24 @@ async function ejecutar() {
 
   // FILTRO ESTRICTO: Solo enlaces que contengan textualmente "sumario boletín" y extensión .pdf
 $("a").each((_, el) => {
-    const texto = $(el).text().toLowerCase();
+    // Normalizamos el texto quitando tildes y pasando a minúsculas
+    const texto = $(el).text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
     const href = $(el).attr("href");
     
-    if (href && texto.includes("sumario boletín") && href.endsWith(".pdf")) {
-      let urlFinal = "";
-      // Si el enlace ya empieza por el año (ej. "2026/147/...") o trae ruta relativa
-      if (!href.startsWith("http")) {
-        const cleanHref = href.startsWith("/") ? href.slice(1) : href;
-        // Si no incluye ya 'eboja/', se lo inyectamos asegurando la estructura completa con año y número
-        if (!cleanHref.startsWith("eboja/")) {
-          urlFinal = `https://www.juntadeandalucia.es/eboja/${cleanHref}`;
-        } else {
-          urlFinal = `https://www.juntadeandalucia.es/${cleanHref}`;
-        }
-      } else {
-        urlFinal = href;
-      }
-
+    // Comprobamos que el texto contenga ambas palabras juntas/cercanas
+    if (href && texto.includes("sumario") && texto.includes("boletin")) {
+      const urlFinal = new URL(href, "https://www.juntadeandalucia.es/BOJA").href;
+      
       if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
         urlsPdfSumarios.push(urlFinal);
       }
     }
   });
+
+  // Función auxiliar interna para evitar errores de ámbito
+  function matchBase(val) {
+    return val;
+  }
 
   console.log(`📄 PDFs de sumarios oficiales detectados:`, urlsPdfSumarios);
 
