@@ -519,7 +519,6 @@ async function ejecutarBOE() {
     const $ = cheerio.load(html);
 
     let encontradosCount = 0;
-    let seccionActual = "";
 
     $("a").each((_, el) => {
       const textoEnlace = $(el).text();
@@ -536,7 +535,7 @@ async function ejecutarBOE() {
           .trim();
 
         if (tituloTexto && tituloTexto.length > 10) {
-          const sectorEncontrado = clasificarTexto(tituloTexto, seccionActual);
+          const sectorEncontrado = clasificarTexto(tituloTexto, "");
 
           if (sectorEncontrado) {
             documentos.push({
@@ -556,7 +555,7 @@ async function ejecutarBOE() {
     console.log(`⚠️ Error al conectar con el BOE: ${err.message}`);
   }
 
-  // FILTRO ROBUSTO DE DUPLICADOS: Garantiza que no se repita ningún anuncio basándose en la URL del PDF o el título exacto
+  // Filtro local de duplicados en la misma ejecución
   const unicos = documentos.filter((documento, index, self) =>
     index === self.findIndex((t) => (
       t.url_pdf === documento.url_pdf || t.titulo === documento.titulo
@@ -567,9 +566,19 @@ async function ejecutarBOE() {
 
   for (const d of unicos) {
     try {
-      await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
+      // 1. Comprobamos si el anuncio ya existe en Supabase
+      const existentes = await supabaseRequest(`anuncios_boja?url_pdf=eq.${encodeURIComponent(d.url_pdf)}`, {
+        method: "GET"
+      });
+
+      if (existentes && existentes.length > 0) {
+        console.log(`ℹ️ El anuncio ya existe en la base de datos, se omite: ${d.titulo.substring(0, 40)}...`);
+        continue; // Saltamos al siguiente para no tocarlo ni volver a mandarlo
+      }
+
+      // 2. Si no existe, lo insertamos como nuevo con enviado: false
+      await supabaseRequest("anuncios_boja", {
         method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates" },
         body: JSON.stringify({
           titulo: d.titulo,
           url_pdf: d.url_pdf,
@@ -578,6 +587,8 @@ async function ejecutarBOE() {
           enviado: false
         })
       });
+      console.log(`✅ Nuevo anuncio guardado: ${d.titulo.substring(0, 40)}...`);
+
     } catch (err) {
       console.log(`⚠️ Aviso al guardar anuncio del BOE: ${err.message}`);
     }
