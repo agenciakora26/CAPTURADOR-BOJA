@@ -36,10 +36,9 @@ async function enriquecerTitulosConIA(anuncios) {
   const prompt = `
     Eres un experto en comunicación clara. Para cada uno de los siguientes anuncios oficiales, genera un resumen muy sencillo, claro y directo que explique por qué le puede interesar a un profesional.
     
-    Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin markdown ni texto adicional, con esta estructura exacta para cada elemento:
+    Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin bloques de código ni texto adicional, con esta estructura exacta:
     [
-      {"id": 0, "resumen": "Resumen claro y directo de 1 o 2 líneas explicando por qué interesa"},
-      ...
+      {"id": 0, "resumen": "Resumen claro y directo de 1 o 2 líneas explicando por qué interesa"}
     ]
 
     Anuncios a procesar:
@@ -54,4 +53,28 @@ async function enriquecerTitulosConIA(anuncios) {
     });
 
     let textoRespuesta = response.text.trim();
-    textoRespuesta = textoRespuesta.replace(/```json/g, '').replace(/
+    // Limpieza segura sin expresiones regulares frágiles
+    if (textoRespuesta.startsWith("```json")) {
+      textoRespuesta = textoRespuesta.replace("```json", "");
+    }
+    if (textoRespuesta.startsWith("```")) {
+      textoRespuesta = textoRespuesta.replace("```", "");
+    }
+    if (textoRespuesta.endsWith("```")) {
+      textoRespuesta = textoRespuesta.slice(0, -3);
+    }
+    textoRespuesta = textoRespuesta.trim();
+
+    const jsonRespuetas = JSON.parse(textoRespuesta);
+    
+    jsonRespuetas.forEach(item => {
+      if (anuncios[item.id] && item.resumen) {
+        anuncios[item.id].resumenIA = item.resumen.trim();
+      }
+    });
+  } catch (err) {
+    console.warn("⚠️ Aviso: La IA no pudo devolver el JSON, se omitirá el resumen:", err.message);
+  }
+
+  return anuncios;
+}
