@@ -32,29 +32,24 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function enriquecerTitulosConIA(anuncios) {
   if (!anuncios || anuncios.length === 0 || !GEMINI_API_KEY) return anuncios;
 
-  console.log(`🤖 Generando resúmenes inteligentes por lotes para ${anuncios.length} anuncios...`);
-  const tamanoLote = 10;
+  console.log(`🤖 Generando resúmenes inteligentes por lotes seguros para ${anuncios.length} anuncios...`);
+  const tamanoLote = 5; // Reducimos el lote a 5 para no saturar
 
   for (let i = 0; i < anuncios.length; i += tamanoLote) {
     const lote = anuncios.slice(i, i + tamanoLote);
     const listaParaIA = lote.map((a, index) => ({ id: index, texto: a.titulo }));
 
     const prompt = `
-      Eres un asesor y analista experto para profesionales. Para cada uno de los siguientes títulos de boletines oficiales, redacta una explicación breve y práctica de 1 o 2 frases que le indique claramente al cliente por qué le interesa y de qué trata el documento (ej: plazos de inscripción, adjudicaciones, nombramientos o bases de una convocatoria). 
-      No repitas el título de forma seca; interpreta el propósito real del texto de manera útil para el lector.
-      
-      Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin bloques de código ni texto adicional, con esta estructura exacta:
-      [
-        {"id": 0, "resumen": "Explicación clara y práctica de lo que encontrará el lector en este anuncio."}
-      ]
-
-      Anuncios a procesar:
+      Eres un asesor experto. Explica brevemente de qué trata este anuncio oficial para que un profesional entienda su propósito real:
       ${JSON.stringify(listaParaIA)}
+      
+      Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin bloques de código, con esta estructura:
+      [{"id": 0, "resumen": "Explicación clara del propósito"}]
     `;
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-1.5-flash', // Volvemos al modelo estándar estable 1.5-flash
         contents: prompt,
       });
 
@@ -72,14 +67,16 @@ async function enriquecerTitulosConIA(anuncios) {
         }
       });
     } catch (err) {
-      console.warn(`⚠️ Aviso en lote ${i}: No se pudo procesar con IA, usando título original.`, err.message);
+      console.warn(`⚠️ Aviso en lote ${i}:`, err.message);
       lote.forEach(a => {
         a.resumenIA = a.titulo;
       });
     }
 
+    // Pausa de 15 segundos obligatoria entre lotes para respetar el límite gratuito (Rate Limit)
     if (i + tamanoLote < anuncios.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log("⏳ Pausa de 15s para evitar el límite de la API...");
+      await new Promise(resolve => setTimeout(resolve, 15000));
     }
   }
 
