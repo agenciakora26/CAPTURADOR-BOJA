@@ -6,7 +6,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
 const SECTORES = {
-  "oposiciones y empleo": {
+  "Oposiciones y Empleo": {
     threshold: 8,
     seccionesPreferidas: [
       "oposiciones, concursos y otras convocatorias"
@@ -49,10 +49,10 @@ const SECTORES = {
       { texto: "bases de la convocatoria", puntos: 4 },
       { texto: "plazo de presentacion de solicitudes", puntos: 4 },
       { texto: "acceso libre", puntos: 4 },
-      { texto: "promocion interna", puntos: 2 },
-      { texto: "personal funcionario", puntos: 2 },
-      { texto: "personal laboral", puntos: 2 },
-      { texto: "personal estatutario", puntos: 2 },
+      { texto: "promocion interna", points: 2 },
+      { texto: "personal funcionario", points: 2 },
+      { texto: "personal laboral", points: 2 },
+      { texto: "personal estatutario", points: 2 },
       { texto: "plazas vacantes", puntos: 2 },
       { texto: "presentacion de solicitudes", puntos: 3 },
       { texto: "tasa de examen", puntos: 3 }
@@ -88,61 +88,7 @@ const SECTORES = {
       "ejecucion de sentencia"
     ]
   },
-  "hosteleria y comercio": {
-    threshold: 8,
-    fuertes: [
-      { texto: "subvenciones destinadas al comercio minorista", puntos: 10 },
-      { texto: "ayudas al comercio minorista", puntos: 10 },
-      { texto: "subvenciones destinadas a establecimientos de hosteleria", puntos: 10 },
-      { texto: "ayudas al sector hostelero", puntos: 10 },
-      { texto: "sector de la hosteleria", puntos: 6 },
-      { texto: "sector del comercio minorista", puntos: 7 },
-      { texto: "modernizacion del comercio", puntos: 8 },
-      { texto: "modernizacion de establecimientos comerciales", puntos: 9 },
-      { texto: "establecimientos de restauracion", puntos: 7 },
-      { texto: "establecimientos hoteleros", puntos: 7 },
-      { texto: "municipio turistico", puntos: 7 },
-      { texto: "empresa turistica", puntos: 6 },
-      { texto: "registro de turismo", puntos: 6 },
-      { texto: "calidad turistica", puntos: 6 }
-    ],
-    medias: [
-      { texto: "hosteleria", puntos: 3 },
-      { texto: "comercio minorista", puntos: 4 },
-      { texto: "establecimiento comercial", puntos: 3 },
-      { texto: "restauracion", puntos: 2 },
-      { texto: "alojamiento turistico", puntos: 3 },
-      { texto: "hotel", puntos: 1 },
-      { texto: "apartamento turistico", puntos: 3 },
-      { texto: "campamento de turismo", puntos: 3 },
-      { texto: "agencia de viajes", puntos: 3 },
-      { texto: "empresa de turismo activo", puntos: 3 },
-      { texto: "artesania", puntos: 3 },
-      { texto: "horarios comerciales", puntos: 5 },
-      { texto: "venta ambulante", puntos: 4 }
-    ],
-    combinaciones: [
-      { todos: ["subvencion", "hosteleria"], puntos: 8 },
-      { todos: ["ayuda", "comercio minorista"], puntos: 8 },
-      { todos: ["convocatoria", "establecimientos comerciales"], puntos: 7 },
-      { todos: ["beneficiarios", "sector turistico"], puntos: 6 }
-    ],
-    negativas: [
-      { texto: "procedimiento sancionador", puntos: -10 },
-      { texto: "infraccion administrativa", puntos: -9 },
-      { texto: "hojas de reclamaciones", puntos: -5 },
-      { texto: "inspeccion de consumo", puntos: -6 },
-      { texto: "notificacion por comparecencia", puntos: -8 },
-      { texto: "no ha sido posible notificar", puntos: -10 },
-      { texto: "reintegro de subvenciones", puntos: -6 },
-      { texto: "devolucion de cantidades", puntos: -6 }
-    ],
-    excluirSiContiene: [
-      "expediente sancionador en materia de comercio",
-      "sancion en materia de turismo"
-    ]
-  },
-  "agricultura y ganaderia": {
+  "Agricultura y Ganadería": {
     threshold: 8,
     fuertes: [
       { texto: "ayudas a las explotaciones agrarias", puntos: 10 },
@@ -207,7 +153,7 @@ const SECTORES = {
       "procedimiento sancionador en materia de sanidad vegetal"
     ]
   },
-  "licitaciones y obras": {
+  "Licitaciones y Contratación": {
     threshold: 8,
     seccionesPreferidas: [
       "licitaciones publicas y adjudicaciones"
@@ -262,7 +208,7 @@ const SECTORES = {
       "resolucion de prorroga"
     ]
   },
-  "educacion y formacion": {
+  "Educación y Universidades": {
     threshold: 8,
     fuertes: [
       { texto: "becas y ayudas al estudio", puntos: 9 },
@@ -314,7 +260,7 @@ const SECTORES = {
       "declaracion de cantidades indebidamente percibidas"
     ]
   },
-  "sanidad y bienestar social": {
+  "Sanidad y Asuntos Sociales": {
     threshold: 8,
     fuertes: [
       { texto: "prestacion de dependencia", puntos: 7 },
@@ -365,7 +311,7 @@ const SECTORES = {
       "relacion de solicitantes de reconocimiento de la situacion de dependencia"
     ]
   },
-  "subvenciones y ayudas generales": {
+  "Subvenciones y Ayudas": {
     threshold: 9,
     fuertes: [
       { texto: "se convocan subvenciones", puntos: 10 },
@@ -422,6 +368,28 @@ const SECTORES = {
       "acuerdo de inicio de reintegro",
       "cantidades indebidamente percibidas"
     ]
+  },
+  "Urbanismo y Medio Ambiente": {
+    threshold: 8,
+    fuertes: [
+      { texto: "urbanismo", puntos: 9 },
+      { texto: "medio ambiente", puntos: 9 },
+      { texto: "plan general", puntos: 8 },
+      { texto: "sostenibilidad", puntos: 8 },
+      { texto: "impacto ambiental", puntos: 10 },
+      { texto: "transicion ecologica", puntos: 9 }
+    ],
+    medias: [
+      { texto: "territorio", points: 4 },
+      { texto: "ambiental", points: 4 },
+      { texto: "energia", points: 3 },
+      { texto: "residuos", points: 4 }
+    ],
+    combinaciones: [
+      { todos: ["evaluacion", "impacto", "ambiental"], points: 9 }
+    ],
+    negativas: [],
+    excluirSiContiene: []
   }
 };
 
@@ -573,7 +541,7 @@ async function ejecutarBOE() {
 
       if (existentes && existentes.length > 0) {
         console.log(`ℹ️ El anuncio ya existe en la base de datos, se omite: ${d.titulo.substring(0, 40)}...`);
-        continue; // Saltamos al siguiente para no tocarlo ni volver a mandarlo
+        continue; 
       }
 
       // 2. Si no existe, lo insertamos como nuevo con enviado: false
