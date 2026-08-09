@@ -28,7 +28,6 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-// Función con JSON estricto para asegurar que la IA devuelva el resumen independiente
 async function enriquecerTitulosConIA(anuncios) {
   if (!anuncios || anuncios.length === 0 || !GEMINI_API_KEY) return anuncios;
 
@@ -55,18 +54,4 @@ async function enriquecerTitulosConIA(anuncios) {
     });
 
     let textoRespuesta = response.text.trim();
-    textoRespuesta = textoRespuesta.replace(/```json/g, '').replace(/```/g, '').trim();
-
-    const jsonRespuetas = JSON.parse(textoRespuesta);
-    
-    jsonRespuetas.forEach(item => {
-      if (anuncios[item.id] && item.resumen) {
-        anuncios[item.id].resumenIA = item.resumen.trim();
-      }
-    });
-  } catch (err) {
-    console.warn("⚠️ Aviso: La IA no pudo devolver el JSON, se omitirá el resumen:", err.message);
-  }
-
-  return anuncios;
-}
+    textoRespuesta = textoRespuesta.replace(/```json/g, '').replace(/
