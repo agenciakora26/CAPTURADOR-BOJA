@@ -58,33 +58,37 @@ async function enriquecerTitulosConIA(anuncios) {
 async function iniciarProcesoGlobal() {
   console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
 
-  let documentosBoja = [];
-  let documentosBoe = [];
-
+  // Opcional: Ejecutamos los capturadores para que inserten los nuevos si procede
   try {
-    documentosBoja = await ejecutarBOJA() || [];
+    await ejecutarBOJA();
   } catch (err) {
     console.error("❌ Error en BOJA:", err.message);
   }
 
   try {
-    documentosBoe = await ejecutarBOE() || [];
+    await ejecutarBOE();
   } catch (err) {
     console.error("❌ Error en BOE:", err.message);
   }
 
-  const totalDetectados = documentosBoja.length + documentosBoe.length;
-  console.log(`📌 Detectados ${totalDetectados} anuncios en total (${documentosBoja.length} BOJA, ${documentosBoe.length} BOE).`);
+  // CONSULTA DIRECTA A SUPABASE DE LOS PENDIENTES QUE HAS MARCADO A FALSE
+  console.log("📥 Consultando anuncios pendientes en Supabase...");
+  const anunciosPendientes = await supabaseRequest("anuncios_boja?enviado=eq.false&select=*");
 
-  if (totalDetectados === 0) {
-    console.log("📭 No hay nuevos anuncios hoy.");
+  if (!anunciosPendientes || anunciosPendientes.length === 0) {
+    console.log("📭 No hay anuncios pendientes con enviado=false en Supabase.");
     return;
   }
 
-  // Enriquecemos ambos bloques con la IA de forma unificada
-  console.log("🧠 Procesando resúmenes con IA...");
-  documentosBoja = await enriquecerTitulosConIA(documentosBoja);
-  documentosBoe = await enriquecerTitulosConIA(documentosBoe);
+  console.log(`📌 Encontrados ${anunciosPendientes.length} anuncios pendientes en base de datos. Procesando...`);
+
+  // Aplicamos los resúmenes automáticos inteligentes que ya funcionan
+  const anunciosProcesados = await enriquecerTitulosConIA(anunciosPendientes);
+
+  const documentosBoja = anunciosProcesados.filter(d => d.origen === "BOJA" || !d.origen);
+  const documentosBoe = anunciosProcesados.filter(d => d.origen === "BOE");
+
+  // Resto del código de envío de emails...
 
   console.log("👥 Consultando usuarios suscritos...");
   const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
