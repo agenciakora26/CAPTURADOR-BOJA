@@ -26,18 +26,18 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-// Función robusta de lectura por líneas para asegurar que el resumen llegue sí o sí
+// Función limpia para extraer el resumen de la IA manteniendo intacto el título original
 async function enriquecerTitulosConIA(anuncios) {
   if (!anuncios || anuncios.length === 0 || !GEMINI_API_KEY) return anuncios;
 
   const listaTextos = anuncios.map((a, index) => `${index + 1}. ${a.titulo}`).join("\n");
 
   const prompt = `
-    Eres un experto en comunicación clara. Tu tarea es reescribir los siguientes títulos de anuncios oficiales.
-    Para cada uno, mantén el número de orden y añade debajo un resumen muy sencillo, claro y directo en una sola frase.
+    Eres un experto en comunicación clara. Tu tarea es analizar los siguientes títulos de anuncios oficiales.
+    Para cada uno, mantén el número de orden y redacta un resumen muy sencillo, claro y directo en una sola frase que explique de qué trata.
     
     Usa exactamente este formato para cada elemento:
-    1. TÍTULO ORIGINAL...
+    1. 
     RESUMEN: [Tu resumen claro y directo aquí]
 
     Aquí tienes la lista:
@@ -63,14 +63,13 @@ async function enriquecerTitulosConIA(anuncios) {
       if (linea.includes("RESUMEN:") && currentIndex >= 0 && anuncios[currentIndex]) {
         const resumenTexto = linea.replace(/.*RESUMEN:\s*/i, "").trim();
         if (resumenTexto) {
-          // Guardamos el título original en otra propiedad por si acaso y ponemos el resumen como título principal
-          anuncios[currentIndex].tituloOriginal = anuncios[currentIndex].titulo;
-          anuncios[currentIndex].titulo = resumenTexto;
+          // Guardamos el resumen en una propiedad propia para mostrarlo debajo
+          anuncios[currentIndex].resumenIA = resumenTexto;
         }
       }
     }
   } catch (err) {
-    console.warn("⚠️ Aviso: La IA no pudo procesar los resúmenes, se mantendrán los originales:", err.message);
+    console.warn("⚠️ Aviso: La IA no pudo procesar los resúmenes:", err.message);
   }
 
   return anuncios;
@@ -136,13 +135,22 @@ async function iniciarProcesoGlobal() {
 
     console.log(`📧 Enviando resumen personalizado a ${usuario.email} (${totalAlertas} alertas)...`);
 
+    // Estructura HTML con Título Oficial arriba y Resumen IA destacado debajo
     let htmlBojaContent = "";
     if (relevantesBoja.length > 0) {
       htmlBojaContent = relevantesBoja.map(r => `
         <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #10b981; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
           <span style="font-size: 11px; font-weight: bold; background: #ecfdf5; color: #047857; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
-          <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 6px 0; line-height: 1.4;">${r.titulo}</h4>
-          ${r.tituloOriginal ? `<p style="font-size: 12px; color: #64748b; margin: 0 0 10px 0;">Ref: ${r.tituloOriginal}</p>` : ''}
+          
+          ${r.resumenIA ? `
+            <div style="background: #f8fafc; border-left: 3px solid #3b82f6; padding: 10px 12px; margin: 10px 0; border-radius: 4px;">
+              <p style="font-size: 14px; color: #1e293b; font-weight: bold; margin: 0; line-height: 1.4;">💡 ${r.resumenIA}</p>
+            </div>
+            <p style="font-size: 12px; color: #64748b; margin: 8px 0 12px 0; line-height: 1.3;"><strong>Título oficial:</strong> ${r.titulo}</p>
+          ` : `
+            <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 12px 0; line-height: 1.4;">${r.titulo}</h4>
+          `}
+
           <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #047857; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
         </div>
       `).join("");
@@ -155,8 +163,16 @@ async function iniciarProcesoGlobal() {
       htmlBoeContent = relevantesBoe.map(r => `
         <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
           <span style="font-size: 11px; font-weight: bold; background: #eff6ff; color: #1d4ed8; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
-          <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 6px 0; line-height: 1.4;">${r.titulo}</h4>
-          ${r.tituloOriginal ? `<p style="font-size: 12px; color: #64748b; margin: 0 0 10px 0;">Ref: ${r.tituloOriginal}</p>` : ''}
+          
+          ${r.resumenIA ? `
+            <div style="background: #f8fafc; border-left: 3px solid #3b82f6; padding: 10px 12px; margin: 10px 0; border-radius: 4px;">
+              <p style="font-size: 14px; color: #1e293b; font-weight: bold; margin: 0; line-height: 1.4;">💡 ${r.resumenIA}</p>
+            </div>
+            <p style="font-size: 12px; color: #64748b; margin: 8px 0 12px 0; line-height: 1.3;"><strong>Título oficial:</strong> ${r.titulo}</p>
+          ` : `
+            <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 12px 0; line-height: 1.4;">${r.titulo}</h4>
+          `}
+
           <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #1d4ed8; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
         </div>
       `).join("");
