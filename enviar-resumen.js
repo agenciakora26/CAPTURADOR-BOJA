@@ -53,4 +53,18 @@ async function enriquecerTitulosConIA(anuncios) {
     });
 
     let textoRespuesta = response.text.trim();
-    textoRespuesta = textoRespuesta.replace(/```json/g, '').replace(/
+    textoRespuesta = textoRespuesta.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    const jsonRespuetas = JSON.parse(textoRespuesta);
+    
+    jsonRespuetas.forEach(item => {
+      if (anuncios[item.id] && item.resumen) {
+        anuncios[item.id].resumenIA = item.resumen.trim();
+      }
+    });
+  } catch (err) {
+    console.warn("⚠️ Aviso: La IA no pudo devolver el JSON, se omitirá el resumen:", err.message);
+  }
+
+  return anuncios;
+}
