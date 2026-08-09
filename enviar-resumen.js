@@ -1,3 +1,4 @@
+console.log("INICIO DEL SCRIPT - COMPROBANDO ENTORNO");
 import { ejecutarBOJA } from './capturador.js';
 import { ejecutarBOE } from './capturador-boe.js';
 import { Resend } from 'resend';
