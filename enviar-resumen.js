@@ -26,54 +26,53 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-// Función optimizada: La IA redacta un resumen claro, directo y sencillo de cada titular
+// Función robusta con formato JSON para asegurar que la IA devuelva los resúmenes limpios
 async function enriquecerTitulosConIA(anuncios) {
   if (!anuncios || anuncios.length === 0 || !GEMINI_API_KEY) return anuncios;
 
-  const listaTextos = anuncios.map((a, index) => `${index + 1}. ${a.titulo}`).join("\n");
+  const listaParaIA = anuncios.map((a, index) => ({ id: index, texto: a.titulo }));
 
   const prompt = `
-    Eres un experto en comunicación clara. Tu tarea es reescribir los siguientes títulos de anuncios oficiales 
-    para que sean un resumen muy sencillo, claro y directo. 
+    Eres un experto en comunicación clara. Tu tarea es reescribir los títulos de los siguientes anuncios oficiales 
+    para que sean un resumen muy sencillo, claro y directo, eliminando la jerga burocrática excesiva.
     
-    Elimina lenguaje burocrático innecesario. Explica qué es el anuncio en una sola frase breve y legible.
-    
-    Devuelve la respuesta estrictamente con este formato por cada línea:
-    [NUMERO]
-    RESUMEN: [Resumen claro y directo de 1 o 2 líneas]
-    
-    Lista de anuncios:
-    ${listaTextos}
+    Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin markdown ni texto adicional, con esta estructura exacta para cada elemento:
+    [
+      {"id": 0, "resumen": "Resumen claro y directo de 1 o 2 líneas"},
+      ...
+    ]
+
+    Anuncios a procesar:
+    ${JSON.stringify(listaParaIA)}
   `;
 
   try {
-    console.log("🤖 Generando resúmenes claros con Gemini (Capa Gratuita)...");
+    console.log("🤖 Generando resúmenes claros con Gemini...");
     const response = await ai.models.generateContent({
       model: 'gemini-1.5-flash',
       contents: prompt,
     });
 
-    const textoRespuesta = response.text;
-    const bloques = textoRespuesta.split(/\[?(\d+)\]?\s*\n/);
+    let textoRespuesta = response.text.trim();
+    // Limpieza por si la IA devuelve bloques de código markdown tipo ```json ... ```
+    textoRespuesta = textoRespuesta.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    const jsonRespuetas = JSON.parse(textoRespuesta);
     
-    for (let i = 1; i < bloques.length; i += 2) {
-      const index = parseInt(bloques[i]) - 1;
-      const contenido = bloques[i + 1];
-      const matchResumen = contenido ? contenido.match(/RESUMEN:\s*(.*)/i) : null;
-      
-      if (anuncios[index] && matchResumen && matchResumen[1]) {
-        anuncios[index].titulo = matchResumen[1].trim();
+    jsonRespuetas.forEach(item => {
+      if (anuncios[item.id] && item.resumen) {
+        anuncios[item.id].titulo = item.resumen.trim();
       }
-    }
+    });
   } catch (err) {
-    console.warn("⚠️ Aviso: La IA no pudo procesar el lote, se usarán los títulos originales:", err.message);
+    console.warn("⚠️ Aviso: La IA no pudo devolver el JSON limpio, se usarán los títulos originales:", err.message);
   }
 
   return anuncios;
 }
 
 async function iniciarProcesoGlobal() {
-  console.log("🚀 Iniciando proceso unificado BOJA y BOE con resúmenes personalizados...");
+  console.log("🚀 Iniciando proceso unificado BOJA y BOE con resúmenes y estructura fija...");
 
   try {
     await ejecutarBOJA();
@@ -95,7 +94,7 @@ async function iniciarProcesoGlobal() {
     return;
   }
 
-  console.log(`📌 Encontrados ${anunciosPendientes.length} anuncios nuevos. Procesando resúmenes...`);
+  console.log(`📌 Encontrados ${anunciosPendientes.length} anuncios nuevos. Procesando...`);
 
   const anunciosProcesados = await enriquecerTitulosConIA(anunciosPendientes);
 
@@ -128,26 +127,37 @@ async function iniciarProcesoGlobal() {
     const totalAlertas = relevantesBoja.length + relevantesBoe.length;
     if (totalAlertas === 0) continue;
 
-    // Extracción limpia del nombre a partir del correo (ej: andresterronlopez de andresterronlopez@gmail.com)
     const nombreUsuario = usuario.email.split('@')[0];
 
     console.log(`📧 Enviando resumen personalizado a ${usuario.email} (${totalAlertas} alertas)...`);
 
-    let htmlBoja = relevantesBoja.length > 0 ? relevantesBoja.map(r => `
-      <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #10b981; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
-        <span style="font-size: 11px; font-weight: bold; background: #ecfdf5; color: #047857; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
-        <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 12px 0; line-height: 1.4;">${r.titulo}</h4>
-        <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #047857; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
-      </div>
-    `).join("") : '';
+    // Renderizado BOJA con soporte para "sin resultados"
+    let htmlBojaContent = "";
+    if (relevantesBoja.length > 0) {
+      htmlBojaContent = relevantesBoja.map(r => `
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #10b981; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
+          <span style="font-size: 11px; font-weight: bold; background: #ecfdf5; color: #047857; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
+          <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 12px 0; line-height: 1.4;">${r.titulo}</h4>
+          <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #047857; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
+        </div>
+      `).join("");
+    } else {
+      htmlBojaContent = `<p style="font-size: 14px; color: #64748b; font-style: italic; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px dashed #cbd5e1;">No hay ningún anuncio que coincida con tus intereses en esta sección.</p>`;
+    }
 
-    let htmlBoe = relevantesBoe.length > 0 ? relevantesBoe.map(r => `
-      <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
-        <span style="font-size: 11px; font-weight: bold; background: #eff6ff; color: #1d4ed8; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
-        <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 12px 0; line-height: 1.4;">${r.titulo}</h4>
-        <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #1d4ed8; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
-      </div>
-    `).join("") : '';
+    // Renderizado BOE con soporte para "sin resultados"
+    let htmlBoeContent = "";
+    if (relevantesBoe.length > 0) {
+      htmlBoeContent = relevantesBoe.map(r => `
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
+          <span style="font-size: 11px; font-weight: bold; background: #eff6ff; color: #1d4ed8; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
+          <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 12px 0; line-height: 1.4;">${r.titulo}</h4>
+          <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #1d4ed8; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
+        </div>
+      `).join("");
+    } else {
+      htmlBoeContent = `<p style="font-size: 14px; color: #64748b; font-style: italic; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px dashed #cbd5e1;">No hay ningún anuncio que coincida con tus intereses en esta sección.</p>`;
+    }
 
     const htmlFinal = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; padding: 30px 20px; color: #334155;">
@@ -162,15 +172,11 @@ async function iniciarProcesoGlobal() {
             <p style="font-size: 16px; color: #334155; margin-top: 0;">Hola <strong>${nombreUsuario}</strong>,</p>
             <p style="font-size: 15px; color: #334155;">Aquí tienes el desglose de las <strong>${totalAlertas} novedades</strong> de hoy:</p>
             
-            ${relevantesBoja.length > 0 ? `
-              <h3 style="color: #047857; font-size: 16px; border-bottom: 2px solid #10b981; padding-bottom: 5px; margin-top: 25px;">🟢 Junta de Andalucía (BOJA)</h3>
-              ${htmlBoja}
-            ` : ''}
+            <h3 style="color: #047857; font-size: 16px; border-bottom: 2px solid #10b981; padding-bottom: 5px; margin-top: 25px;">🟢 Junta de Andalucía (BOJA)</h3>
+            ${htmlBojaContent}
 
-            ${relevantesBoe.length > 0 ? `
-              <h3 style="color: #1d4ed8; font-size: 16px; border-bottom: 2px solid #3b82f6; padding-bottom: 5px; margin-top: 25px;">🔵 Estado (BOE)</h3>
-              ${htmlBoe}
-            ` : ''}
+            <h3 style="color: #1d4ed8; font-size: 16px; border-bottom: 2px solid #3b82f6; padding-bottom: 5px; margin-top: 25px;">🔵 Estado (BOE)</h3>
+            ${htmlBoeContent}
           </div>
 
           <div style="background: #f1f5f9; padding: 15px; text-align: center; border-top: 1px solid #e2e8f0;">
