@@ -32,22 +32,32 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function enriquecerTitulosConIA(anuncios) {
   if (!anuncios || anuncios.length === 0) return anuncios;
 
-  console.log(`⚡ Generando resúmenes automáticos optimizados para ${anuncios.length} anuncios...`);
+  console.log(`⚡ Generando resúmenes automáticos avanzados para ${anuncios.length} anuncios...`);
 
   anuncios.forEach(a => {
-    const tituloLower = (a.titulo || "").toLowerCase();
-    let explicacion = "Documento oficial publicado en el boletín correspondiente a esta sección.";
+    let titulo = (a.titulo || "").trim();
+    
+    // Si el título viene cortado por el final, le quitamos los puntos suspensivos o coletillas colgadas
+    if (/(para la|se somete a|de|del|en|por|el|la)$/i.test(titulo)) {
+      titulo = titulo.replace(/(para la|se somete a|de|del|en|por|el|la)$/i, "").trim();
+    }
+    a.titulo = titulo;
 
-    if (tituloLower.includes("nombr") || tituloLower.includes("cese") || tituloLower.includes("personal")) {
-      explicacion = "Nombramiento, cese o modificación de personal en la administración pública.";
-    } else if (tituloLower.includes("subvenc") || tituloLower.includes("ayuda") || tituloLower.includes("beneficiario")) {
-      explicacion = "Convocatoria o resolución de ayudas, subvenciones o fondos públicos.";
-    } else if (tituloLower.includes("oposic") || tituloLower.includes("prueba selectiva") || tituloLower.includes("empleo")) {
-      explicacion = "Convocatoria de empleo público, bases de selección o listas de aspirantes.";
-    } else if (tituloLower.includes("corrección") || tituloLower.includes("error")) {
-      explicacion = "Corrección de errores u erratas detectadas en publicaciones anteriores.";
-    } else if (tituloLower.includes("información pública") || tituloLower.includes("somete")) {
-      explicacion = "Apertura de periodo de información pública para alegaciones o trámites.";
+    const tituloLower = titulo.toLowerCase();
+    let explicacion = "Información oficial de interés profesional publicada en el boletín.";
+
+    if (tituloLower.includes("nombr") || tituloLower.includes("cese") || tituloLower.includes("personal eventual")) {
+      explicacion = "Nombramiento, cese o asignación de cargos y personal directivo en la administración.";
+    } else if (tituloLower.includes("subvenc") || tituloLower.includes("ayuda") || tituloLower.includes("concesion") || tituloLower.includes("bases reguladoras")) {
+      explicacion = "Convocatoria o bases de ayudas y subvenciones públicas dirigidas a sectores económicos.";
+    } else if (tituloLower.includes("oposic") || tituloLower.includes("empleo publico") || tituloLower.includes("aspirantes") || tituloLower.includes("plazas")) {
+      explicacion = "Convocatoria de empleo público, plazas vacantes, tribunales o listas de aprobados.";
+    } else if (tituloLower.includes("corrección de errores") || tituloLower.includes("rectificación")) {
+      explicacion = "Corrección oficial de erratas detectadas en decretos o publicaciones anteriores.";
+    } else if (tituloLower.includes("información pública") || tituloLower.includes("autorización ambiental") || tituloLower.includes("impacto")) {
+      explicacion = "Apertura de expediente e información pública para alegaciones sobre proyectos o instalaciones.";
+    } else if (tituloLower.includes("estructura orgánica") || tituloLower.includes("competencias")) {
+      explicacion = "Modificación de la estructura orgánica, delegación de competencias o organización interna.";
     }
 
     a.resumenIA = explicacion;
