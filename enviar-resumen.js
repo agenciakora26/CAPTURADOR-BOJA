@@ -35,11 +35,11 @@ async function enriquecerTitulosConIA(anuncios) {
   const listaParaIA = anuncios.map((a, index) => ({ id: index, texto: a.titulo }));
 
   const prompt = `
-    Eres un experto en comunicación clara. Para cada uno de los siguientes anuncios oficiales, genera un resumen muy sencillo, claro y directo que explique por qué le puede interesar a un profesional.
+    Eres un analista experto en administración pública y boletines oficiales. Tu objetivo es leer cada título oficial e interpretar en 1 o 2 frases sencillas QUÉ SE ESTÁ HACIendo (por ejemplo: nombramientos, convocatorias de plazas, subvenciones, etc.) para que un profesional entienda el propósito real de un vistazo. No te limites a repetir el título, explícalo de forma clara y directa.
     
-    Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin bloques de código ni texto adicional, con esta estructura exacta:
+    Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin bloques de código ni texto adicional, con esta estructura exacta para cada elemento:
     [
-      {"id": 0, "resumen": "Resumen claro y directo de 1 o 2 líneas explicando por qué interesa"}
+      {"id": 0, "resumen": "Explicación clara y directa redactada de nuevo interpretando el propósito del anuncio."}
     ]
 
     Anuncios a procesar:
@@ -47,7 +47,7 @@ async function enriquecerTitulosConIA(anuncios) {
   `;
 
   try {
-    console.log("🤖 Generando resúmenes estructurados con Gemini...");
+    console.log("🤖 Generando resúmenes inteligentes con Gemini...");
     const response = await ai.models.generateContent({
       model: 'gemini-1.5-flash',
       contents: prompt,
@@ -67,12 +67,11 @@ async function enriquecerTitulosConIA(anuncios) {
       }
     });
   } catch (err) {
-    console.warn("⚠️ Aviso: La IA no pudo devolver el JSON, se omitirá el resumen:", err.message);
+    console.warn("⚠️ Aviso: La IA no pudo procesar el JSON, se usará una descripción genérica:", err.message);
   }
 
   return anuncios;
 }
-
 async function iniciarProcesoGlobal() {
   console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
 
