@@ -6,7 +6,7 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
 const SECTORES = {
-  "oposiciones y empleo": {
+  "Oposiciones y Empleo": {
     threshold: 4,
     fuertes: [
       { texto: "oposicion", puntos: 5 },
@@ -35,48 +35,27 @@ const SECTORES = {
     ],
     excluirSiContiene: ["nombramiento"]
   },
-  "hosteleria y comercio": {
+  "Subvenciones y Ayudas": {
     threshold: 3,
     fuertes: [
-      { texto: "hosteleria", puntos: 5 },
-      { texto: "comercio", points: 4 },
-      { texto: "turismo", points: 4 },
-      { texto: "restauracion", points: 4 },
-      { texto: "establecimientos comerciales", points: 5 },
-      { texto: "artesania", points: 4 }
+      { texto: "subvencion", points: 4 },
+      { texto: "subvenciones", points: 4 },
+      { texto: "ayudas", points: 4 },
+      { texto: "concesion", points: 3 },
+      { texto: "bases reguladoras", points: 4 },
+      { texto: "incentivos", points: 3 },
+      { texto: "autonomos", points: 4 }
     ],
     medias: [
-      { texto: "hotel", points: 2 },
-      { texto: "bono turistico", points: 4 },
-      { texto: "ayudas", points: 2 },
-      { texto: "subvencion", points: 2 },
-      { texto: "mercado", points: 2 }
+      { texto: "beneficiarios", points: 2 },
+      { texto: "solicitudes", points: 2 },
+      { texto: "fomento", points: 2 },
+      { texto: "emprendimiento", points: 3 }
     ],
     negativas: [],
     excluirSiContiene: ["nombramiento"]
   },
-  "agricultura y ganaderia": {
-    threshold: 3,
-    fuertes: [
-      { texto: "agricultura", puntos: 4 },
-      { texto: "ganaderia", puntos: 4 },
-      { texto: "pesca", points: 4 },
-      { texto: "explotaciones agrarias", points: 5 },
-      { texto: "pac", points: 4 },
-      { texto: "produccion ecologica", points: 4 },
-      { texto: "ayudas", points: 2 }
-    ],
-    medias: [
-      { texto: "agrario", points: 2 },
-      { texto: "rural", points: 2 },
-      { texto: "olivar", points: 3 },
-      { texto: "vinedo", points: 3 },
-      { texto: "subvencion", points: 2 }
-    ],
-    negativas: [],
-    excluirSiContiene: ["nombramiento"]
-  },
-  "licitaciones y obras": {
+  "Licitaciones y Contratación": {
     threshold: 4,
     fuertes: [
       { texto: "licitacion", puntos: 5 },
@@ -95,27 +74,46 @@ const SECTORES = {
     negativas: [],
     excluirSiContiene: ["nombramiento"]
   },
-  "educacion y formacion": {
+  "Agricultura y Ganadería": {
     threshold: 3,
     fuertes: [
-      { texto: "educacion", points: 4 },
-      { texto: "formacion profesional", points: 5 },
-      { texto: "becas", points: 5 },
-      { texto: "centros docentes", points: 4 },
-      { texto: "universidad", points: 4 },
-      { texto: "profesorado", points: 4 },
-      { texto: "alumnado", points: 3 }
+      { texto: "agricultura", puntos: 4 },
+      { texto: "ganaderia", points: 4 },
+      { texto: "pesca", points: 4 },
+      { texto: "explotaciones agrarias", points: 5 },
+      { texto: "pac", points: 4 },
+      { texto: "produccion ecologica", points: 4 },
+      { texto: "ayudas", points: 2 }
     ],
     medias: [
-      { texto: "ensenanza", points: 2 },
-      { texto: "curso", points: 2 },
-      { texto: "ayudas", points: 2 },
-      { texto: "subvenciones", points: 2 }
+      { texto: "agrario", points: 2 },
+      { texto: "rural", points: 2 },
+      { texto: "olivar", points: 3 },
+      { texto: "vinedo", points: 3 },
+      { texto: "subvencion", points: 2 }
     ],
     negativas: [],
     excluirSiContiene: ["nombramiento"]
   },
-  "sanidad y bienestar social": {
+  "Urbanismo y Medio Ambiente": {
+    threshold: 3,
+    fuertes: [
+      { texto: "urbanismo", points: 4 },
+      { texto: "medio ambiente", points: 4 },
+      { texto: "plan general", points: 4 },
+      { texto: "sostenibilidad", points: 4 },
+      { texto: "energia", points: 3 },
+      { texto: "industrial", points: 3 }
+    ],
+    medias: [
+      { texto: "territorio", points: 2 },
+      { texto: "ambiental", points: 2 },
+      { texto: "transporte", points: 2 }
+    ],
+    negativas: [],
+    excluirSiContiene: ["nombramiento"]
+  },
+  "Sanidad y Asuntos Sociales": {
     threshold: 3,
     fuertes: [
       { texto: "sanidad", points: 4 },
@@ -134,22 +132,22 @@ const SECTORES = {
     negativas: [],
     excluirSiContiene: ["nombramiento"]
   },
-  "subvenciones y ayudas generales": {
+  "Educación y Universidades": {
     threshold: 3,
     fuertes: [
-      { texto: "subvencion", points: 4 },
-      { texto: "subvenciones", points: 4 },
-      { texto: "ayudas", points: 4 },
-      { texto: "concesion", points: 3 },
-      { texto: "bases reguladoras", points: 4 },
-      { texto: "incentivos", points: 3 },
-      { texto: "autonomos", points: 4 }
+      { texto: "educacion", points: 4 },
+      { texto: "formacion profesional", points: 5 },
+      { texto: "becas", points: 5 },
+      { texto: "centros docentes", points: 4 },
+      { texto: "universidad", points: 4 },
+      { texto: "profesorado", points: 4 },
+      { texto: "alumnado", points: 3 }
     ],
     medias: [
-      { texto: "beneficiarios", points: 2 },
-      { texto: "solicitudes", points: 2 },
-      { texto: "fomento", points: 2 },
-      { texto: "emprendimiento", points: 3 }
+      { texto: "ensenanza", points: 2 },
+      { texto: "curso", points: 2 },
+      { texto: "ayudas", points: 2 },
+      { texto: "subvenciones", points: 2 }
     ],
     negativas: [],
     excluirSiContiene: ["nombramiento"]
@@ -228,10 +226,10 @@ function clasificarTexto(texto, seccion) {
       const nombreSectorLimpio = sector.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       const seccionLimpia = seccion.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       
-      // Separamos el nombre del sector (ej: "agricultura y ganaderia" -> "agricultura", "ganaderia")
+      // Separamos el nombre del sector (ej: "Agricultura y Ganadería" -> "agricultura", "ganaderia")
       const palabrasClaveSector = nombreSectorLimpio.split(" y ");
       for (const palabra of palabrasClaveSector) {
-        // Si la palabra clave (ej. Agricultura, Empleo, Sanidad) está en el nombre de la Consejería, aprueba directo
+        // Si la palabra clave está en el nombre de la Consejería, aprueba directo
         if (palabra.length > 3 && seccionLimpia.includes(palabra)) {
           puntuacion += reglas.threshold; 
         }
@@ -364,7 +362,7 @@ async function ejecutarCapturadorBoja() {
         });
       }
 
-    let seccionActual = "GENERAL";
+      let seccionActual = "GENERAL";
       let parrafoActual = "";
       let urlAnuncioEspecifica = urlPdfSumario;
       let saltarSoloNombramientos = false;
@@ -374,7 +372,6 @@ async function ejecutarCapturadorBoja() {
         const linea = lineaObj.texto;
         const textoMinus = linea.toLowerCase();
 
-        // 1. Si detectamos que arranca específicamente el apartado 2.1 o la palabra nombramientos, activamos el salto exclusivo
         if (
           textoMinus.includes("2.1.") || 
           textoMinus.includes("2.1 nombramientos") || 
@@ -385,8 +382,6 @@ async function ejecutarCapturadorBoja() {
           continue;
         }
 
-        // 2. En cuanto el boletín cambia a cualquier otra sección o subapartado (2.2, 2.3, sección 3, etc.), 
-        // desactivamos el escudo y retomamos el análisis de inmediato.
         if (
           textoMinus.includes("2.2.") || 
           textoMinus.includes("2.3.") || 
@@ -400,18 +395,15 @@ async function ejecutarCapturadorBoja() {
           saltarSoloNombramientos = false;
         }
 
-        // Si el interruptor de exclusión del 2.1 está activo, nos saltamos estas líneas
         if (saltarSoloNombramientos) {
           parrafoActual = "";
           continue;
         }
 
-        // Si la línea trae un enlace propio que no es el sumario general, lo guardamos
         if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
           urlAnuncioEspecifica = lineaObj.url;
         }
 
-        // Ignoramos ruidos habituales de cabeceras, pies y metadatos
         if (
           linea.includes("Depósito legal") || 
           linea.includes("ISSN") || 
@@ -468,7 +460,8 @@ async function ejecutarCapturadorBoja() {
         body: JSON.stringify({
           titulo: d.titulo,
           url_pdf: d.url_pdf,
-          categoria: d.sector
+          categoria: d.sector,
+          origen: "BOJA"
         })
       });
     } catch (err) {
@@ -479,7 +472,4 @@ async function ejecutarCapturadorBoja() {
   return unicos;
 }
 
-
-
-// Exportación única al final del archivo
 export { ejecutarCapturadorBoja as ejecutarBOJA };
