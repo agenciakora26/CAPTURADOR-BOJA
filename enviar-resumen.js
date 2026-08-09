@@ -32,17 +32,23 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function enriquecerTitulosConIA(anuncios) {
   if (!anuncios || anuncios.length === 0 || !GEMINI_API_KEY) return anuncios;
 
-  console.log(`🤖 Generando resúmenes inteligentes con Gemini para ${anuncios.length} anuncios...`);
+  console.log(`🤖 Generando resúmenes inteligentes por lotes para ${anuncios.length} anuncios...`);
+  const tamanoLote = 10;
 
-  // Procesamos los anuncios uno a uno de forma segura para evitar saturar la API
-  for (let i = 0; i < anuncios.length; i++) {
-    const anuncio = anuncios[i];
-    
+  for (let i = 0; i < anuncios.length; i += tamanoLote) {
+    const lote = anuncios.slice(i, i + tamanoLote);
+    const listaParaIA = lote.map((a, index) => ({ id: index, texto: a.titulo }));
+
     const prompt = `
-      Eres un analista experto en administración pública. Explica brevemente y de forma muy sencilla en 1 frase de qué trata este anuncio oficial para un profesional, sin limitarte a repetir el título:
-      "${anuncio.titulo}"
+      Eres un analista experto en administración pública. Para cada uno de los siguientes títulos oficiales, redacta una explicación breve y sencilla de 1 o 2 frases indicando exactamente de qué trata (por ejemplo, aprobaciones de listas, convocatorias, nombramientos, etc.).
       
-      Devuelve ÚNICAMENTE el texto del resumen claro y directo, sin formato JSON, sin comillas y sin markdown.
+      Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin bloques de código ni texto adicional, con esta estructura exacta:
+      [
+        {"id": 0, "resumen": "Explicación clara y directa del propósito de este anuncio."}
+      ]
+
+      Anuncios a procesar:
+      ${JSON.stringify(listaParaIA)}
     `;
 
     try {
@@ -51,15 +57,29 @@ async function enriquecerTitulosConIA(anuncios) {
         contents: prompt,
       });
 
-      const resumenTexto = response.text ? response.text.trim() : "";
-      if (resumenTexto) {
-        anuncio.resumenIA = resumenTexto;
-      } else {
-        anuncio.resumenIA = anuncio.titulo;
-      }
+      let textoRespuesta = response.text.trim();
+      if (textoRespuesta.startsWith("```json")) textoRespuesta = textoRespuesta.replace("```json", "");
+      if (textoRespuesta.startsWith("```")) textoRespuesta = textoRespuesta.replace("```", "");
+      if (textoRespuesta.endsWith("```")) textoRespuesta = textoRespuesta.slice(0, -3);
+      textoRespuesta = textoRespuesta.trim();
+
+      const jsonRespuetas = JSON.parse(textoRespuesta);
+      
+      jsonRespuetas.forEach(item => {
+        if (lote[item.id] && item.resumen) {
+          lote[item.id].resumenIA = item.resumen.trim();
+        }
+      });
     } catch (err) {
-      // Si falla un anuncio individual, ponemos una descripción limpia basada en su categoría
-      anuncio.resumenIA = `Disposición oficial sobre ${anuncio.categoria || anuncio.sector} publicada en el boletín.`;
+      console.warn(`⚠️ Aviso en lote ${i}: No se pudo procesar con IA, usando título original.`, err.message);
+      lote.forEach(a => {
+        a.resumenIA = a.titulo;
+      });
+    }
+
+    // Pequeña pausa de cortesía entre lotes para respetar los límites de la API gratuita
+    if (i + tamanoLote < anuncios.length) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
 
