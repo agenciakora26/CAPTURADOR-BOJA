@@ -40,11 +40,12 @@ async function enriquecerTitulosConIA(anuncios) {
     const listaParaIA = lote.map((a, index) => ({ id: index, texto: a.titulo }));
 
     const prompt = `
-      Eres un analista experto en administración pública. Para cada uno de los siguientes títulos oficiales, redacta una explicación breve y sencilla de 1 o 2 frases indicando exactamente de qué trata (por ejemplo, aprobaciones de listas, convocatorias, nombramientos, etc.).
+      Eres un asesor y analista experto para profesionales. Para cada uno de los siguientes títulos de boletines oficiales, redacta una explicación breve y práctica de 1 o 2 frases que le indique claramente al cliente por qué le interesa y de qué trata el documento (ej: plazos de inscripción, adjudicaciones, nombramientos o bases de una convocatoria). 
+      No repitas el título de forma seca; interpreta el propósito real del texto de manera útil para el lector.
       
       Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin bloques de código ni texto adicional, con esta estructura exacta:
       [
-        {"id": 0, "resumen": "Explicación clara y directa del propósito de este anuncio."}
+        {"id": 0, "resumen": "Explicación clara y práctica de lo que encontrará el lector en este anuncio."}
       ]
 
       Anuncios a procesar:
@@ -77,7 +78,6 @@ async function enriquecerTitulosConIA(anuncios) {
       });
     }
 
-    // Pequeña pausa de cortesía entre lotes para respetar los límites de la API gratuita
     if (i + tamanoLote < anuncios.length) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
