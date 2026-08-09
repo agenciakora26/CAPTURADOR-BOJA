@@ -1,8 +1,9 @@
-console.log("INICIO DEL SCRIPT - COMPROBANDO ENTORNO");
 import { ejecutarBOJA } from './capturador.js';
 import { ejecutarBOE } from './capturador-boe.js';
 import { Resend } from 'resend';
 import { GoogleGenAI } from '@google/genai';
+
+console.log("INICIO DEL SCRIPT - COMPROBANDO ENTORNO");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
