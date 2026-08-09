@@ -26,24 +26,22 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-// Función robusta con formato JSON para asegurar que la IA devuelva los resúmenes limpios
+// Función robusta de lectura por líneas para asegurar que el resumen llegue sí o sí
 async function enriquecerTitulosConIA(anuncios) {
   if (!anuncios || anuncios.length === 0 || !GEMINI_API_KEY) return anuncios;
 
-  const listaParaIA = anuncios.map((a, index) => ({ id: index, texto: a.titulo }));
+  const listaTextos = anuncios.map((a, index) => `${index + 1}. ${a.titulo}`).join("\n");
 
   const prompt = `
-    Eres un experto en comunicación clara. Tu tarea es reescribir los títulos de los siguientes anuncios oficiales 
-    para que sean un resumen muy sencillo, claro y directo, eliminando la jerga burocrática excesiva.
+    Eres un experto en comunicación clara. Tu tarea es reescribir los siguientes títulos de anuncios oficiales.
+    Para cada uno, mantén el número de orden y añade debajo un resumen muy sencillo, claro y directo en una sola frase.
     
-    Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin markdown ni texto adicional, con esta estructura exacta para cada elemento:
-    [
-      {"id": 0, "resumen": "Resumen claro y directo de 1 o 2 líneas"},
-      ...
-    ]
+    Usa exactamente este formato para cada elemento:
+    1. TÍTULO ORIGINAL...
+    RESUMEN: [Tu resumen claro y directo aquí]
 
-    Anuncios a procesar:
-    ${JSON.stringify(listaParaIA)}
+    Aquí tienes la lista:
+    ${listaTextos}
   `;
 
   try {
@@ -53,26 +51,33 @@ async function enriquecerTitulosConIA(anuncios) {
       contents: prompt,
     });
 
-    let textoRespuesta = response.text.trim();
-    // Limpieza por si la IA devuelve bloques de código markdown tipo ```json ... ```
-    textoRespuesta = textoRespuesta.replace(/```json/g, '').replace(/```/g, '').trim();
-
-    const jsonRespuetas = JSON.parse(textoRespuesta);
+    const textoRespuesta = response.text;
+    const lineas = textoRespuesta.split("\n");
     
-    jsonRespuetas.forEach(item => {
-      if (anuncios[item.id] && item.resumen) {
-        anuncios[item.id].titulo = item.resumen.trim();
+    let currentIndex = -1;
+    for (const linea of lineas) {
+      const matchNum = linea.match(/^(\d+)\./);
+      if (matchNum) {
+        currentIndex = parseInt(matchNum[1]) - 1;
       }
-    });
+      if (linea.includes("RESUMEN:") && currentIndex >= 0 && anuncios[currentIndex]) {
+        const resumenTexto = linea.replace(/.*RESUMEN:\s*/i, "").trim();
+        if (resumenTexto) {
+          // Guardamos el título original en otra propiedad por si acaso y ponemos el resumen como título principal
+          anuncios[currentIndex].tituloOriginal = anuncios[currentIndex].titulo;
+          anuncios[currentIndex].titulo = resumenTexto;
+        }
+      }
+    }
   } catch (err) {
-    console.warn("⚠️ Aviso: La IA no pudo devolver el JSON limpio, se usarán los títulos originales:", err.message);
+    console.warn("⚠️ Aviso: La IA no pudo procesar los resúmenes, se mantendrán los originales:", err.message);
   }
 
   return anuncios;
 }
 
 async function iniciarProcesoGlobal() {
-  console.log("🚀 Iniciando proceso unificado BOJA y BOE con resúmenes y estructura fija...");
+  console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
 
   try {
     await ejecutarBOJA();
@@ -131,13 +136,13 @@ async function iniciarProcesoGlobal() {
 
     console.log(`📧 Enviando resumen personalizado a ${usuario.email} (${totalAlertas} alertas)...`);
 
-    // Renderizado BOJA con soporte para "sin resultados"
     let htmlBojaContent = "";
     if (relevantesBoja.length > 0) {
       htmlBojaContent = relevantesBoja.map(r => `
         <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #10b981; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
           <span style="font-size: 11px; font-weight: bold; background: #ecfdf5; color: #047857; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
-          <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 12px 0; line-height: 1.4;">${r.titulo}</h4>
+          <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 6px 0; line-height: 1.4;">${r.titulo}</h4>
+          ${r.tituloOriginal ? `<p style="font-size: 12px; color: #64748b; margin: 0 0 10px 0;">Ref: ${r.tituloOriginal}</p>` : ''}
           <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #047857; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
         </div>
       `).join("");
@@ -145,13 +150,13 @@ async function iniciarProcesoGlobal() {
       htmlBojaContent = `<p style="font-size: 14px; color: #64748b; font-style: italic; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px dashed #cbd5e1;">No hay ningún anuncio que coincida con tus intereses en esta sección.</p>`;
     }
 
-    // Renderizado BOE con soporte para "sin resultados"
     let htmlBoeContent = "";
     if (relevantesBoe.length > 0) {
       htmlBoeContent = relevantesBoe.map(r => `
         <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
           <span style="font-size: 11px; font-weight: bold; background: #eff6ff; color: #1d4ed8; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
-          <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 12px 0; line-height: 1.4;">${r.titulo}</h4>
+          <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 6px 0; line-height: 1.4;">${r.titulo}</h4>
+          ${r.tituloOriginal ? `<p style="font-size: 12px; color: #64748b; margin: 0 0 10px 0;">Ref: ${r.tituloOriginal}</p>` : ''}
           <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #1d4ed8; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
         </div>
       `).join("");
