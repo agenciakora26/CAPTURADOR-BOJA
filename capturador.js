@@ -327,7 +327,7 @@ async function ejecutarCapturadorBoja() {
       const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
       const pdfDocument = await loadingTask.promise;
 
-      let lineasConEnlaces = [];
+      let itemsGlobal = [];
 
       for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
         const page = await pdfDocument.getPage(pageNum);
@@ -350,105 +350,81 @@ async function ejecutarCapturadorBoja() {
 
         items.forEach(item => {
           let urlAsociada = urlPdfSumario; 
-          const matchLink = links.find(l => Math.abs(l.y - item.y) < 10 && Math.abs(l.x - item.x) < 100);
+          const matchLink = links.find(l => Math.abs(l.y - item.y) < 15 && Math.abs(l.x - item.x) < 120);
           if (matchLink) {
             urlAsociada = matchLink.url;
           }
 
-          lineasConEnlaces.push({
+          itemsGlobal.push({
             texto: item.str,
-            url: urlAsociada
+            url: urlAsociada,
+            y: item.y,
+            x: item.x
           });
         });
       }
 
-      let seccionActual = "GENERAL";
-      let parrafoActual = "";
-      let urlAnuncioEspecifica = urlPdfSumario;
-      let saltarSoloNombramientos = false;
+      // Ordenamos todos los items de arriba a abajo y de izquierda a derecha
+      itemsGlobal.sort((a, b) => Math.abs(b.y - a.y) > 5 ? b.y - a.y : a.x - b.x);
 
-      for (let i = 0; i < lineasConEnlaces.length; i++) {
-        const lineaObj = lineasConEnlaces[i];
-        const linea = lineaObj.texto;
-        const textoMinus = linea.toLowerCase();
+      let textoCompletoPaginas = "";
+      let mapeoEnlaces = [];
 
-        if (
-          textoMinus.includes("2.1.") || 
-          textoMinus.includes("2.1 nombramientos") || 
-          textoMinus.includes("nombramientos, situaciones e incidencias")
-        ) {
-          saltarSoloNombramientos = true;
-          parrafoActual = "";
-          continue;
+      itemsGlobal.forEach(item => {
+        textoCompletoPaginas += " " + item.texto;
+        if (item.url && item.url !== urlPdfSumario) {
+          mapeoEnlaces.push({ texto: item.texto, url: item.url });
+        }
+      });
+
+      textoCompletoPaginas = textoCompletoPaginas.replace(/\s+/g, " ");
+
+      // Troceamos basándonos en la estructura "texto núm." que delimita cada anuncio en el BOJA
+      const bloquesAnuncios = textoCompletoPaginas.split(/texto núm\./gi);
+      let consejeriaActual = "JUNTA DE ANDALUCÍA";
+
+      for (let i = 1; i < bloquesAnuncios.length; i++) {
+        const bloque = bloquesAnuncios[i];
+        const partesAnuncio = bloque.split(/-\s*\d+\s*página[s]?/i);
+        if (partesAnuncio.length === 0) continue;
+
+        let textoAnuncioBruto = partesAnuncio[0].trim();
+
+        // Detectar si hay cambios de Consejería en el bloque
+        const matchesConsejeria = textoAnuncioBruto.match(/(CONSEJERÍA DE [A-ZÁÉÍÓÚÑ,\s]+|AYUNTAMIENTO DE [A-ZÁÉÍÓÚÑ,\s]+|DELEGACIÓN [A-ZÁÉÍÓÚÑ,\s]+)/g);
+        if (matchesConsejeria && matchesConsejeria.length > 0) {
+          consejeriaActual = matchesConsejeria[matchesConsejeria.length - 1].trim();
+          textoAnuncioBruto = textoAnuncioBruto.replace(consejeriaActual, "").trim();
         }
 
-        if (
-          textoMinus.includes("2.2.") || 
-          textoMinus.includes("2.3.") || 
-          textoMinus.includes("3. ") || 
-          textoMinus.includes("otras disposiciones") || 
-          textoMinus.includes("oposiciones") || 
-          textoMinus.includes("concursos") ||
-          textoMinus.includes("personal funcionario") ||
-          textoMinus.includes("personal laboral")
-        ) {
-          saltarSoloNombramientos = false;
-        }
+        textoAnuncioBruto = textoAnuncioBruto.replace(/^[\.,\s]+/, "").trim();
 
-        if (saltarSoloNombramientos) {
-          parrafoActual = "";
-          continue;
-        }
-
-        if (lineaObj.url && lineaObj.url !== urlPdfSumario) {
-          urlAnuncioEspecifica = lineaObj.url;
-        }
-
-        if (
-          linea.includes("Depósito legal") || 
-          linea.includes("ISSN") || 
-          linea.includes("Sumario") || 
-          linea.includes("Extraordinario") || 
-          linea.includes("Boletín Oficial") ||
-          linea.startsWith("texto núm.") ||
-          linea.includes("sumario - página") ||
-          linea === "https://www.juntadeandalucia.es/eboja" ||
-          linea === "Junta de Andalucía" ||
-          linea === "BOJA"
-        ) {
-          continue;
-        }
-
-        const lineaLimpiaTexto = linea.replace(/texto núm\.\s*\d+.*?(página[s]?)?/gi, "").trim();
-        if (lineaLimpiaTexto.length === 0) continue;
-
-        const esTodoMayusculas = (linea === linea.toUpperCase()) && /[A-ZÁÉÍÓÚÑ]/.test(linea);
-        const esCabecera = linea.length > 3 && linea.length < 100 && esTodoMayusculas;
-
-        if (esCabecera) {
-          if (parrafoActual.length > 15) {
-            evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
-            parrafoActual = "";
+        if (textoAnuncioBruto.length > 20) {
+          const textoMinus = textoAnuncioBruto.toLowerCase();
+          
+          // Opcional: si deseas omitir nombramientos masivos, se mantiene la regla
+          if (textoMinus.includes("nombramiento de personal eventual") || textoMinus.includes("cese de")) {
+            // Comenta o ajusta si quieres incluirlos
           }
-          seccionActual = linea; 
-          continue; 
-        }
 
-        parrafoActual += " " + lineaLimpiaTexto;
+          // Buscamos si hay un enlace específico asociado en este bloque
+          let urlAnuncioEspecifica = urlPdfSumario;
+          for (const m of mapeoEnlaces) {
+            if (textoAnuncioBruto.includes(m.texto.substring(0, 15))) {
+              urlAnuncioEspecifica = m.url;
+              break;
+            }
+          }
 
-        if (parrafoActual.length > 120) {
-          evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
-          parrafoActual = "";
+          evaluarYGuardar(textoAnuncioBruto, urlAnuncioEspecifica, consejeriaActual, documentosProcesados);
         }
       }
 
-      if (parrafoActual.length > 15 && !saltarSoloNombramientos) {
-        evaluarYGuardar(parrafoActual, urlAnuncioEspecifica, seccionActual, documentosProcesados);
-      }
     } catch (err) {
       console.log(`⚠️ Error procesando PDF de sumario: ${err.message}`);
     }
   }
+
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes totales encontrados en el BOJA: ${unicos.length}`);
 
