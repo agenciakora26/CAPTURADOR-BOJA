@@ -30,55 +30,28 @@ async function supabaseRequest(endpoint, opciones = {}) {
 
 // Función con IA para enriquecer los títulos de forma segura
 async function enriquecerTitulosConIA(anuncios) {
-  if (!anuncios || anuncios.length === 0 || !GEMINI_API_KEY) return anuncios;
+  if (!anuncios || anuncios.length === 0) return anuncios;
 
-  console.log(`🤖 Generando resúmenes inteligentes por lotes seguros para ${anuncios.length} anuncios...`);
-  const tamanoLote = 5; // Reducimos el lote a 5 para no saturar
+  console.log(`⚡ Generando resúmenes automáticos optimizados para ${anuncios.length} anuncios...`);
 
-  for (let i = 0; i < anuncios.length; i += tamanoLote) {
-    const lote = anuncios.slice(i, i + tamanoLote);
-    const listaParaIA = lote.map((a, index) => ({ id: index, texto: a.titulo }));
+  anuncios.forEach(a => {
+    const tituloLower = (a.titulo || "").toLowerCase();
+    let explicacion = "Documento oficial publicado en el boletín correspondiente a esta sección.";
 
-    const prompt = `
-      Eres un asesor experto. Explica brevemente de qué trata este anuncio oficial para que un profesional entienda su propósito real:
-      ${JSON.stringify(listaParaIA)}
-      
-      Devuelve la respuesta EXCLUSIVAMENTE en formato de array JSON válido, sin bloques de código, con esta estructura:
-      [{"id": 0, "resumen": "Explicación clara del propósito"}]
-    `;
-
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: prompt,
-      });
-
-      let textoRespuesta = response.text.trim();
-      if (textoRespuesta.startsWith("```json")) textoRespuesta = textoRespuesta.replace("```json", "");
-      if (textoRespuesta.startsWith("```")) textoRespuesta = textoRespuesta.replace("```", "");
-      if (textoRespuesta.endsWith("```")) textoRespuesta = textoRespuesta.slice(0, -3);
-      textoRespuesta = textoRespuesta.trim();
-
-      const jsonRespuetas = JSON.parse(textoRespuesta);
-      
-      jsonRespuetas.forEach(item => {
-        if (lote[item.id] && item.resumen) {
-          lote[item.id].resumenIA = item.resumen.trim();
-        }
-      });
-    } catch (err) {
-      console.warn(`⚠️ Aviso en lote ${i}:`, err.message);
-      lote.forEach(a => {
-        a.resumenIA = a.titulo;
-      });
+    if (tituloLower.includes("nombr") || tituloLower.includes("cese") || tituloLower.includes("personal")) {
+      explicacion = "Nombramiento, cese o modificación de personal en la administración pública.";
+    } else if (tituloLower.includes("subvenc") || tituloLower.includes("ayuda") || tituloLower.includes("beneficiario")) {
+      explicacion = "Convocatoria o resolución de ayudas, subvenciones o fondos públicos.";
+    } else if (tituloLower.includes("oposic") || tituloLower.includes("prueba selectiva") || tituloLower.includes("empleo")) {
+      explicacion = "Convocatoria de empleo público, bases de selección o listas de aspirantes.";
+    } else if (tituloLower.includes("corrección") || tituloLower.includes("error")) {
+      explicacion = "Corrección de errores u erratas detectadas en publicaciones anteriores.";
+    } else if (tituloLower.includes("información pública") || tituloLower.includes("somete")) {
+      explicacion = "Apertura de periodo de información pública para alegaciones o trámites.";
     }
 
-    // Pausa de 15 segundos obligatoria entre lotes para respetar el límite gratuito (Rate Limit)
-    if (i + tamanoLote < anuncios.length) {
-      console.log("⏳ Pausa de 15s para evitar el límite de la API...");
-      await new Promise(resolve => setTimeout(resolve, 15000));
-    }
-  }
+    a.resumenIA = explicacion;
+  });
 
   return anuncios;
 }
