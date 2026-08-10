@@ -113,51 +113,87 @@ function obtenerSectoresUsuario(usuario) {
         .filter(Boolean);
 }
 
+import pdfParse from 'pdf-parse';
+
 // ============================================================
-// 6. ANALIZAR ANUNCIO CON GEMINI (MODO TEXTO OPTIMIZADO)
+// 6. ANALIZAR PDF REAL MEDIANTE EXTRACCIÓN DE TEXTO Y GEMINI
 // ============================================================
 
 async function analizarPDFConGemini(anuncio) {
 
     const titulo = String(anuncio.titulo || "").trim();
+    const urlPdf = String(anuncio.url_pdf || "").trim();
     const categoria = String(
         anuncio.categoria ||
         anuncio.sector ||
         ""
     ).trim();
-    const urlPdf = String(anuncio.url_pdf || "").trim();
 
-    if (!titulo) {
+    if (!urlPdf) {
         return {
-            resumen: "No se ha podido analizar el documento oficial porque no dispone de título.",
+            resumen: "No se ha podido analizar el documento oficial porque no dispone de URL PDF.",
             impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: ""
         };
     }
 
     console.log("🤖 ------------------------------------------------");
-    console.log("🤖 Analizando anuncio con Gemini (Modo Texto Oficial)");
-    console.log(`🤖 Título: ${titulo}`);
-    console.log(`🤖 Categoría: ${categoria}`);
+    console.log(`🤖 Analizando contenido real del PDF: ${titulo}`);
 
     try {
+        const respuestaPDF = await fetch(urlPdf, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (compatible; BoletinHoy/1.0; +https://boletinhoy.es)"
+            },
+            signal: AbortSignal.timeout(30000)
+        });
+
+        if (!respuestaPDF.ok) {
+            throw new Error(`El PDF respondió HTTP ${respuestaPDF.status}`);
+        }
+
+        const arrayBuffer = await respuestaPDF.arrayBuffer();
+        const bufferPDF = Buffer.from(arrayBuffer);
+
+        if (bufferPDF.length < 1000) {
+            throw new Error("El archivo descargado es demasiado pequeño.");
+        }
+
+        // Extraemos el texto plano del PDF con pdf-parse
+        const datosPdf = await pdfParse(bufferPDF);
+        let textoPdf = datosPdf.text ? datosPdf.text.trim() : "";
+
+        if (textoPdf.length < 50) {
+            textoPdf = titulo; // Si el PDF fuera una imagen escaneada sin texto incrustado, usamos el título como respaldo
+        }
+
+        // Limitamos el texto a los primeros 12,000 caracteres para garantizar velocidad y evitar límites de tokens
+        const textoAcotado = textoPdf.substring(0, 12000);
+
         const prompt = `
-Eres el analista profesional de BoletínHoy.
-A partir del título oficial y la categoría de la publicación del boletín oficial que se indica a continuación, redacta un resumen ejecutivo profesional, claro y útil.
+Eres el analista experto y redactor jefe de BoletínHoy. 
+Tu trabajo es leer el texto extraído de un documento oficial (BOJA o BOE) y redactar un **resumen ejecutivo de alto valor real** para el usuario.
 
-DATOS DE LA PUBLICACIÓN:
-Título oficial: ${titulo}
-Sector / Categoría: ${categoria}
+DATOS DEL DOCUMENTO:
+- Título oficial: ${titulo}
+- Sector: ${categoria}
 
-REGLAS IMPORTANTES:
-- No repitas el título de forma obvia.
-- Interpreta qué se está aprobando, convocando, notificando o regulando y a quién afecta en la práctica.
-- Si el título menciona becas, ayudas, oposiciones, licitaciones o normativas, explícalo de forma divulgativa y profesional.
-- No inventes plazos, importes o requisitos que no se deriven directamente del título.
-- Extensión aproximada: Entre 60 y 140 palabras.
+TEXTO ÍNTEGRO EXTRAÍDO DEL PDF OFICIAL:
+"""
+${textoAcotado}
+"""
 
-RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO con esta estructura exactísima:
+INSTRUCCIONES CLAVE:
+- Explica de forma clara, directa y profesional de qué trata exactamente el documento.
+- Si es una subvención o ayuda: indica beneficiarios, cuantías, plazos de solicitud u objetivos si figuran en el texto.
+- Si es una oposición o empleo público: detalla plazas, requisitos clave o plazos.
+- Si es una licitación: explica el objeto del contrato, importe o entidad contratante.
+- Si es una notificación o acto administrativo: detalla qué se está notificando y qué implicaciones tiene.
+- NUNCA digas frases vacías como "es una publicación oficial" o "consulte el documento". Ve directos a la información útil.
+- Extensión: Entre 90 y 160 palabras.
+
+RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO con esta estructura:
 {
-    "resumen": "Resumen ejecutivo profesional y concreto basado en el contenido del título oficial."
+    "resumen": "Aquí tu resumen ejecutivo redactado con rigor, datos concretos y utilidad práctica."
 }
 `;
 
@@ -193,15 +229,17 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO con esta estructura exactísi
             resultado = JSON.parse(limpio);
         }
 
+        console.log(`✅ Resumen generado con éxito para: ${titulo.substring(0, 40)}...`);
+
         return {
             resumen: String(resultado.resumen || "").trim(),
             impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: ""
         };
 
     } catch (error) {
-        console.error(`❌ Error analizando con Gemini: ${error.message}`);
+        console.error(`❌ Error analizando el PDF: ${error.message}`);
         return {
-            resumen: `Publicación oficial enmarcada en el sector de ${categoria}. Consulte el documento original para conocer todos los detalles y el texto íntegro.`,
+            resumen: `Publicación oficial correspondiente a ${categoria}. ${titulo}. Consulte el enlace oficial para revisar el expediente completo.`,
             impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: ""
         };
     }
