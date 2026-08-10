@@ -16,7 +16,9 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
 const resend = new Resend(RESEND_API_KEY);
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+const ai = new GoogleGenAI({
+    apiKey: GEMINI_API_KEY
+});
 
 
 // ============================================================
@@ -40,9 +42,11 @@ async function supabaseRequest(endpoint, opciones = {}) {
     );
 
     if (!res.ok) {
+
         throw new Error(
             `Supabase error: ${res.status} - ${await res.text()}`
         );
+
     }
 
     const text = await res.text();
@@ -53,8 +57,6 @@ async function supabaseRequest(endpoint, opciones = {}) {
 
 // ============================================================
 // 3. NORMALIZAR TEXTO
-//    Permite comparar categorías aunque haya diferencias
-//    de mayúsculas, espacios o tildes.
 // ============================================================
 
 function normalizarTexto(texto) {
@@ -68,25 +70,45 @@ function normalizarTexto(texto) {
 
 
 // ============================================================
-// 4. NORMALIZAR SECTORES DEL USUARIO
+// 4. ESCAPAR HTML
+// ============================================================
+
+function escaparHTML(texto) {
+
+    return String(texto || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+
+// ============================================================
+// 5. NORMALIZAR SECTORES DEL USUARIO
 // ============================================================
 
 function obtenerSectoresUsuario(usuario) {
 
     let sectores = usuario.sectores_suscritos || [];
 
-    // Si Supabase devuelve un JSON como texto
     if (typeof sectores === "string") {
 
         try {
+
             sectores = JSON.parse(sectores);
+
         } catch (error) {
+
             sectores = [sectores];
+
         }
     }
 
     if (!Array.isArray(sectores)) {
+
         sectores = [sectores];
+
     }
 
     return sectores
@@ -97,113 +119,582 @@ function obtenerSectoresUsuario(usuario) {
 
 
 // ============================================================
-// 5. ENRIQUECIMIENTO DE TÍTULOS
+// 6. ANALIZAR PDF REAL CON GEMINI
+// ============================================================
+
+async function analizarPDFConGemini(anuncio) {
+
+    const titulo = String(anuncio.titulo || "").trim();
+    const urlPdf = String(anuncio.url_pdf || "").trim();
+    const categoria = String(
+        anuncio.categoria ||
+        anuncio.sector ||
+        ""
+    ).trim();
+
+    if (!urlPdf) {
+
+        console.log(
+            `⚠️ ${titulo} no tiene URL PDF. No se puede analizar el documento.`
+        );
+
+        return {
+            resumen: "No se ha podido analizar el documento oficial porque no dispone de una URL PDF.",
+            impacto: "Revisa el documento original para conocer su alcance.",
+            plazo: "",
+            accion: ""
+        };
+    }
+
+    console.log("🤖 ------------------------------------------------");
+    console.log(`🤖 Analizando documento con Gemini`);
+    console.log(`🤖 Título: ${titulo}`);
+    console.log(`🤖 Categoría: ${categoria}`);
+    console.log(`🤖 PDF: ${urlPdf}`);
+
+    try {
+
+        // --------------------------------------------------------
+        // 6.1 DESCARGAR PDF OFICIAL
+        // --------------------------------------------------------
+
+        const respuestaPDF = await fetch(urlPdf, {
+            headers: {
+                "User-Agent":
+                    "Mozilla/5.0 (compatible; BoletinHoy/1.0; +https://boletinhoy.es)"
+            },
+
+            signal: AbortSignal.timeout(30000)
+        });
+
+        if (!respuestaPDF.ok) {
+
+            throw new Error(
+                `El PDF respondió HTTP ${respuestaPDF.status}`
+            );
+
+        }
+
+        const arrayBuffer = await respuestaPDF.arrayBuffer();
+
+        const bufferPDF = Buffer.from(arrayBuffer);
+
+        console.log(
+            `📄 PDF descargado: ${Math.round(bufferPDF.length / 1024)} KB`
+        );
+
+        if (bufferPDF.length < 1000) {
+
+            throw new Error(
+                "El archivo descargado parece demasiado pequeño para ser un PDF válido."
+            );
+
+        }
+
+
+        // --------------------------------------------------------
+        // 6.2 CONVERTIR PDF A BASE64
+        // --------------------------------------------------------
+
+        const pdfBase64 = bufferPDF.toString("base64");
+
+
+        // --------------------------------------------------------
+        // 6.3 PROMPT DE ANÁLISIS
+        // --------------------------------------------------------
+
+        const prompt = `
+Eres el analista profesional de BoletínHoy.
+
+Tu trabajo es analizar un documento oficial publicado por el BOJA o el BOE y explicar SU CONTENIDO REAL.
+
+NO hagas un resumen genérico.
+NO repitas simplemente el título.
+NO digas cosas obvias como "es importante conocer los plazos".
+NO inventes información.
+NO supongas requisitos, cantidades, fechas o beneficiarios que no aparezcan en el documento.
+Si un dato no aparece claramente, no lo inventes.
+
+Analiza el documento completo y extrae la información que realmente pueda ser útil para una persona o empresa interesada en el sector indicado.
+
+DATOS DEL REGISTRO:
+
+Título:
+${titulo}
+
+Categoría/sector:
+${categoria}
+
+URL oficial:
+${urlPdf}
+
+
+QUIERO QUE ANALICES ESPECIALMENTE:
+
+1. QUÉ SE PUBLICA
+Explica de forma clara qué establece realmente el documento.
+
+2. A QUIÉN AFECTA
+Identifica quién puede verse afectado:
+- empresas
+- autónomos
+- trabajadores
+- opositores
+- administraciones
+- asociaciones
+- entidades
+- ciudadanos
+- u otros colectivos.
+
+3. QUÉ CAMBIA O QUÉ OPORTUNIDAD EXISTE
+Explica la consecuencia práctica de la publicación.
+
+4. PLAZOS Y FECHAS
+Si existe un plazo de solicitud, alegaciones, presentación, entrada en vigor, etc., indícalo.
+Si aparece una fecha concreta, indícala.
+Si no existe un plazo relevante, déjalo vacío.
+
+5. REQUISITOS
+Extrae los requisitos realmente relevantes para acceder, participar, cumplir o beneficiarse de lo publicado.
+
+6. IMPORTES / AYUDAS / CONDICIONES ECONÓMICAS
+Si existen cantidades, porcentajes, límites, cuantías o condiciones económicas, indícalos.
+Si no existen, no inventes nada.
+
+7. QUÉ DEBERÍA HACER EL LECTOR
+Da una recomendación práctica basada EXCLUSIVAMENTE en lo que establece el documento.
+
+8. VALOR PROFESIONAL
+Explica por qué esta publicación puede ser relevante para alguien suscrito al sector "${categoria}".
+
+IMPORTANTE:
+
+- Prioriza la información accionable.
+- No hagas un resumen jurídico interminable.
+- No copies párrafos completos del documento.
+- No uses lenguaje burocrático innecesario.
+- No digas simplemente "se publica una resolución".
+- Explica qué significa realmente esa resolución.
+- Si se trata de una corrección de errores, explica QUÉ se corrige.
+- Si se trata de una convocatoria, explica QUIÉN puede participar, QUÉ se puede conseguir y CUÁNDO.
+- Si se trata de una modificación normativa, explica QUÉ cambia respecto a la situación anterior.
+- Si se trata de un nombramiento o cese, identifica a la persona y el cargo.
+- Si se trata de información pública, explica qué procedimiento se abre y qué puede hacer el interesado.
+- Si se trata de contratación pública, identifica el objeto y la oportunidad para empresas.
+- Si se trata de una disposición sin una acción directa para el ciudadano o empresa, explícalo igualmente de forma concreta.
+
+RESPONDE EXCLUSIVAMENTE CON JSON VÁLIDO.
+
+Formato obligatorio:
+
+{
+  "resumen": "Explicación concreta de qué se publica y qué establece.",
+  "impacto": "Explicación práctica de a quién afecta y por qué importa.",
+  "plazo": "Fechas o plazos relevantes. Vacío si no existen.",
+  "requisitos": "Requisitos relevantes. Vacío si no existen.",
+  "accion": "Qué debería hacer el lector si le afecta.",
+  "valor_profesional": "Por qué es relevante para el sector."
+}
+`;
+
+
+        // --------------------------------------------------------
+        // 6.4 LLAMADA REAL A GEMINI
+        // --------------------------------------------------------
+
+        const respuestaGemini =
+            await ai.models.generateContent({
+
+                model: "gemini-2.5-flash",
+
+                contents: [
+
+                    {
+                        role: "user",
+
+                        parts: [
+
+                            {
+                                inlineData: {
+                                    mimeType: "application/pdf",
+                                    data: pdfBase64
+                                }
+                            },
+
+                            {
+                                text: prompt
+                            }
+
+                        ]
+                    }
+
+                ],
+
+                config: {
+
+                    temperature: 0.2,
+
+                    responseMimeType: "application/json"
+
+                }
+
+            });
+
+
+        const textoRespuesta =
+            respuestaGemini.text;
+
+        console.log(
+            "🤖 Respuesta de Gemini recibida."
+        );
+
+
+        if (!textoRespuesta) {
+
+            throw new Error(
+                "Gemini no devolvió contenido."
+            );
+
+        }
+
+
+        // --------------------------------------------------------
+        // 6.5 PARSEAR JSON
+        // --------------------------------------------------------
+
+        let resultado;
+
+        try {
+
+            resultado = JSON.parse(textoRespuesta);
+
+        } catch (jsonError) {
+
+            console.log(
+                "⚠️ Gemini no devolvió JSON limpio. Intentando limpiar respuesta..."
+            );
+
+            const limpio =
+                textoRespuesta
+                    .replace(/^```json/i, "")
+                    .replace(/^```/i, "")
+                    .replace(/```$/i, "")
+                    .trim();
+
+            try {
+
+                resultado = JSON.parse(limpio);
+
+            } catch (segundoError) {
+
+                throw new Error(
+                    "No se pudo interpretar la respuesta JSON de Gemini."
+                );
+
+            }
+        }
+
+
+        // --------------------------------------------------------
+        // 6.6 VALIDAR RESULTADO
+        // --------------------------------------------------------
+
+        resultado = {
+
+            resumen:
+                String(resultado.resumen || "").trim(),
+
+            impacto:
+                String(resultado.impacto || "").trim(),
+
+            plazo:
+                String(resultado.plazo || "").trim(),
+
+            requisitos:
+                String(resultado.requisitos || "").trim(),
+
+            accion:
+                String(resultado.accion || "").trim(),
+
+            valor_profesional:
+                String(resultado.valor_profesional || "").trim()
+
+        };
+
+
+        if (!resultado.resumen) {
+
+            throw new Error(
+                "Gemini no proporcionó un resumen válido."
+            );
+
+        }
+
+
+        console.log(
+            `🤖 Análisis completado: ${titulo}`
+        );
+
+        console.log(
+            `🤖 Resumen: ${resultado.resumen}`
+        );
+
+
+        return resultado;
+
+
+    } catch (error) {
+
+        console.error(
+            `❌ Error analizando PDF con Gemini: ${error.message}`
+        );
+
+
+        // --------------------------------------------------------
+        // FALLBACK
+        // --------------------------------------------------------
+
+        return {
+
+            resumen:
+                "No se ha podido realizar el análisis automático del documento oficial.",
+
+            impacto:
+                "Consulta el documento oficial para conocer su contenido y alcance.",
+
+            plazo:
+                "",
+
+            requisitos:
+                "",
+
+            accion:
+                "Revisa el PDF oficial antes de tomar cualquier decisión.",
+
+            valor_profesional:
+                ""
+
+        };
+    }
+}
+
+
+// ============================================================
+// 7. ENRIQUECER ANUNCIOS CON ANÁLISIS REAL
 // ============================================================
 
 async function enriquecerTitulosConIA(anuncios) {
 
     if (!anuncios || anuncios.length === 0) {
+
         return anuncios;
+
     }
 
     console.log(
-        `⚡ Generando resúmenes de alto valor profesional para ${anuncios.length} anuncios...`
+        `🤖 Analizando ${anuncios.length} anuncios mediante Gemini...`
     );
 
-    anuncios.forEach(a => {
 
-        let titulo = (a.titulo || "").trim();
+    /*
+     * Evitamos analizar dos veces el mismo PDF
+     * durante una misma ejecución.
+     */
 
-        // Limpiamos fragmentos huérfanos al inicio
+    const analisisPorURL = new Map();
+
+
+    for (const anuncio of anuncios) {
+
+        let titulo =
+            String(anuncio.titulo || "").trim();
+
+
+        /*
+         * Limpiar pequeños fragmentos accidentales
+         * del principio del título.
+         */
+
         titulo = titulo.replace(
             /^(de|y|la|el|en|por|a)\s+/i,
             ""
         );
 
-        a.titulo = titulo;
 
-        const tLower = titulo.toLowerCase();
+        anuncio.titulo = titulo;
 
-        let beneficio =
-            "Documento oficial de relevancia para la gestión y normativa del sector.";
 
-        if (
-            tLower.includes("nombr") ||
-            tLower.includes("cese") ||
-            tLower.includes("personal")
-        ) {
+        const url =
+            String(anuncio.url_pdf || "").trim();
 
-            beneficio =
-                "Modificación de personal o altos cargos. Esencial para conocer interlocutores y cambios en la estructura directiva.";
 
-        } else if (
-            tLower.includes("subvenc") ||
-            tLower.includes("ayuda") ||
-            tLower.includes("bases reguladoras")
-        ) {
+        if (!url) {
 
-            beneficio =
-                "Nueva línea de financiación o fondos públicos. Clave para evaluar plazos, requisitos y solicitud de incentivos.";
+            anuncio.resumenIA =
+                "No se ha encontrado el PDF oficial asociado a esta publicación.";
 
-        } else if (
-            tLower.includes("oposic") ||
-            tLower.includes("empleo") ||
-            tLower.includes("aspirantes") ||
-            tLower.includes("plazas")
-        ) {
+            anuncio.analisisIA = {
 
-            beneficio =
-                "Convocatoria de empleo público o listados de selección. Vital para aspirantes y seguimiento de procesos selectivos.";
+                resumen:
+                    "No se ha encontrado el PDF oficial asociado a esta publicación.",
 
-        } else if (
-            tLower.includes("corrección de errores") ||
-            tLower.includes("erratas")
-        ) {
+                impacto:
+                    "",
 
-            beneficio =
-                "Subsanación de errores en disposiciones anteriores. Importante para asegurar la seguridad jurídica de los datos correctos.";
+                plazo:
+                    "",
 
-        } else if (
-            tLower.includes("información pública") ||
-            tLower.includes("somete") ||
-            tLower.includes("autorización ambiental")
-        ) {
+                requisitos:
+                    "",
 
-            beneficio =
-                "Apertura de plazo para alegaciones ciudadanas o empresariales. Oportunidad clave para revisar proyectos o presentar oposiciones.";
+                accion:
+                    "",
 
-        } else if (
-            tLower.includes("contrat") ||
-            tLower.includes("licitacion") ||
-            tLower.includes("adjudicacion")
-        ) {
+                valor_profesional:
+                    ""
 
-            beneficio =
-                "Expediente de contratación pública. Interesante para empresas y autónomos que buscan licitar con la administración.";
+            };
+
+            continue;
+
         }
 
-        a.resumenIA = beneficio;
-    });
+
+        /*
+         * Si ya hemos analizado esta misma URL
+         * reutilizamos el resultado.
+         */
+
+        if (analisisPorURL.has(url)) {
+
+            const analisis =
+                analisisPorURL.get(url);
+
+            anuncio.analisisIA = analisis;
+
+            anuncio.resumenIA =
+                construirResumenVisible(analisis);
+
+            continue;
+
+        }
+
+
+        const analisis =
+            await analizarPDFConGemini(anuncio);
+
+
+        analisisPorURL.set(
+            url,
+            analisis
+        );
+
+
+        anuncio.analisisIA =
+            analisis;
+
+
+        anuncio.resumenIA =
+            construirResumenVisible(analisis);
+
+
+        /*
+         * Pequeña pausa para evitar lanzar
+         * demasiadas peticiones seguidas a Gemini.
+         */
+
+        await new Promise(
+            resolve => setTimeout(resolve, 500)
+        );
+    }
+
 
     return anuncios;
 }
 
 
 // ============================================================
-// 6. PROCESO GLOBAL BOJA + BOE
+// 8. CONSTRUIR TEXTO VISIBLE DEL ANÁLISIS
+// ============================================================
+
+function construirResumenVisible(analisis) {
+
+    if (!analisis) {
+
+        return "";
+
+    }
+
+
+    const partes = [];
+
+
+    if (analisis.resumen) {
+
+        partes.push(
+            analisis.resumen
+        );
+
+    }
+
+
+    if (analisis.impacto) {
+
+        partes.push(
+            analisis.impacto
+        );
+
+    }
+
+
+    if (analisis.plazo) {
+
+        partes.push(
+            `Plazo: ${analisis.plazo}`
+        );
+
+    }
+
+
+    if (analisis.accion) {
+
+        partes.push(
+            `Qué hacer: ${analisis.accion}`
+        );
+
+    }
+
+
+    return partes.join(" ");
+}
+
+
+// ============================================================
+// 9. PROCESO GLOBAL BOJA + BOE
 // ============================================================
 
 async function iniciarProcesoGlobal() {
 
-    console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
+    console.log(
+        "🚀 Iniciando proceso unificado BOJA y BOE..."
+    );
+
+
+    // ========================================================
+    // BOJA
+    // ========================================================
 
     try {
 
-        console.log("📡 Ejecutando capturador BOJA...");
+        console.log(
+            "📡 Ejecutando capturador BOJA..."
+        );
 
         await ejecutarBOJA();
 
-        console.log("✅ Capturador BOJA finalizado.");
+        console.log(
+            "✅ Capturador BOJA finalizado."
+        );
 
     } catch (err) {
 
@@ -211,16 +702,25 @@ async function iniciarProcesoGlobal() {
             "❌ Error en BOJA:",
             err.message
         );
+
     }
 
 
+    // ========================================================
+    // BOE
+    // ========================================================
+
     try {
 
-        console.log("📡 Ejecutando capturador BOE...");
+        console.log(
+            "📡 Ejecutando capturador BOE..."
+        );
 
         await ejecutarBOE();
 
-        console.log("✅ Capturador BOE finalizado.");
+        console.log(
+            "✅ Capturador BOE finalizado."
+        );
 
     } catch (err) {
 
@@ -228,16 +728,18 @@ async function iniciarProcesoGlobal() {
             "❌ Error en BOE:",
             err.message
         );
+
     }
 
 
     // ========================================================
-    // 7. OBTENER ANUNCIOS PENDIENTES
+    // 10. OBTENER ANUNCIOS PENDIENTES
     // ========================================================
 
     console.log(
         "📥 Consultando anuncios pendientes en Supabase..."
     );
+
 
     const anunciosPendientes =
         await supabaseRequest(
@@ -255,6 +757,7 @@ async function iniciarProcesoGlobal() {
         );
 
         return;
+
     }
 
 
@@ -264,7 +767,7 @@ async function iniciarProcesoGlobal() {
 
 
     // ========================================================
-    // 8. PREPARAR ANUNCIOS
+    // 11. ANALIZAR DOCUMENTOS
     // ========================================================
 
     const anunciosProcesados =
@@ -272,6 +775,10 @@ async function iniciarProcesoGlobal() {
             anunciosPendientes
         );
 
+
+    // ========================================================
+    // 12. SEPARAR BOJA / BOE
+    // ========================================================
 
     const documentosBoja =
         anunciosProcesados.filter(
@@ -298,12 +805,13 @@ async function iniciarProcesoGlobal() {
 
 
     // ========================================================
-    // 9. OBTENER USUARIOS ACTIVOS
+    // 13. OBTENER USUARIOS ACTIVOS
     // ========================================================
 
     console.log(
         "👥 Consultando usuarios suscritos..."
     );
+
 
     const usuarios =
         await supabaseRequest(
@@ -325,6 +833,7 @@ async function iniciarProcesoGlobal() {
         );
 
         return;
+
     }
 
 
@@ -334,31 +843,23 @@ async function iniciarProcesoGlobal() {
 
 
     // ========================================================
-    // 10. CONTROL DE ENVÍOS
+    // 14. CONTROL DE ENVÍOS
     // ========================================================
 
-    /*
-     * Guardamos qué anuncios han sido enviados correctamente.
-     *
-     * IMPORTANTE:
-     * No marcamos un anuncio como enviado simplemente porque
-     * haya sido procesado.
-     */
+    const anunciosConEnvioCorrecto =
+        new Set();
 
-    const anunciosConEnvioCorrecto = new Set();
 
-    /*
-     * También guardamos cuántos usuarios deberían recibir
-     * cada anuncio y cuántos lo han recibido correctamente.
-     */
+    const destinatariosPorAnuncio =
+        new Map();
 
-    const destinatariosPorAnuncio = new Map();
 
-    const enviosCorrectosPorAnuncio = new Map();
+    const enviosCorrectosPorAnuncio =
+        new Map();
 
 
     // ========================================================
-    // 11. RECORRER USUARIOS
+    // 15. RECORRER USUARIOS
     // ========================================================
 
     for (const usuario of usuarios) {
@@ -383,15 +884,18 @@ async function iniciarProcesoGlobal() {
             );
 
             continue;
+
         }
 
 
         const sectoresNormalizados =
-            sectoresUsuario.map(normalizarTexto);
+            sectoresUsuario.map(
+                normalizarTexto
+            );
 
 
         // ====================================================
-        // 12. FILTRAR BOJA PARA ESTE USUARIO
+        // 16. FILTRAR BOJA
         // ====================================================
 
         const relevantesBoja =
@@ -402,17 +906,20 @@ async function iniciarProcesoGlobal() {
                     doc.sector ||
                     "";
 
+
                 const categoriaNormalizada =
                     normalizarTexto(categoria);
+
 
                 return sectoresNormalizados.includes(
                     categoriaNormalizada
                 );
+
             });
 
 
         // ====================================================
-        // 13. FILTRAR BOE PARA ESTE USUARIO
+        // 17. FILTRAR BOE
         // ====================================================
 
         const relevantesBoe =
@@ -423,12 +930,15 @@ async function iniciarProcesoGlobal() {
                     doc.sector ||
                     "";
 
+
                 const categoriaNormalizada =
                     normalizarTexto(categoria);
+
 
                 return sectoresNormalizados.includes(
                     categoriaNormalizada
                 );
+
             });
 
 
@@ -444,11 +954,12 @@ async function iniciarProcesoGlobal() {
             );
 
             continue;
+
         }
 
 
         // ====================================================
-        // 14. REGISTRAR DESTINATARIOS POR ANUNCIO
+        // 18. REGISTRAR DESTINATARIOS POR ANUNCIO
         // ====================================================
 
         [
@@ -457,8 +968,11 @@ async function iniciarProcesoGlobal() {
         ].forEach(anuncio => {
 
             if (!anuncio.id) {
+
                 return;
+
             }
+
 
             if (
                 !destinatariosPorAnuncio.has(
@@ -470,11 +984,14 @@ async function iniciarProcesoGlobal() {
                     anuncio.id,
                     new Set()
                 );
+
             }
+
 
             destinatariosPorAnuncio
                 .get(anuncio.id)
                 .add(usuario.email);
+
         });
 
 
@@ -488,13 +1005,20 @@ async function iniciarProcesoGlobal() {
 
 
         // ====================================================
-        // 15. CONTENIDO BOJA
+        // 19. CONTENIDO BOJA
         // ====================================================
 
         const htmlBojaContent =
             relevantesBoja.length > 0
 
-                ? relevantesBoja.map(r => `
+                ? relevantesBoja.map(r => {
+
+                    const analisis =
+                        r.analisisIA || {};
+
+
+                    return `
+
                     <div style="
                         background: #ffffff;
                         border: 1px solid #e2e8f0;
@@ -513,8 +1037,13 @@ async function iniciarProcesoGlobal() {
                             border-radius: 4px;
                             text-transform: uppercase;
                         ">
-                            ${r.categoria || r.sector || "BOJA"}
+                            ${escaparHTML(
+                                r.categoria ||
+                                r.sector ||
+                                "BOJA"
+                            )}
                         </span>
+
 
                         <h4 style="
                             font-size: 15px;
@@ -522,50 +1051,147 @@ async function iniciarProcesoGlobal() {
                             margin: 10px 0;
                             line-height: 1.4;
                         ">
-                            ${r.titulo}
+                            ${escaparHTML(r.titulo)}
                         </h4>
 
+
                         <div style="
-                            background-color: #f8f9fa;
+                            background-color: #f8fafc;
                             border-left: 4px solid #10b981;
-                            padding: 10px 15px;
+                            padding: 12px 15px;
                             margin-top: 10px;
                             border-radius: 4px;
                         ">
 
                             <strong style="
+                                display:block;
                                 color: #065f46;
                                 font-size: 13px;
+                                margin-bottom: 6px;
                             ">
-                                💡 Impacto Profesional:
+                                💡 Análisis profesional
                             </strong>
 
-                            <span style="
-                                color: #374151;
-                                font-size: 13px;
-                            ">
-                                ${r.resumenIA || r.titulo}
-                            </span>
+
+                            ${
+                                analisis.resumen
+                                    ? `
+                                    <div style="
+                                        color:#374151;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                        margin-bottom:7px;
+                                    ">
+                                        ${escaparHTML(
+                                            analisis.resumen
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
+
+
+                            ${
+                                analisis.impacto
+                                    ? `
+                                    <div style="
+                                        color:#374151;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                        margin-bottom:7px;
+                                    ">
+                                        <strong>Impacto:</strong>
+                                        ${escaparHTML(
+                                            analisis.impacto
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
+
+
+                            ${
+                                analisis.plazo
+                                    ? `
+                                    <div style="
+                                        color:#374151;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                        margin-bottom:7px;
+                                    ">
+                                        <strong>Plazo:</strong>
+                                        ${escaparHTML(
+                                            analisis.plazo
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
+
+
+                            ${
+                                analisis.requisitos
+                                    ? `
+                                    <div style="
+                                        color:#374151;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                        margin-bottom:7px;
+                                    ">
+                                        <strong>Requisitos:</strong>
+                                        ${escaparHTML(
+                                            analisis.requisitos
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
+
+
+                            ${
+                                analisis.accion
+                                    ? `
+                                    <div style="
+                                        color:#374151;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                    ">
+                                        <strong>Qué hacer:</strong>
+                                        ${escaparHTML(
+                                            analisis.accion
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
 
                         </div>
 
+
                         <a
-                            href="${r.url_pdf}"
+                            href="${escaparHTML(r.url_pdf)}"
                             target="_blank"
                             style="
-                                font-size: 12px;
-                                color: #047857;
-                                font-weight: bold;
-                                text-decoration: none;
+                                display:inline-block;
+                                margin-top:12px;
+                                font-size:12px;
+                                color:#047857;
+                                font-weight:bold;
+                                text-decoration:none;
                             "
                         >
                             📄 Ver PDF Oficial &rarr;
                         </a>
 
                     </div>
-                `).join("")
 
-                : `<p style="
+                    `;
+
+                }).join("")
+
+                : `
+
+                <p style="
                     font-size: 14px;
                     color: #64748b;
                     font-style: italic;
@@ -575,17 +1201,26 @@ async function iniciarProcesoGlobal() {
                     border: 1px dashed #cbd5e1;
                 ">
                     No hay ningún anuncio en esta sección.
-                </p>`;
+                </p>
+
+                `;
 
 
         // ====================================================
-        // 16. CONTENIDO BOE
+        // 20. CONTENIDO BOE
         // ====================================================
 
         const htmlBoeContent =
             relevantesBoe.length > 0
 
-                ? relevantesBoe.map(r => `
+                ? relevantesBoe.map(r => {
+
+                    const analisis =
+                        r.analisisIA || {};
+
+
+                    return `
+
                     <div style="
                         background: #ffffff;
                         border: 1px solid #e2e8f0;
@@ -604,8 +1239,13 @@ async function iniciarProcesoGlobal() {
                             border-radius: 4px;
                             text-transform: uppercase;
                         ">
-                            ${r.categoria || r.sector || "BOE"}
+                            ${escaparHTML(
+                                r.categoria ||
+                                r.sector ||
+                                "BOE"
+                            )}
                         </span>
+
 
                         <h4 style="
                             font-size: 15px;
@@ -613,50 +1253,146 @@ async function iniciarProcesoGlobal() {
                             margin: 10px 0;
                             line-height: 1.4;
                         ">
-                            ${r.titulo}
+                            ${escaparHTML(r.titulo)}
                         </h4>
+
 
                         <div style="
                             background: #f8fafc;
                             border: 1px solid #e2e8f0;
-                            padding: 10px 12px;
+                            padding: 12px 15px;
                             margin-bottom: 12px;
                             border-radius: 4px;
                         ">
 
                             <strong style="
+                                display:block;
                                 color: #1e40af;
                                 font-size: 13px;
+                                margin-bottom: 6px;
                             ">
-                                💡 Impacto Profesional:
+                                💡 Análisis profesional
                             </strong>
 
-                            <span style="
-                                color: #334155;
-                                font-size: 13px;
-                            ">
-                                ${r.resumenIA || r.titulo}
-                            </span>
+
+                            ${
+                                analisis.resumen
+                                    ? `
+                                    <div style="
+                                        color:#334155;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                        margin-bottom:7px;
+                                    ">
+                                        ${escaparHTML(
+                                            analisis.resumen
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
+
+
+                            ${
+                                analisis.impacto
+                                    ? `
+                                    <div style="
+                                        color:#334155;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                        margin-bottom:7px;
+                                    ">
+                                        <strong>Impacto:</strong>
+                                        ${escaparHTML(
+                                            analisis.impacto
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
+
+
+                            ${
+                                analisis.plazo
+                                    ? `
+                                    <div style="
+                                        color:#334155;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                        margin-bottom:7px;
+                                    ">
+                                        <strong>Plazo:</strong>
+                                        ${escaparHTML(
+                                            analisis.plazo
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
+
+
+                            ${
+                                analisis.requisitos
+                                    ? `
+                                    <div style="
+                                        color:#334155;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                        margin-bottom:7px;
+                                    ">
+                                        <strong>Requisitos:</strong>
+                                        ${escaparHTML(
+                                            analisis.requisitos
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
+
+
+                            ${
+                                analisis.accion
+                                    ? `
+                                    <div style="
+                                        color:#334155;
+                                        font-size:13px;
+                                        line-height:1.55;
+                                    ">
+                                        <strong>Qué hacer:</strong>
+                                        ${escaparHTML(
+                                            analisis.accion
+                                        )}
+                                    </div>
+                                    `
+                                    : ""
+                            }
 
                         </div>
 
+
                         <a
-                            href="${r.url_pdf}"
+                            href="${escaparHTML(r.url_pdf)}"
                             target="_blank"
                             style="
-                                font-size: 12px;
-                                color: #1d4ed8;
-                                font-weight: bold;
-                                text-decoration: none;
+                                display:inline-block;
+                                font-size:12px;
+                                color:#1d4ed8;
+                                font-weight:bold;
+                                text-decoration:none;
                             "
                         >
                             📄 Ver PDF Oficial &rarr;
                         </a>
 
                     </div>
-                `).join("")
 
-                : `<p style="
+                    `;
+
+                }).join("")
+
+                : `
+
+                <p style="
                     font-size: 14px;
                     color: #64748b;
                     font-style: italic;
@@ -666,11 +1402,13 @@ async function iniciarProcesoGlobal() {
                     border: 1px dashed #cbd5e1;
                 ">
                     No hay ningún anuncio en esta sección.
-                </p>`;
+                </p>
+
+                `;
 
 
         // ====================================================
-        // 17. EMAIL FINAL
+        // 21. EMAIL FINAL
         // ====================================================
 
         const htmlFinal = `
@@ -723,8 +1461,9 @@ async function iniciarProcesoGlobal() {
                             color: #334155;
                             margin-top: 0;
                         ">
-                            Hola <strong>${nombreUsuario}</strong>,
+                            Hola <strong>${escaparHTML(nombreUsuario)}</strong>,
                         </p>
+
 
                         <p style="
                             font-size: 15px;
@@ -746,6 +1485,7 @@ async function iniciarProcesoGlobal() {
                             🟢 Junta de Andalucía (BOJA)
                         </h3>
 
+
                         ${htmlBojaContent}
 
 
@@ -758,6 +1498,7 @@ async function iniciarProcesoGlobal() {
                         ">
                             🔵 Estado (BOE)
                         </h3>
+
 
                         ${htmlBoeContent}
 
@@ -789,7 +1530,7 @@ async function iniciarProcesoGlobal() {
 
 
         // ====================================================
-        // 18. ENVIAR EMAIL
+        // 22. ENVIAR EMAIL
         // ====================================================
 
         try {
@@ -808,6 +1549,7 @@ async function iniciarProcesoGlobal() {
 
                     html:
                         htmlFinal
+
                 });
 
 
@@ -816,10 +1558,9 @@ async function iniciarProcesoGlobal() {
             );
 
 
-            /*
-             * Registramos que este usuario ha recibido
-             * correctamente sus anuncios.
-             */
+            // =================================================
+            // REGISTRAR ENVÍOS CORRECTOS
+            // =================================================
 
             [
                 ...relevantesBoja,
@@ -827,8 +1568,11 @@ async function iniciarProcesoGlobal() {
             ].forEach(anuncio => {
 
                 if (!anuncio.id) {
+
                     return;
+
                 }
+
 
                 if (
                     !enviosCorrectosPorAnuncio.has(
@@ -840,11 +1584,14 @@ async function iniciarProcesoGlobal() {
                         anuncio.id,
                         new Set()
                     );
+
                 }
+
 
                 enviosCorrectosPorAnuncio
                     .get(anuncio.id)
                     .add(usuario.email);
+
             });
 
 
@@ -855,19 +1602,13 @@ async function iniciarProcesoGlobal() {
                 emailErr.message
             );
 
-            /*
-             * IMPORTANTE:
-             * No marcamos los anuncios como enviados.
-             *
-             * Permanecerán en enviado=false para
-             * poder volver a procesarlos.
-             */
         }
+
     }
 
 
     // ========================================================
-    // 19. MARCAR COMO ENVIADOS SOLO LOS COMPLETADOS
+    // 23. MARCAR COMO ENVIADOS SOLO LOS COMPLETADOS
     // ========================================================
 
     console.log(
@@ -876,7 +1617,10 @@ async function iniciarProcesoGlobal() {
 
 
     for (
-        const [anuncioId, destinatarios]
+        const [
+            anuncioId,
+            destinatarios
+        ]
         of destinatariosPorAnuncio.entries()
     ) {
 
@@ -900,8 +1644,8 @@ async function iniciarProcesoGlobal() {
 
 
         /*
-         * SOLO marcamos enviado=true cuando TODOS los
-         * usuarios que debían recibir ese anuncio
+         * SOLO marcamos enviado=true cuando TODOS
+         * los usuarios que deben recibir ese anuncio
          * lo han recibido correctamente.
          */
 
@@ -940,33 +1684,38 @@ async function iniciarProcesoGlobal() {
                     `❌ No se pudo actualizar enviado para el anuncio ${anuncioId}:`,
                     patchErr.message
                 );
-            }
 
+            }
 
         } else {
 
             console.log(
                 `⏳ Anuncio ${anuncioId} permanece en enviado=false porque no todos los destinatarios lo recibieron.`
             );
+
         }
+
     }
 
 
     // ========================================================
-    // 20. RESUMEN FINAL
+    // 24. RESUMEN FINAL
     // ========================================================
 
     console.log(
         "======================================"
     );
 
+
     console.log(
         `📊 Anuncios procesados: ${anunciosProcesados.length}`
     );
 
+
     console.log(
         `📨 Anuncios completamente enviados: ${anunciosConEnvioCorrecto.size}`
     );
+
 
     console.log(
         `⏳ Anuncios pendientes de envío: ${
@@ -975,18 +1724,21 @@ async function iniciarProcesoGlobal() {
         }`
     );
 
+
     console.log(
         "======================================"
     );
 
+
     console.log(
         "✅ Proceso completado con éxito."
     );
+
 }
 
 
 // ============================================================
-// 21. EJECUCIÓN
+// 25. EJECUCIÓN
 // ============================================================
 
 iniciarProcesoGlobal().catch(err => {
@@ -997,4 +1749,5 @@ iniciarProcesoGlobal().catch(err => {
     );
 
     process.exit(1);
+
 });
