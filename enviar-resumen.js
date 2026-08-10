@@ -5,7 +5,6 @@ import { GoogleGenAI } from '@google/genai';
 
 console.log("INICIO DEL SCRIPT - COMPROBANDO ENTORNO");
 
-
 // ============================================================
 // 1. CONFIGURACIÓN
 // ============================================================
@@ -16,10 +15,10 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
 const resend = new Resend(RESEND_API_KEY);
+
 const ai = new GoogleGenAI({
     apiKey: GEMINI_API_KEY
 });
-
 
 // ============================================================
 // 2. FUNCIÓN GENERAL PARA SUPABASE
@@ -54,7 +53,6 @@ async function supabaseRequest(endpoint, opciones = {}) {
     return text ? JSON.parse(text) : null;
 }
 
-
 // ============================================================
 // 3. NORMALIZAR TEXTO
 // ============================================================
@@ -67,7 +65,6 @@ function normalizarTexto(texto) {
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
 }
-
 
 // ============================================================
 // 4. ESCAPAR HTML
@@ -82,7 +79,6 @@ function escaparHTML(texto) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
 }
-
 
 // ============================================================
 // 5. NORMALIZAR SECTORES DEL USUARIO
@@ -117,7 +113,6 @@ function obtenerSectoresUsuario(usuario) {
         .filter(Boolean);
 }
 
-
 // ============================================================
 // 6. ANALIZAR PDF REAL CON GEMINI
 // ============================================================
@@ -125,7 +120,9 @@ function obtenerSectoresUsuario(usuario) {
 async function analizarPDFConGemini(anuncio) {
 
     const titulo = String(anuncio.titulo || "").trim();
+
     const urlPdf = String(anuncio.url_pdf || "").trim();
+
     const categoria = String(
         anuncio.categoria ||
         anuncio.sector ||
@@ -135,36 +132,46 @@ async function analizarPDFConGemini(anuncio) {
     if (!urlPdf) {
 
         console.log(
-            `⚠️ ${titulo} no tiene URL PDF. No se puede analizar el documento.`
+            `⚠️ ${titulo} no tiene URL PDF.`
         );
 
         return {
-            resumen: "No se ha podido analizar el documento oficial porque no dispone de una URL PDF.",
-            impacto: "Revisa el documento original para conocer su alcance.",
+
+            resumen:
+                "No se ha podido analizar el documento oficial porque no dispone de una URL PDF.",
+
+            impacto: "",
             plazo: "",
-            accion: ""
+            requisitos: "",
+            accion: "",
+            valor_profesional: ""
+
         };
     }
 
     console.log("🤖 ------------------------------------------------");
-    console.log(`🤖 Analizando documento con Gemini`);
+    console.log("🤖 Analizando documento con Gemini");
     console.log(`🤖 Título: ${titulo}`);
     console.log(`🤖 Categoría: ${categoria}`);
     console.log(`🤖 PDF: ${urlPdf}`);
 
     try {
 
-        // --------------------------------------------------------
-        // 6.1 DESCARGAR PDF OFICIAL
-        // --------------------------------------------------------
+        // ====================================================
+        // 6.1 DESCARGAR PDF
+        // ====================================================
 
         const respuestaPDF = await fetch(urlPdf, {
+
             headers: {
+
                 "User-Agent":
                     "Mozilla/5.0 (compatible; BoletinHoy/1.0; +https://boletinhoy.es)"
+
             },
 
             signal: AbortSignal.timeout(30000)
+
         });
 
         if (!respuestaPDF.ok) {
@@ -175,9 +182,11 @@ async function analizarPDFConGemini(anuncio) {
 
         }
 
-        const arrayBuffer = await respuestaPDF.arrayBuffer();
+        const arrayBuffer =
+            await respuestaPDF.arrayBuffer();
 
-        const bufferPDF = Buffer.from(arrayBuffer);
+        const bufferPDF =
+            Buffer.from(arrayBuffer);
 
         console.log(
             `📄 PDF descargado: ${Math.round(bufferPDF.length / 1024)} KB`
@@ -191,116 +200,95 @@ async function analizarPDFConGemini(anuncio) {
 
         }
 
-
-        // --------------------------------------------------------
+        // ====================================================
         // 6.2 CONVERTIR PDF A BASE64
-        // --------------------------------------------------------
+        // ====================================================
 
-        const pdfBase64 = bufferPDF.toString("base64");
+        const pdfBase64 =
+            bufferPDF.toString("base64");
 
-
-        // --------------------------------------------------------
-        // 6.3 PROMPT DE ANÁLISIS
-        // --------------------------------------------------------
+        // ====================================================
+        // 6.3 PROMPT PROFESIONAL
+        // ====================================================
 
         const prompt = `
 Eres el analista profesional de BoletínHoy.
 
-Tu trabajo es analizar un documento oficial publicado por el BOJA o el BOE y explicar SU CONTENIDO REAL.
+Debes analizar COMPLETAMENTE el documento oficial que se adjunta.
 
-NO hagas un resumen genérico.
-NO repitas simplemente el título.
-NO digas cosas obvias como "es importante conocer los plazos".
-NO inventes información.
-NO supongas requisitos, cantidades, fechas o beneficiarios que no aparezcan en el documento.
-Si un dato no aparece claramente, no lo inventes.
+Tu objetivo NO es repetir el título ni describir de forma obvia que se trata de una resolución, anuncio, orden o publicación.
 
-Analiza el documento completo y extrae la información que realmente pueda ser útil para una persona o empresa interesada en el sector indicado.
+Debes INTERPRETAR el contenido real del documento y explicar qué significa para una persona, empresa, autónomo, trabajador, entidad o profesional al que pueda afectar.
 
-DATOS DEL REGISTRO:
+DATOS DEL DOCUMENTO:
 
 Título:
 ${titulo}
 
-Categoría/sector:
+Sector:
 ${categoria}
 
 URL oficial:
 ${urlPdf}
 
 
-QUIERO QUE ANALICES ESPECIALMENTE:
+REGLAS IMPORTANTES:
 
-1. QUÉ SE PUBLICA
-Explica de forma clara qué establece realmente el documento.
+- Lee el documento completo antes de responder.
+- No te limites al título.
+- No inventes información.
+- No supongas requisitos, plazos, importes o consecuencias que no aparezcan en el documento.
+- Si el documento contiene información relevante que no aparece en el título, debes detectarla.
+- Prioriza las consecuencias prácticas.
+- Explica qué cambia, qué se anuncia, qué se concede, qué se modifica, qué se convoca, qué se notifica o qué oportunidad existe.
+- Identifica claramente quién resulta afectado.
+- Si existen fechas, plazos, importes o requisitos realmente relevantes, intégralos dentro del resumen.
+- Si no existen, no inventes nada.
+- Si se trata de una mera notificación, explica qué se está notificando y a quién afecta.
+- Si se trata de una convocatoria o ayuda, explica qué oportunidad existe y quién puede beneficiarse.
+- Si se trata de contratación pública, explica qué se contrata y quién podría estar interesado.
+- Si se trata de una modificación normativa, explica qué cambia en la práctica.
+- Si se trata de un nombramiento, cese o designación, explica quién es la persona y qué función desempeña.
+- Si se trata de una corrección de errores, explica qué se corrige.
+- Si no existe una acción directa para el lector, explica claramente por qué la publicación puede ser relevante o simplemente informativa.
 
-2. A QUIÉN AFECTA
-Identifica quién puede verse afectado:
-- empresas
-- autónomos
-- trabajadores
-- opositores
-- administraciones
-- asociaciones
-- entidades
-- ciudadanos
-- u otros colectivos.
+MUY IMPORTANTE:
 
-3. QUÉ CAMBIA O QUÉ OPORTUNIDAD EXISTE
-Explica la consecuencia práctica de la publicación.
+El resultado debe parecer escrito por un analista profesional que ha leído el documento.
 
-4. PLAZOS Y FECHAS
-Si existe un plazo de solicitud, alegaciones, presentación, entrada en vigor, etc., indícalo.
-Si aparece una fecha concreta, indícala.
-Si no existe un plazo relevante, déjalo vacío.
+EVITA frases genéricas como:
 
-5. REQUISITOS
-Extrae los requisitos realmente relevantes para acceder, participar, cumplir o beneficiarse de lo publicado.
+"Es importante conocer esta información."
 
-6. IMPORTES / AYUDAS / CONDICIONES ECONÓMICAS
-Si existen cantidades, porcentajes, límites, cuantías o condiciones económicas, indícalos.
-Si no existen, no inventes nada.
+"Los interesados deberán consultar el documento."
 
-7. QUÉ DEBERÍA HACER EL LECTOR
-Da una recomendación práctica basada EXCLUSIVAMENTE en lo que establece el documento.
+"Se recomienda revisar los plazos."
 
-8. VALOR PROFESIONAL
-Explica por qué esta publicación puede ser relevante para alguien suscrito al sector "${categoria}".
+"Esta publicación puede tener impacto en el sector."
 
-IMPORTANTE:
+Ese tipo de frases NO aportan valor.
 
-- Prioriza la información accionable.
-- No hagas un resumen jurídico interminable.
-- No copies párrafos completos del documento.
-- No uses lenguaje burocrático innecesario.
-- No digas simplemente "se publica una resolución".
-- Explica qué significa realmente esa resolución.
-- Si se trata de una corrección de errores, explica QUÉ se corrige.
-- Si se trata de una convocatoria, explica QUIÉN puede participar, QUÉ se puede conseguir y CUÁNDO.
-- Si se trata de una modificación normativa, explica QUÉ cambia respecto a la situación anterior.
-- Si se trata de un nombramiento o cese, identifica a la persona y el cargo.
-- Si se trata de información pública, explica qué procedimiento se abre y qué puede hacer el interesado.
-- Si se trata de contratación pública, identifica el objeto y la oportunidad para empresas.
-- Si se trata de una disposición sin una acción directa para el ciudadano o empresa, explícalo igualmente de forma concreta.
+En su lugar, explica concretamente QUÉ ocurre y POR QUÉ puede importar.
+
+El "resumen ejecutivo" debe ser claro, profesional y útil.
+
+Extensión aproximada:
+Entre 80 y 180 palabras.
+
+No hagas un resumen jurídico interminable.
 
 RESPONDE EXCLUSIVAMENTE CON JSON VÁLIDO.
 
 Formato obligatorio:
 
 {
-  "resumen": "Explicación concreta de qué se publica y qué establece.",
-  "impacto": "Explicación práctica de a quién afecta y por qué importa.",
-  "plazo": "Fechas o plazos relevantes. Vacío si no existen.",
-  "requisitos": "Requisitos relevantes. Vacío si no existen.",
-  "accion": "Qué debería hacer el lector si le afecta.",
-  "valor_profesional": "Por qué es relevante para el sector."
+    "resumen": "Resumen ejecutivo profesional, concreto y basado en el contenido real del documento."
 }
 `;
 
-
-        // --------------------------------------------------------
-        // 6.4 LLAMADA REAL A GEMINI
-        // --------------------------------------------------------
+        // ====================================================
+        // 6.4 LLAMADA A GEMINI
+        // ====================================================
 
         const respuestaGemini =
             await ai.models.generateContent({
@@ -310,22 +298,31 @@ Formato obligatorio:
                 contents: [
 
                     {
+
                         role: "user",
 
                         parts: [
 
                             {
+
                                 inlineData: {
+
                                     mimeType: "application/pdf",
+
                                     data: pdfBase64
+
                                 }
+
                             },
 
                             {
+
                                 text: prompt
+
                             }
 
                         ]
+
                     }
 
                 ],
@@ -340,14 +337,12 @@ Formato obligatorio:
 
             });
 
-
         const textoRespuesta =
             respuestaGemini.text;
 
         console.log(
             "🤖 Respuesta de Gemini recibida."
         );
-
 
         if (!textoRespuesta) {
 
@@ -357,21 +352,21 @@ Formato obligatorio:
 
         }
 
-
-        // --------------------------------------------------------
+        // ====================================================
         // 6.5 PARSEAR JSON
-        // --------------------------------------------------------
+        // ====================================================
 
         let resultado;
 
         try {
 
-            resultado = JSON.parse(textoRespuesta);
+            resultado =
+                JSON.parse(textoRespuesta);
 
         } catch (jsonError) {
 
             console.log(
-                "⚠️ Gemini no devolvió JSON limpio. Intentando limpiar respuesta..."
+                "⚠️ Gemini no devolvió JSON limpio. Limpiando respuesta..."
             );
 
             const limpio =
@@ -381,46 +376,30 @@ Formato obligatorio:
                     .replace(/```$/i, "")
                     .trim();
 
-            try {
-
-                resultado = JSON.parse(limpio);
-
-            } catch (segundoError) {
-
-                throw new Error(
-                    "No se pudo interpretar la respuesta JSON de Gemini."
-                );
-
-            }
+            resultado =
+                JSON.parse(limpio);
         }
 
-
-        // --------------------------------------------------------
+        // ====================================================
         // 6.6 VALIDAR RESULTADO
-        // --------------------------------------------------------
+        // ====================================================
 
         resultado = {
 
             resumen:
                 String(resultado.resumen || "").trim(),
 
-            impacto:
-                String(resultado.impacto || "").trim(),
+            impacto: "",
 
-            plazo:
-                String(resultado.plazo || "").trim(),
+            plazo: "",
 
-            requisitos:
-                String(resultado.requisitos || "").trim(),
+            requisitos: "",
 
-            accion:
-                String(resultado.accion || "").trim(),
+            accion: "",
 
-            valor_profesional:
-                String(resultado.valor_profesional || "").trim()
+            valor_profesional: ""
 
         };
-
 
         if (!resultado.resumen) {
 
@@ -430,7 +409,6 @@ Formato obligatorio:
 
         }
 
-
         console.log(
             `🤖 Análisis completado: ${titulo}`
         );
@@ -439,9 +417,7 @@ Formato obligatorio:
             `🤖 Resumen: ${resultado.resumen}`
         );
 
-
         return resultado;
-
 
     } catch (error) {
 
@@ -449,38 +425,27 @@ Formato obligatorio:
             `❌ Error analizando PDF con Gemini: ${error.message}`
         );
 
-
-        // --------------------------------------------------------
-        // FALLBACK
-        // --------------------------------------------------------
-
         return {
 
             resumen:
                 "No se ha podido realizar el análisis automático del documento oficial.",
 
-            impacto:
-                "Consulta el documento oficial para conocer su contenido y alcance.",
+            impacto: "",
 
-            plazo:
-                "",
+            plazo: "",
 
-            requisitos:
-                "",
+            requisitos: "",
 
-            accion:
-                "Revisa el PDF oficial antes de tomar cualquier decisión.",
+            accion: "",
 
-            valor_profesional:
-                ""
+            valor_profesional: ""
 
         };
     }
 }
 
-
 // ============================================================
-// 7. ENRIQUECER ANUNCIOS CON ANÁLISIS REAL
+// 7. ENRIQUECER ANUNCIOS CON IA
 // ============================================================
 
 async function enriquecerTitulosConIA(anuncios) {
@@ -495,38 +460,22 @@ async function enriquecerTitulosConIA(anuncios) {
         `🤖 Analizando ${anuncios.length} anuncios mediante Gemini...`
     );
 
-
-    /*
-     * Evitamos analizar dos veces el mismo PDF
-     * durante una misma ejecución.
-     */
-
     const analisisPorURL = new Map();
-
 
     for (const anuncio of anuncios) {
 
         let titulo =
             String(anuncio.titulo || "").trim();
 
-
-        /*
-         * Limpiar pequeños fragmentos accidentales
-         * del principio del título.
-         */
-
         titulo = titulo.replace(
             /^(de|y|la|el|en|por|a)\s+/i,
             ""
         );
 
-
         anuncio.titulo = titulo;
-
 
         const url =
             String(anuncio.url_pdf || "").trim();
-
 
         if (!url) {
 
@@ -538,139 +487,56 @@ async function enriquecerTitulosConIA(anuncios) {
                 resumen:
                     "No se ha encontrado el PDF oficial asociado a esta publicación.",
 
-                impacto:
-                    "",
-
-                plazo:
-                    "",
-
-                requisitos:
-                    "",
-
-                accion:
-                    "",
-
-                valor_profesional:
-                    ""
+                impacto: "",
+                plazo: "",
+                requisitos: "",
+                accion: "",
+                valor_profesional: ""
 
             };
 
             continue;
-
         }
-
-
-        /*
-         * Si ya hemos analizado esta misma URL
-         * reutilizamos el resultado.
-         */
 
         if (analisisPorURL.has(url)) {
 
             const analisis =
                 analisisPorURL.get(url);
 
-            anuncio.analisisIA = analisis;
+            anuncio.analisisIA =
+                analisis;
 
             anuncio.resumenIA =
-                construirResumenVisible(analisis);
+                analisis.resumen;
 
             continue;
 
         }
 
-
         const analisis =
             await analizarPDFConGemini(anuncio);
-
 
         analisisPorURL.set(
             url,
             analisis
         );
 
-
         anuncio.analisisIA =
             analisis;
 
-
         anuncio.resumenIA =
-            construirResumenVisible(analisis);
-
-
-        /*
-         * Pequeña pausa para evitar lanzar
-         * demasiadas peticiones seguidas a Gemini.
-         */
+            analisis.resumen;
 
         await new Promise(
             resolve => setTimeout(resolve, 500)
         );
     }
 
-
     return anuncios;
 }
 
-
 // ============================================================
-// 8. CONSTRUIR TEXTO VISIBLE DEL ANÁLISIS
-// ============================================================
-
-function construirResumenVisible(analisis) {
-
-    if (!analisis) {
-
-        return "";
-
-    }
-
-
-    const partes = [];
-
-
-    if (analisis.resumen) {
-
-        partes.push(
-            analisis.resumen
-        );
-
-    }
-
-
-    if (analisis.impacto) {
-
-        partes.push(
-            analisis.impacto
-        );
-
-    }
-
-
-    if (analisis.plazo) {
-
-        partes.push(
-            `Plazo: ${analisis.plazo}`
-        );
-
-    }
-
-
-    if (analisis.accion) {
-
-        partes.push(
-            `Qué hacer: ${analisis.accion}`
-        );
-
-    }
-
-
-    return partes.join(" ");
-}
-
-
-// ============================================================
-// 9. PROCESO GLOBAL BOJA + BOE
+// 8. PROCESO GLOBAL BOJA + BOE
 // ============================================================
 
 async function iniciarProcesoGlobal() {
@@ -678,7 +544,6 @@ async function iniciarProcesoGlobal() {
     console.log(
         "🚀 Iniciando proceso unificado BOJA y BOE..."
     );
-
 
     // ========================================================
     // BOJA
@@ -705,7 +570,6 @@ async function iniciarProcesoGlobal() {
 
     }
 
-
     // ========================================================
     // BOE
     // ========================================================
@@ -731,21 +595,18 @@ async function iniciarProcesoGlobal() {
 
     }
 
-
     // ========================================================
-    // 10. OBTENER ANUNCIOS PENDIENTES
+    // OBTENER ANUNCIOS PENDIENTES
     // ========================================================
 
     console.log(
         "📥 Consultando anuncios pendientes en Supabase..."
     );
 
-
     const anunciosPendientes =
         await supabaseRequest(
             "anuncios_boja?enviado=eq.false&select=*"
         );
-
 
     if (
         !anunciosPendientes ||
@@ -753,21 +614,19 @@ async function iniciarProcesoGlobal() {
     ) {
 
         console.log(
-            "📭 No hay anuncios pendientes con enviado=false en Supabase."
+            "📭 No hay anuncios pendientes."
         );
 
         return;
 
     }
 
-
     console.log(
-        `📌 Encontrados ${anunciosPendientes.length} anuncios pendientes en base de datos. Procesando...`
+        `📌 Encontrados ${anunciosPendientes.length} anuncios pendientes.`
     );
 
-
     // ========================================================
-    // 11. ANALIZAR DOCUMENTOS
+    // ANALIZAR DOCUMENTOS
     // ========================================================
 
     const anunciosProcesados =
@@ -775,9 +634,8 @@ async function iniciarProcesoGlobal() {
             anunciosPendientes
         );
 
-
     // ========================================================
-    // 12. SEPARAR BOJA / BOE
+    // SEPARAR BOJA / BOE
     // ========================================================
 
     const documentosBoja =
@@ -787,13 +645,11 @@ async function iniciarProcesoGlobal() {
                 !d.origen
         );
 
-
     const documentosBoe =
         anunciosProcesados.filter(
             d =>
                 d.origen === "BOE"
         );
-
 
     console.log(
         `🟢 BOJA pendientes: ${documentosBoja.length}`
@@ -803,21 +659,18 @@ async function iniciarProcesoGlobal() {
         `🔵 BOE pendientes: ${documentosBoe.length}`
     );
 
-
     // ========================================================
-    // 13. OBTENER USUARIOS ACTIVOS
+    // OBTENER USUARIOS
     // ========================================================
 
     console.log(
         "👥 Consultando usuarios suscritos..."
     );
 
-
     const usuarios =
         await supabaseRequest(
             "perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa"
         );
-
 
     if (
         !usuarios ||
@@ -828,38 +681,29 @@ async function iniciarProcesoGlobal() {
             "⚠️ No hay usuarios activos."
         );
 
-        console.log(
-            "ℹ️ Los anuncios permanecerán con enviado=false."
-        );
-
         return;
 
     }
-
 
     console.log(
         `👥 Usuarios activos encontrados: ${usuarios.length}`
     );
 
-
     // ========================================================
-    // 14. CONTROL DE ENVÍOS
+    // CONTROL DE ENVÍOS
     // ========================================================
 
     const anunciosConEnvioCorrecto =
         new Set();
 
-
     const destinatariosPorAnuncio =
         new Map();
-
 
     const enviosCorrectosPorAnuncio =
         new Map();
 
-
     // ========================================================
-    // 15. RECORRER USUARIOS
+    // RECORRER USUARIOS
     // ========================================================
 
     for (const usuario of usuarios) {
@@ -867,35 +711,27 @@ async function iniciarProcesoGlobal() {
         const sectoresUsuario =
             obtenerSectoresUsuario(usuario);
 
-
         console.log(
             `👤 ${usuario.email} → Sectores:`,
             sectoresUsuario
         );
-
 
         if (
             !sectoresUsuario ||
             sectoresUsuario.length === 0
         ) {
 
-            console.log(
-                `⚠️ ${usuario.email} no tiene sectores suscritos.`
-            );
-
             continue;
 
         }
-
 
         const sectoresNormalizados =
             sectoresUsuario.map(
                 normalizarTexto
             );
 
-
         // ====================================================
-        // 16. FILTRAR BOJA
+        // FILTRAR BOJA
         // ====================================================
 
         const relevantesBoja =
@@ -906,20 +742,14 @@ async function iniciarProcesoGlobal() {
                     doc.sector ||
                     "";
 
-
-                const categoriaNormalizada =
-                    normalizarTexto(categoria);
-
-
                 return sectoresNormalizados.includes(
-                    categoriaNormalizada
+                    normalizarTexto(categoria)
                 );
 
             });
 
-
         // ====================================================
-        // 17. FILTRAR BOE
+        // FILTRAR BOE
         // ====================================================
 
         const relevantesBoe =
@@ -930,36 +760,28 @@ async function iniciarProcesoGlobal() {
                     doc.sector ||
                     "";
 
-
-                const categoriaNormalizada =
-                    normalizarTexto(categoria);
-
-
                 return sectoresNormalizados.includes(
-                    categoriaNormalizada
+                    normalizarTexto(categoria)
                 );
 
             });
-
 
         const totalAlertas =
             relevantesBoja.length +
             relevantesBoe.length;
 
-
         if (totalAlertas === 0) {
 
             console.log(
-                `ℹ️ ${usuario.email} no tiene alertas correspondientes a sus sectores.`
+                `ℹ️ ${usuario.email} no tiene alertas correspondientes.`
             );
 
             continue;
 
         }
 
-
         // ====================================================
-        // 18. REGISTRAR DESTINATARIOS POR ANUNCIO
+        // REGISTRAR DESTINATARIOS
         // ====================================================
 
         [
@@ -972,7 +794,6 @@ async function iniciarProcesoGlobal() {
                 return;
 
             }
-
 
             if (
                 !destinatariosPorAnuncio.has(
@@ -987,25 +808,21 @@ async function iniciarProcesoGlobal() {
 
             }
 
-
             destinatariosPorAnuncio
                 .get(anuncio.id)
                 .add(usuario.email);
 
         });
 
-
         const nombreUsuario =
             usuario.email.split("@")[0];
-
 
         console.log(
             `📧 Preparando resumen para ${usuario.email} (${totalAlertas} alertas)...`
         );
 
-
         // ====================================================
-        // 19. CONTENIDO BOJA
+        // 19. CREAR TARJETAS DE BOJA
         // ====================================================
 
         const htmlBojaContent =
@@ -1016,171 +833,96 @@ async function iniciarProcesoGlobal() {
                     const analisis =
                         r.analisisIA || {};
 
-
                     return `
 
                     <div style="
-                        background: #ffffff;
-                        border: 1px solid #e2e8f0;
-                        border-left: 4px solid #10b981;
-                        padding: 15px;
-                        margin-bottom: 15px;
-                        border-radius: 6px;
+                        background:#ffffff;
+                        border:1px solid #e2e8f0;
+                        border-left:4px solid #10b981;
+                        padding:18px;
+                        margin-bottom:18px;
+                        border-radius:8px;
                     ">
 
-                        <span style="
-                            font-size: 11px;
-                            font-weight: bold;
-                            background: #ecfdf5;
-                            color: #047857;
-                            padding: 3px 8px;
-                            border-radius: 4px;
-                            text-transform: uppercase;
+                        <div style="
+                            font-size:11px;
+                            font-weight:bold;
+                            color:#047857;
+                            text-transform:uppercase;
+                            margin-bottom:8px;
                         ">
                             ${escaparHTML(
                                 r.categoria ||
                                 r.sector ||
                                 "BOJA"
                             )}
-                        </span>
+                        </div>
 
+                        <div style="
+                            font-size:11px;
+                            font-weight:bold;
+                            color:#64748b;
+                            text-transform:uppercase;
+                            letter-spacing:.3px;
+                            margin-bottom:6px;
+                        ">
+                            Anuncio oficial
+                        </div>
 
                         <h4 style="
-                            font-size: 15px;
-                            color: #1e293b;
-                            margin: 10px 0;
-                            line-height: 1.4;
+                            font-size:16px;
+                            color:#1e293b;
+                            margin:0 0 16px 0;
+                            line-height:1.5;
                         ">
                             ${escaparHTML(r.titulo)}
                         </h4>
 
-
                         <div style="
-                            background-color: #f8fafc;
-                            border-left: 4px solid #10b981;
-                            padding: 12px 15px;
-                            margin-top: 10px;
-                            border-radius: 4px;
+                            background:#f8fafc;
+                            border-radius:6px;
+                            padding:14px;
+                            margin-bottom:15px;
                         ">
 
-                            <strong style="
-                                display:block;
-                                color: #065f46;
-                                font-size: 13px;
-                                margin-bottom: 6px;
+                            <div style="
+                                font-size:11px;
+                                font-weight:bold;
+                                color:#047857;
+                                text-transform:uppercase;
+                                margin-bottom:7px;
                             ">
-                                💡 Análisis profesional
-                            </strong>
+                                Resumen ejecutivo
+                            </div>
 
-
-                            ${
-                                analisis.resumen
-                                    ? `
-                                    <div style="
-                                        color:#374151;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                        margin-bottom:7px;
-                                    ">
-                                        ${escaparHTML(
-                                            analisis.resumen
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
-
-
-                            ${
-                                analisis.impacto
-                                    ? `
-                                    <div style="
-                                        color:#374151;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                        margin-bottom:7px;
-                                    ">
-                                        <strong>Impacto:</strong>
-                                        ${escaparHTML(
-                                            analisis.impacto
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
-
-
-                            ${
-                                analisis.plazo
-                                    ? `
-                                    <div style="
-                                        color:#374151;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                        margin-bottom:7px;
-                                    ">
-                                        <strong>Plazo:</strong>
-                                        ${escaparHTML(
-                                            analisis.plazo
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
-
-
-                            ${
-                                analisis.requisitos
-                                    ? `
-                                    <div style="
-                                        color:#374151;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                        margin-bottom:7px;
-                                    ">
-                                        <strong>Requisitos:</strong>
-                                        ${escaparHTML(
-                                            analisis.requisitos
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
-
-
-                            ${
-                                analisis.accion
-                                    ? `
-                                    <div style="
-                                        color:#374151;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                    ">
-                                        <strong>Qué hacer:</strong>
-                                        ${escaparHTML(
-                                            analisis.accion
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
+                            <div style="
+                                color:#334155;
+                                font-size:14px;
+                                line-height:1.65;
+                            ">
+                                ${escaparHTML(
+                                    analisis.resumen ||
+                                    "No se ha podido generar el resumen ejecutivo."
+                                )}
+                            </div>
 
                         </div>
-
 
                         <a
                             href="${escaparHTML(r.url_pdf)}"
                             target="_blank"
                             style="
                                 display:inline-block;
-                                margin-top:12px;
+                                background:#047857;
+                                color:#ffffff;
+                                padding:9px 14px;
+                                border-radius:5px;
                                 font-size:12px;
-                                color:#047857;
                                 font-weight:bold;
                                 text-decoration:none;
                             "
                         >
-                            📄 Ver PDF Oficial &rarr;
+                            📄 Ver PDF oficial →
                         </a>
 
                     </div>
@@ -1189,25 +931,10 @@ async function iniciarProcesoGlobal() {
 
                 }).join("")
 
-                : `
-
-                <p style="
-                    font-size: 14px;
-                    color: #64748b;
-                    font-style: italic;
-                    background: #f8fafc;
-                    padding: 12px;
-                    border-radius: 6px;
-                    border: 1px dashed #cbd5e1;
-                ">
-                    No hay ningún anuncio en esta sección.
-                </p>
-
-                `;
-
+                : "";
 
         // ====================================================
-        // 20. CONTENIDO BOE
+        // 20. CREAR TARJETAS DE BOE
         // ====================================================
 
         const htmlBoeContent =
@@ -1218,170 +945,96 @@ async function iniciarProcesoGlobal() {
                     const analisis =
                         r.analisisIA || {};
 
-
                     return `
 
                     <div style="
-                        background: #ffffff;
-                        border: 1px solid #e2e8f0;
-                        border-left: 4px solid #3b82f6;
-                        padding: 15px;
-                        margin-bottom: 15px;
-                        border-radius: 6px;
+                        background:#ffffff;
+                        border:1px solid #e2e8f0;
+                        border-left:4px solid #3b82f6;
+                        padding:18px;
+                        margin-bottom:18px;
+                        border-radius:8px;
                     ">
 
-                        <span style="
-                            font-size: 11px;
-                            font-weight: bold;
-                            background: #eff6ff;
-                            color: #1d4ed8;
-                            padding: 3px 8px;
-                            border-radius: 4px;
-                            text-transform: uppercase;
+                        <div style="
+                            font-size:11px;
+                            font-weight:bold;
+                            color:#1d4ed8;
+                            text-transform:uppercase;
+                            margin-bottom:8px;
                         ">
                             ${escaparHTML(
                                 r.categoria ||
                                 r.sector ||
                                 "BOE"
                             )}
-                        </span>
+                        </div>
 
+                        <div style="
+                            font-size:11px;
+                            font-weight:bold;
+                            color:#64748b;
+                            text-transform:uppercase;
+                            letter-spacing:.3px;
+                            margin-bottom:6px;
+                        ">
+                            Anuncio oficial
+                        </div>
 
                         <h4 style="
-                            font-size: 15px;
-                            color: #1e293b;
-                            margin: 10px 0;
-                            line-height: 1.4;
+                            font-size:16px;
+                            color:#1e293b;
+                            margin:0 0 16px 0;
+                            line-height:1.5;
                         ">
                             ${escaparHTML(r.titulo)}
                         </h4>
 
-
                         <div style="
-                            background: #f8fafc;
-                            border: 1px solid #e2e8f0;
-                            padding: 12px 15px;
-                            margin-bottom: 12px;
-                            border-radius: 4px;
+                            background:#f8fafc;
+                            border-radius:6px;
+                            padding:14px;
+                            margin-bottom:15px;
                         ">
 
-                            <strong style="
-                                display:block;
-                                color: #1e40af;
-                                font-size: 13px;
-                                margin-bottom: 6px;
+                            <div style="
+                                font-size:11px;
+                                font-weight:bold;
+                                color:#1d4ed8;
+                                text-transform:uppercase;
+                                margin-bottom:7px;
                             ">
-                                💡 Análisis profesional
-                            </strong>
+                                Resumen ejecutivo
+                            </div>
 
-
-                            ${
-                                analisis.resumen
-                                    ? `
-                                    <div style="
-                                        color:#334155;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                        margin-bottom:7px;
-                                    ">
-                                        ${escaparHTML(
-                                            analisis.resumen
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
-
-
-                            ${
-                                analisis.impacto
-                                    ? `
-                                    <div style="
-                                        color:#334155;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                        margin-bottom:7px;
-                                    ">
-                                        <strong>Impacto:</strong>
-                                        ${escaparHTML(
-                                            analisis.impacto
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
-
-
-                            ${
-                                analisis.plazo
-                                    ? `
-                                    <div style="
-                                        color:#334155;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                        margin-bottom:7px;
-                                    ">
-                                        <strong>Plazo:</strong>
-                                        ${escaparHTML(
-                                            analisis.plazo
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
-
-
-                            ${
-                                analisis.requisitos
-                                    ? `
-                                    <div style="
-                                        color:#334155;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                        margin-bottom:7px;
-                                    ">
-                                        <strong>Requisitos:</strong>
-                                        ${escaparHTML(
-                                            analisis.requisitos
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
-
-
-                            ${
-                                analisis.accion
-                                    ? `
-                                    <div style="
-                                        color:#334155;
-                                        font-size:13px;
-                                        line-height:1.55;
-                                    ">
-                                        <strong>Qué hacer:</strong>
-                                        ${escaparHTML(
-                                            analisis.accion
-                                        )}
-                                    </div>
-                                    `
-                                    : ""
-                            }
+                            <div style="
+                                color:#334155;
+                                font-size:14px;
+                                line-height:1.65;
+                            ">
+                                ${escaparHTML(
+                                    analisis.resumen ||
+                                    "No se ha podido generar el resumen ejecutivo."
+                                )}
+                            </div>
 
                         </div>
-
 
                         <a
                             href="${escaparHTML(r.url_pdf)}"
                             target="_blank"
                             style="
                                 display:inline-block;
+                                background:#1d4ed8;
+                                color:#ffffff;
+                                padding:9px 14px;
+                                border-radius:5px;
                                 font-size:12px;
-                                color:#1d4ed8;
                                 font-weight:bold;
                                 text-decoration:none;
                             "
                         >
-                            📄 Ver PDF Oficial &rarr;
+                            📄 Ver PDF oficial →
                         </a>
 
                     </div>
@@ -1390,22 +1043,7 @@ async function iniciarProcesoGlobal() {
 
                 }).join("")
 
-                : `
-
-                <p style="
-                    font-size: 14px;
-                    color: #64748b;
-                    font-style: italic;
-                    background: #f8fafc;
-                    padding: 12px;
-                    border-radius: 6px;
-                    border: 1px dashed #cbd5e1;
-                ">
-                    No hay ningún anuncio en esta sección.
-                </p>
-
-                `;
-
+                : "";
 
         // ====================================================
         // 21. EMAIL FINAL
@@ -1414,108 +1052,113 @@ async function iniciarProcesoGlobal() {
         const htmlFinal = `
 
             <div style="
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-                background-color: #f8fafc;
-                padding: 30px 20px;
-                color: #334155;
+                font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+                background:#f8fafc;
+                padding:30px 20px;
+                color:#334155;
             ">
 
                 <div style="
-                    max-width: 600px;
-                    margin: 0 auto;
-                    background: #ffffff;
-                    border-radius: 8px;
-                    overflow: hidden;
-                    border: 1px solid #e2e8f0;
+                    max-width:600px;
+                    margin:0 auto;
+                    background:#ffffff;
+                    border-radius:8px;
+                    overflow:hidden;
+                    border:1px solid #e2e8f0;
                 ">
 
                     <div style="
-                        background: #0f172a;
-                        padding: 20px;
-                        text-align: center;
+                        background:#0f172a;
+                        padding:20px;
+                        text-align:center;
                     ">
 
                         <h2 style="
-                            color: #ffffff;
-                            margin: 0;
-                            font-size: 20px;
+                            color:#ffffff;
+                            margin:0;
+                            font-size:20px;
                         ">
                             Resumen Diario Oficial
                         </h2>
 
                         <p style="
-                            color: #94a3b8;
-                            font-size: 13px;
-                            margin: 5px 0 0 0;
+                            color:#94a3b8;
+                            font-size:13px;
+                            margin:5px 0 0 0;
                         ">
                             Tus alertas personalizadas
                         </p>
 
                     </div>
 
-
-                    <div style="padding: 25px;">
+                    <div style="padding:25px;">
 
                         <p style="
-                            font-size: 16px;
-                            color: #334155;
-                            margin-top: 0;
+                            font-size:16px;
+                            color:#334155;
+                            margin-top:0;
                         ">
                             Hola <strong>${escaparHTML(nombreUsuario)}</strong>,
                         </p>
 
-
                         <p style="
-                            font-size: 15px;
-                            color: #334155;
+                            font-size:15px;
+                            color:#334155;
                         ">
-                            Aquí tienes el desglose de las
+                            Hemos detectado
                             <strong>${totalAlertas} novedades</strong>
-                            de hoy:
+                            relacionadas con tus sectores suscritos.
                         </p>
 
+                        ${
+                            relevantesBoja.length > 0
+                                ? `
+                                <h3 style="
+                                    color:#047857;
+                                    font-size:16px;
+                                    border-bottom:2px solid #10b981;
+                                    padding-bottom:5px;
+                                    margin-top:25px;
+                                ">
+                                    🟢 Junta de Andalucía (BOJA)
+                                </h3>
 
-                        <h3 style="
-                            color: #047857;
-                            font-size: 16px;
-                            border-bottom: 2px solid #10b981;
-                            padding-bottom: 5px;
-                            margin-top: 25px;
-                        ">
-                            🟢 Junta de Andalucía (BOJA)
-                        </h3>
+                                ${htmlBojaContent}
+                                `
+                                : ""
+                        }
 
+                        ${
+                            relevantesBoe.length > 0
+                                ? `
+                                <h3 style="
+                                    color:#1d4ed8;
+                                    font-size:16px;
+                                    border-bottom:2px solid #3b82f6;
+                                    padding-bottom:5px;
+                                    margin-top:25px;
+                                ">
+                                    🔵 Estado (BOE)
+                                </h3>
 
-                        ${htmlBojaContent}
-
-
-                        <h3 style="
-                            color: #1d4ed8;
-                            font-size: 16px;
-                            border-bottom: 2px solid #3b82f6;
-                            padding-bottom: 5px;
-                            margin-top: 25px;
-                        ">
-                            🔵 Estado (BOE)
-                        </h3>
-
-
-                        ${htmlBoeContent}
+                                ${htmlBoeContent}
+                                `
+                                : ""
+                        }
 
                     </div>
 
-
                     <div style="
-                        background: #f1f5f9;
-                        padding: 15px;
-                        text-align: center;
-                        border-top: 1px solid #e2e8f0;
+                        background:#f1f5f9;
+                        padding:15px;
+                        text-align:center;
+                        border-top:1px solid #e2e8f0;
                     ">
 
                         <p style="
-                            font-size: 12px;
-                            color: #64748b;
-                            margin: 0;
+                            font-size:12px;
+                            color:#64748b;
+                            margin:0;
                         ">
                             BoletínHoy | Tu resumen diario.
                         </p>
@@ -1528,35 +1171,31 @@ async function iniciarProcesoGlobal() {
 
         `;
 
-
         // ====================================================
         // 22. ENVIAR EMAIL
         // ====================================================
 
         try {
 
-            const resultadoEmail =
-                await resend.emails.send({
+            await resend.emails.send({
 
-                    from:
-                        'BoletínHoy <alertas@boletinhoy.es>',
+                from:
+                    'BoletínHoy <alertas@boletinhoy.es>',
 
-                    to:
-                        [usuario.email],
+                to:
+                    [usuario.email],
 
-                    subject:
-                        `Resumen Personalizado: ${totalAlertas} nuevas alertas`,
+                subject:
+                    `Resumen Personalizado: ${totalAlertas} nuevas alertas`,
 
-                    html:
-                        htmlFinal
+                html:
+                    htmlFinal
 
-                });
-
+            });
 
             console.log(
                 `✅ Correo enviado con éxito a ${usuario.email}`
             );
-
 
             // =================================================
             // REGISTRAR ENVÍOS CORRECTOS
@@ -1573,7 +1212,6 @@ async function iniciarProcesoGlobal() {
 
                 }
 
-
                 if (
                     !enviosCorrectosPorAnuncio.has(
                         anuncio.id
@@ -1587,34 +1225,29 @@ async function iniciarProcesoGlobal() {
 
                 }
 
-
                 enviosCorrectosPorAnuncio
                     .get(anuncio.id)
                     .add(usuario.email);
 
             });
 
-
         } catch (emailErr) {
 
             console.error(
-                `❌ Error al enviar email con Resend a ${usuario.email}:`,
+                `❌ Error enviando email a ${usuario.email}:`,
                 emailErr.message
             );
 
         }
-
     }
 
-
     // ========================================================
-    // 23. MARCAR COMO ENVIADOS SOLO LOS COMPLETADOS
+    // 23. MARCAR COMO ENVIADOS
     // ========================================================
 
     console.log(
         "🔄 Comprobando qué anuncios se pueden marcar como enviados..."
     );
-
 
     for (
         const [
@@ -1629,25 +1262,15 @@ async function iniciarProcesoGlobal() {
                 anuncioId
             ) || new Set();
 
-
         const totalDestinatarios =
             destinatarios.size;
-
 
         const totalEnviados =
             enviosCorrectos.size;
 
-
         console.log(
             `📊 Anuncio ${anuncioId}: ${totalEnviados}/${totalDestinatarios} destinatarios recibidos correctamente.`
         );
-
-
-        /*
-         * SOLO marcamos enviado=true cuando TODOS
-         * los usuarios que deben recibir ese anuncio
-         * lo han recibido correctamente.
-         */
 
         if (
             totalDestinatarios > 0 &&
@@ -1667,16 +1290,13 @@ async function iniciarProcesoGlobal() {
                     }
                 );
 
-
                 anunciosConEnvioCorrecto.add(
                     anuncioId
                 );
 
-
                 console.log(
                     `✅ Anuncio ${anuncioId} marcado como enviado=true`
                 );
-
 
             } catch (patchErr) {
 
@@ -1690,13 +1310,11 @@ async function iniciarProcesoGlobal() {
         } else {
 
             console.log(
-                `⏳ Anuncio ${anuncioId} permanece en enviado=false porque no todos los destinatarios lo recibieron.`
+                `⏳ Anuncio ${anuncioId} permanece en enviado=false.`
             );
 
         }
-
     }
-
 
     // ========================================================
     // 24. RESUMEN FINAL
@@ -1706,36 +1324,29 @@ async function iniciarProcesoGlobal() {
         "======================================"
     );
 
-
     console.log(
         `📊 Anuncios procesados: ${anunciosProcesados.length}`
     );
-
 
     console.log(
         `📨 Anuncios completamente enviados: ${anunciosConEnvioCorrecto.size}`
     );
 
-
     console.log(
-        `⏳ Anuncios pendientes de envío: ${
+        `⏳ Anuncios pendientes: ${
             anunciosProcesados.length -
             anunciosConEnvioCorrecto.size
         }`
     );
 
-
     console.log(
         "======================================"
     );
 
-
     console.log(
         "✅ Proceso completado con éxito."
     );
-
 }
-
 
 // ============================================================
 // 25. EJECUCIÓN
