@@ -247,7 +247,7 @@ async function ejecutarCapturadorBoja() {
   console.log("🚀 Consultando el feed oficial RSS/XML del BOJA...");
 
   // URL del feed RSS oficial con las publicaciones más recientes del BOJA
-  const urlRss = "https://www.juntadeandalucia.es/eboja/rss";
+  const urlRss = "https://www.juntadeandalucia.es/boja/rss/";
   let xmlTexto = "";
 
   try {
