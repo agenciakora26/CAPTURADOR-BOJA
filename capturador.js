@@ -244,7 +244,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 [BOJA] Capturador mediante RSS oficial...");
+  console.log("🚀 [BOJA] Probando captación mediante RSS oficial...");
 
   const RSS_BOJA = [
     {
@@ -267,6 +267,8 @@ async function ejecutarCapturadorBoja() {
         signal: AbortSignal.timeout(20000)
       });
 
+      console.log(`📡 Respuesta HTTP: ${respuesta.status}`);
+
       if (!respuesta.ok) {
         console.log(
           `⚠️ RSS ${fuente.nombre} respondió HTTP ${respuesta.status}`
@@ -276,10 +278,15 @@ async function ejecutarCapturadorBoja() {
 
       const xml = await respuesta.text();
 
+      console.log(`📄 Longitud del XML: ${xml.length} caracteres`);
+
       if (!xml || xml.length < 50) {
         console.log(`⚠️ El RSS ${fuente.nombre} está vacío`);
         continue;
       }
+
+      console.log("📋 Primeros 3000 caracteres del RSS:");
+      console.log(xml.substring(0, 3000));
 
       const $rss = cheerio.load(xml, {
         xmlMode: true
@@ -288,7 +295,7 @@ async function ejecutarCapturadorBoja() {
       const items = $rss("item");
 
       console.log(
-        `📄 ${fuente.nombre}: ${items.length} publicaciones encontradas`
+        `📚 ${fuente.nombre}: ${items.length} publicaciones encontradas`
       );
 
       items.each((_, item) => {
@@ -297,31 +304,26 @@ async function ejecutarCapturadorBoja() {
         const titulo = $item.find("title").first().text().trim();
         const enlace = $item.find("link").first().text().trim();
         const descripcion = $item.find("description").first().text().trim();
+        const fecha = $item.find("pubDate").first().text().trim();
 
         if (!titulo || !enlace) {
+          console.log("⚠️ Item ignorado porque no tiene título o enlace");
           return;
         }
 
-        console.log(`📰 ${titulo}`);
-        console.log(`🔗 ${enlace}`);
+        console.log("────────────────────────────────────");
+        console.log(`📰 Título: ${titulo}`);
+        console.log(`🔗 Enlace: ${enlace}`);
+        console.log(`📅 Fecha: ${fecha}`);
+        console.log(`📝 Descripción: ${descripcion.substring(0, 500)}`);
 
-        /*
-         * IMPORTANTE:
-         * El RSS puede proporcionar el enlace de la publicación
-         * y no directamente el PDF.
-         *
-         * Por eso primero guardamos la publicación para procesarla
-         * posteriormente.
-         */
-
-        const textoClasificacion = `${titulo} ${descripcion}`;
-
-        evaluarYGuardar(
-          titulo,
-          enlace,
-          "JUNTA DE ANDALUCÍA",
-          documentosProcesados
-        );
+        documentosProcesados.push({
+          titulo: titulo,
+          enlace: enlace,
+          descripcion: descripcion,
+          fecha: fecha,
+          fuente: fuente.nombre
+        });
       });
 
     } catch (error) {
@@ -332,55 +334,34 @@ async function ejecutarCapturadorBoja() {
     }
   }
 
-  /*
-   * Eliminar duplicados por URL
-   */
-  const unicos = Array.from(
-    new Map(
-      documentosProcesados.map(d => [d.url_pdf, d])
-    ).values()
-  );
-
+  console.log("======================================");
   console.log(
-    `🎯 Publicaciones relevantes encontradas: ${unicos.length}`
+    `🎯 Total de publicaciones RSS detectadas: ${documentosProcesados.length}`
   );
+  console.log("======================================");
 
   /*
-   * Guardar en Supabase
+   * IMPORTANTE:
+   * En esta primera fase NO guardamos todavía nada en Supabase.
+   *
+   * Primero comprobamos qué enlace proporciona realmente
+   * el RSS oficial de la Junta.
+   *
+   * Si el enlace lleva directamente al PDF, podremos guardarlo.
+   * Si lleva a una página HTML del BOJA, añadiremos el paso
+   * intermedio para localizar el PDF oficial.
    */
-  for (const d of unicos) {
-    try {
-      await supabaseRequest(
-        "anuncios_boja?on_conflict=url_pdf",
-        {
-          method: "POST",
-          headers: {
-            Prefer: "resolution=merge-duplicates"
-          },
-          body: JSON.stringify({
-            titulo: d.titulo,
-            url_pdf: d.url_pdf,
-            categoria: d.sector,
-            origen: "BOJA"
-          })
-        }
-      );
 
-      console.log(`✅ Guardado: ${d.titulo}`);
-
-    } catch (err) {
-      console.log(
-        `⚠️ Aviso al guardar en Supabase: ${err.message}`
-      );
-    }
-  }
-
-  return unicos;
+  return documentosProcesados;
 }
-async function probarRSSBOJA() {
-  const url = "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
 
-  console.log("📡 Probando RSS:", url);
+
+async function probarRSSBOJA() {
+  const url =
+    "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
+
+  console.log("📡 Probando RSS oficial del BOJA:");
+  console.log(url);
 
   try {
     const res = await fetch(url, {
@@ -390,15 +371,22 @@ async function probarRSSBOJA() {
       signal: AbortSignal.timeout(20000)
     });
 
-    console.log("HTTP:", res.status);
+    console.log("📡 HTTP:", res.status);
+    console.log("📡 OK:", res.ok);
 
     const xml = await res.text();
 
-    console.log("Longitud XML:", xml.length);
-    console.log(xml.substring(0, 3000));
+    console.log("📄 Longitud XML:", xml.length);
+    console.log("📋 Contenido del RSS:");
+    console.log(xml.substring(0, 5000));
+
+    return xml;
 
   } catch (error) {
-    console.error("❌ ERROR RSS:", error);
+    console.error("❌ ERROR RSS:", error.message);
+    return null;
   }
 }
+
+
 export { ejecutarCapturadorBoja as ejecutarBOJA };
