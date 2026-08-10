@@ -244,7 +244,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 [BOJA] Iniciando extracción con depuración de títulos...");
+  console.log("🚀 [BOJA] Extracción directa por secciones oficiales...");
 
   const urlBase = "https://www.juntadeandalucia.es";
   
@@ -273,7 +273,6 @@ async function ejecutarCapturadorBoja() {
     return [];
   }
 
-  // 1. Detectar las URLs exactas de los boletines activos de hoy
   const $dia = cheerio.load(htmlDia);
   const urlsIndicesBoletines = new Set();
 
@@ -293,106 +292,78 @@ async function ejecutarCapturadorBoja() {
         urlAbsoluta = `${urlBase}/eboja/${href}`;
       }
       
-      if (!urlAbsoluta.endsWith("index.html") && !urlAbsoluta.endsWith(".html")) {
-        urlAbsoluta = urlAbsoluta.endsWith("/") ? `${urlAbsoluta}index.html` : `${urlAbsoluta}/index.html`;
+      let basePath = urlAbsoluta.substring(0, urlAbsoluta.lastIndexOf("/") + 1);
+      if (basePath.includes(`/${yyyy}/`)) {
+        urlsIndicesBoletines.add(basePath);
       }
-
-      urlsIndicesBoletines.add(urlAbsoluta);
     }
   });
 
-  const listaIndices = Array.from(urlsIndicesBoletines).filter(u => !u.endsWith("/BOJA/index.html"));
-  console.log(`📌 Índices de boletines detectados para hoy:`, listaIndices);
+  const basesBoletines = Array.from(urlsIndicesBoletines);
+  console.log(`📌 Bases de boletines detectadas para hoy:`, basesBoletines);
 
   const documentosProcesados = [];
 
-  // 2. Por cada boletín, leemos su índice y descubrimos todas sus páginas de secciones internas
-  for (const urlIndice of listaIndices) {
-    try {
-      console.log(`🔗 Analizando boletín: ${urlIndice}`);
-      const resIndice = await fetch(urlIndice, {
-        headers: { "User-Agent": USER_AGENT },
-        signal: AbortSignal.timeout(15000)
-      });
-      if (!resIndice.ok) continue;
+  for (const basePath of basesBoletines) {
+    // Las secciones oficiales fijas del BOJA donde se publican las disposiciones y ayudas
+    const subpaginas = [
+      basePath + "index.html",
+      basePath + "s51.html",
+      basePath + "s52.html",
+      basePath + "s53.html",
+      basePath + "s55.html"
+    ];
 
-      const htmlIndice = await resIndice.text();
-      const $idx = cheerio.load(htmlIndice);
+    for (const urlPagina of subpaginas) {
+      try {
+        const resPag = await fetch(urlPagina, {
+          headers: { "User-Agent": USER_AGENT },
+          signal: AbortSignal.timeout(10000)
+        });
+        if (!resPag.ok) continue;
 
-      const paginasAScanear = new Set([urlIndice]);
-      const baseUrlBoletin = urlIndice.substring(0, urlIndice.lastIndexOf("/") + 1);
+        const htmlPag = await resPag.text();
+        const $ = cheerio.load(htmlPag);
 
-      $idx("a").each((_, el) => {
-        let href = $idx(el).attr("href") || "";
-        if (href && !href.startsWith("http") && !href.startsWith("#") && !href.includes("sumario") && !href.includes("verificacion")) {
-          if (href.endsWith(".html") || !href.includes(".")) {
-            let urlSec = baseUrlBoletin + href;
-            paginasAScanear.add(urlSec);
+        $("a").each((_, linkEl) => {
+          let hrefPdf = $(linkEl).attr("href") || "";
+          
+          if (!hrefPdf.toLowerCase().includes(".pdf")) return;
+          if (hrefPdf.toLowerCase().includes("sumario") || hrefPdf.toLowerCase().includes("verificacion")) return;
+
+          let urlPdfFinal = hrefPdf.startsWith("http") ? hrefPdf : urlBase + (hrefPdf.startsWith("/") ? hrefPdf : basePath + hrefPdf);
+
+          const $contenedor = $(linkEl).closest("p, li, div.disposicion, tr, article");
+          const $clon = $contenedor.clone();
+          $clon.find("a, script, style").remove();
+          
+          let tituloAnuncio = $clon.text().replace(/\s+/g, " ").trim();
+
+          if (tituloAnuncio.length < 25) {
+            tituloAnuncio = $(linkEl).text().replace(/\s+/g, " ").trim();
           }
-        }
-      });
 
-      console.log(`📂 Páginas/Secciones a escanear en este boletín: ${paginasAScanear.size}`);
+          tituloAnuncio = tituloAnuncio
+            .replace(/PDF oficial auténtico/gi, "")
+            .replace(/Otros formatos/gi, "")
+            .replace(/Verificar autenticidad/gi, "")
+            .replace(/texto núm\..*$/gi, "")
+            .replace(/páginas?.*$/gi, "")
+            .trim();
 
-      // 3. Escaneamos cada subpágina buscando enlaces a PDF
-      for (const urlPagina of paginasAScanear) {
-        try {
-          const resPag = await fetch(urlPagina, {
-            headers: { "User-Agent": USER_AGENT },
-            signal: AbortSignal.timeout(10000)
-          });
-          if (!resPag.ok) continue;
-
-          const htmlPag = await resPag.text();
-          const $ = cheerio.load(htmlPag);
-
-          $("a").each((_, linkEl) => {
-            let hrefPdf = $(linkEl).attr("href") || "";
-            
-            if (!hrefPdf.toLowerCase().includes(".pdf")) return;
-            if (hrefPdf.toLowerCase().includes("sumario") || hrefPdf.toLowerCase().includes("verificacion")) return;
-
-            let urlPdfFinal = hrefPdf.startsWith("http") ? hrefPdf : urlBase + (hrefPdf.startsWith("/") ? hrefPdf : baseUrlBoletin + hrefPdf);
-
-            const $contenedor = $(linkEl).closest("p, li, div.disposicion, tr, article");
-            const $clon = $contenedor.clone();
-            $clon.find("a, script, style").remove();
-            
-            let tituloAnuncio = $clon.text().replace(/\s+/g, " ").trim();
-
-            if (tituloAnuncio.length < 25) {
-              tituloAnuncio = $(linkEl).text().replace(/\s+/g, " ").trim();
-            }
-
-            tituloAnuncio = tituloAnuncio
-              .replace(/PDF oficial auténtico/gi, "")
-              .replace(/Otros formatos/gi, "")
-              .replace(/Verificar autenticidad/gi, "")
-              .replace(/texto núm\..*$/gi, "")
-              .replace(/páginas?.*$/gi, "")
-              .trim();
-
-            if (tituloAnuncio.length > 20 && !tituloAnuncio.toLowerCase().startsWith("sumario")) {
-              console.log(`📝 [CANDIDATO ENCONTRADO]: "${tituloAnuncio.substring(0, 70)}..."`);
-              evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
-            }
-          });
-
-        } catch (subErr) {
-          // Ignorar errores puntuales
-        }
+          if (tituloAnuncio.length > 20 && !tituloAnuncio.toLowerCase().startsWith("sumario")) {
+            evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
+          }
+        });
+      } catch (e) {
+        // Sección no existente en este boletín, se omite de forma segura
       }
-
-    } catch (err) {
-      console.log(`⚠️ Error al procesar boletín ${urlIndice}: ${err.message}`);
     }
   }
 
-  // Deduplicación estricta por URL del PDF
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
   console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
 
-  // 4. Guardado en Supabase
   for (const d of unicos) {
     try {
       await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
