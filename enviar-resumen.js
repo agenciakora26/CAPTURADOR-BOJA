@@ -131,7 +131,7 @@ async function iniciarProcesoGlobal() {
         <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 10px 0; line-height: 1.4;">${r.titulo}</h4>
        <div style="background-color: #f8f9fa; border-left: 4px solid #10b981; padding: 10px 15px; margin-top: 10px; border-radius: 4px;">
   <strong style="color: #065f46; font-size: 13px;">💡 Impacto Profesional:</strong> 
-  <span style="color: #374151; font-size: 13px;">${a.resumenIA}</span>
+  <span style="color: #374151; font-size: 13px;">${r.resumenIA}</span>
 </div>
         <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #047857; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
       </div>
@@ -142,7 +142,8 @@ async function iniciarProcesoGlobal() {
         <span style="font-size: 11px; font-weight: bold; background: #eff6ff; color: #1d4ed8; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
         <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 10px 0; line-height: 1.4;">${r.titulo}</h4>
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 12px; margin-bottom: 12px; border-radius: 4px;">
-          <p style="font-size: 13px; color: #334155; margin: 0; line-height: 1.4;"><strong>¿Por qué te interesa?:</strong> ${r.resumenIA || r.titulo}</p>
+          <strong style="color: #1e40af; font-size: 13px;">💡 Impacto Profesional:</strong> 
+          <span style="color: #334155; font-size: 13px;">${r.resumenIA || r.titulo}</span>
         </div>
         <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #1d4ed8; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
       </div>
@@ -171,7 +172,6 @@ async function iniciarProcesoGlobal() {
         </div>
       </div>
     `;
-
     try {
       await resend.emails.send({
         from: 'BoletínHoy <alertas@boletinhoy.es>',
