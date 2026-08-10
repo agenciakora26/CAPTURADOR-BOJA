@@ -244,7 +244,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Extrayendo anuncios del BOJA mediante exploración de secciones...");
+  console.log("🚀 Extrayendo anuncios del BOJA directamente desde los índices de los boletines...");
 
   const urlBase = "https://www.juntadeandalucia.es";
   
@@ -265,16 +265,16 @@ async function ejecutarCapturadorBoja() {
     });
 
     if (!resDia.ok) {
-      console.log(`⚠️ No se encontró la página del día ${fechaFormateada} (status ${resDia.status}).`);
+      console.log(`⚠️ No se encontró la página del día ${fechaFormateada}`);
       return [];
     }
     htmlDia = await resDia.text();
   } catch (error) {
-    console.error("❌ Excepción al conectar con la página del día del BOJA:", error.message);
+    console.error("❌ Excepción al conectar con la página del día:", error.message);
     return [];
   }
 
-  // 1. Detectar los boletines activos del día (ej. /2026/153/index.html)
+  // 1. Detectar las URLs exactas de los boletines activos de hoy
   const $dia = cheerio.load(htmlDia);
   const urlsIndicesBoletines = new Set();
 
@@ -307,63 +307,48 @@ async function ejecutarCapturadorBoja() {
 
   const documentosProcesados = [];
 
-  // 2. Por cada índice de boletín, buscamos las subpáginas de sección (s51.html, s52.html, etc.)
+  // 2. Por cada boletín, leemos su índice principal y todas las secciones del menú lateral (s51, s52, s53, s55)
   for (const urlIndice of listaIndices) {
     try {
-      console.log(`🔗 Leyendo índice del boletín: ${urlIndice}`);
-      const resIndice = await fetch(urlIndice, {
-        headers: { "User-Agent": USER_AGENT },
-        signal: AbortSignal.timeout(15000)
-      });
-      if (!resIndice.ok) continue;
-
-      const htmlIndice = await resIndice.text();
-      const $idx = cheerio.load(htmlIndice);
-
-      const urlsSecciones = new Set();
+      console.log(`🔗 Leyendo boletín: ${urlIndice}`);
+      
+      // Derivamos las URLs estándar de las secciones a partir de la URL del boletín (ej: .../2026/153/)
       const baseUrlBoletin = urlIndice.substring(0, urlIndice.lastIndexOf("/") + 1);
+      const paginasAEvaluar = [
+        urlIndice,
+        `${baseUrlBoletin}s51.html`, // Disposiciones generales
+        `${baseUrlBoletin}s52.html`, // Autoridades y personal
+        `${baseUrlBoletin}s53.html`, // Otras disposiciones
+        `${baseUrlBoletin}s55.html`  // Anuncios
+      ];
 
-      // Recogemos todos los enlaces internos de la tabla de contenidos (ej. s51.html, s52.html...)
-      $idx("a").each((_, el) => {
-        let hrefSec = $idx(el).attr("href") || "";
-        // Si el enlace apunta a un archivo de sección interna o similar
-        if (hrefSec && (hrefSec.includes("s5") || hrefSec.includes(".html")) && !hrefSec.startsWith("http") && !hrefSec.includes("sumario")) {
-          urlsSecciones.add(baseUrlBoletin + hrefSec);
-        }
-      });
-
-      // Añadimos también la propia página índice por si contiene algún PDF directo
-      urlsSecciones.add(urlIndice);
-
-      console.log(`📂 Secciones encontradas en este boletín: ${urlsSecciones.size}`);
-
-      // 3. Entramos en cada sección a extraer los PDFs y títulos
-      for (const urlSeccion of urlsSecciones) {
+      for (const urlPagina of paginasAEvaluar) {
         try {
-          const resSec = await fetch(urlSeccion, {
+          const resPag = await fetch(urlPagina, {
             headers: { "User-Agent": USER_AGENT },
-            signal: AbortSignal.timeout(15000)
+            signal: AbortSignal.timeout(10000)
           });
-          if (!resSec.ok) continue;
+          if (!resPag.ok) continue;
 
-          const htmlSec = await resSec.text();
-          const $sec = cheerio.load(htmlSec);
+          const htmlPag = await resPag.text();
+          const $ = cheerio.load(htmlPag);
 
-          $sec("a[href*='.pdf']").each((_, el) => {
-            let hrefPdf = $sec(el).attr("href") || "";
+          // Buscamos los enlaces a los PDF oficiales
+          $("a[href*='.pdf']").each((_, el) => {
+            let hrefPdf = $(el).attr("href") || "";
             if (hrefPdf.toLowerCase().includes("sumario") || hrefPdf.toLowerCase().includes("verificacion")) return;
 
             let urlPdfFinal = hrefPdf.startsWith("http") ? hrefPdf : urlBase + (hrefPdf.startsWith("/") ? hrefPdf : "/" + hrefPdf);
             
-            // Aislamos el texto puro del contenedor de la disposición
-            const $contenedor = $sec(el).closest("p, li, div.disposicion, tr, article");
+            // Extraemos el texto del bloque contenedor de la disposición
+            const $contenedor = $(el).closest("p, li, div.disposicion, tr, article");
             const $clon = $contenedor.clone();
             $clon.find("a, script, style").remove();
             
             let tituloAnuncio = $clon.text().replace(/\s+/g, " ").trim();
 
             if (tituloAnuncio.length < 25) {
-              tituloAnuncio = $sec(el).text().replace(/\s+/g, " ").trim();
+              tituloAnuncio = $(el).text().replace(/\s+/g, " ").trim();
             }
 
             tituloAnuncio = tituloAnuncio
@@ -378,13 +363,14 @@ async function ejecutarCapturadorBoja() {
               evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
             }
           });
-        } catch (e) {
-          // Ignoramos errores individuales de subsecciones para no romper el bucle
+
+        } catch (subErr) {
+          // Sección no disponible en este boletín, pasamos a la siguiente
         }
       }
 
     } catch (err) {
-      console.log(`⚠️ Error al procesar índice ${urlIndice}: ${err.message}`);
+      console.log(`⚠️ Error al procesar boletín ${urlIndice}: ${err.message}`);
     }
   }
 
@@ -392,7 +378,7 @@ async function ejecutarCapturadorBoja() {
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
   console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
 
-  // 4. Guardado en Supabase
+  // 3. Guardado en Supabase
   for (const d of unicos) {
     try {
       await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
