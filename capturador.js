@@ -244,140 +244,53 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Extrayendo anuncios del BOJA desde los sumarios activos...");
+  console.log("🔍 [DIAGNÓSTICO RSS] Consultando únicamente s51.xml...");
 
-  const urlBase = "https://www.juntadeandalucia.es";
-  
-  const hoy = new Date();
-  const yyyy = hoy.getFullYear();
-  const mm = String(hoy.getMonth() + 1).padStart(2, '0');
-  const dd = String(hoy.getDate()).padStart(2, '0');
-  const fechaFormateada = `${yyyy}${mm}${dd}`;
-  
-  const urlDia = `${urlBase}/eboja/${fechaFormateada}.html`;
-  console.log(`🔗 Accediendo a los boletines de hoy en: ${urlDia}`);
+  const urlTest = "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
+  const documentosProcesados = [];
 
-  let htmlDia = "";
   try {
-    const resDia = await fetch(urlDia, {
+    const respuesta = await fetch(urlTest, {
       headers: { "User-Agent": USER_AGENT },
       signal: AbortSignal.timeout(15000)
     });
 
-    if (!resDia.ok) {
-      console.log(`⚠️ No se encontró boletín publicado para la fecha ${fechaFormateada}`);
+    if (!respuesta.ok) {
+      console.error(`❌ Error HTTP en RSS s51.xml: ${respuesta.status}`);
       return [];
     }
 
-    htmlDia = await resDia.text();
-  } catch (error) {
-    console.error("❌ Excepción al conectar con la página del día del BOJA:", error.message);
-    return [];
-  }
+    const xmlTexto = await respuesta.text();
+    const $ = cheerio.load(xmlTexto, { xmlMode: true });
 
-  const $dia = cheerio.load(htmlDia);
-  const urlsBoletinesHoy = new Set();
+    const totalItems = $("item").length;
+    console.log(`📦 Total de <item> encontrados en s51.xml: ${totalItems}`);
 
-  $dia("a").each((_, el) => {
-    let href = $dia(el).attr("href") || "";
-    let texto = $dia(el).text().toLowerCase();
+    $("item").each((i, item) => {
+      const titulo = $(item).find("title").text().trim();
+      const enlace = $(item).find("link").text().trim() || $(item).find("guid").text().trim();
+      const fecha = $(item).find("pubDate").text().trim() || $(item).find("date").text().trim();
 
-    if (href && !href.endsWith(".pdf") && (href.includes(`/${yyyy}/`) || texto.includes("boletín"))) {
-      let urlAbsoluta = "";
-      if (href.startsWith("http")) {
-        urlAbsoluta = href;
-      } else if (href.startsWith("/eboja/")) {
-        urlAbsoluta = urlBase + href;
-      } else if (href.startsWith("/")) {
-        urlAbsoluta = `${urlBase}/eboja${href}`;
-      } else {
-        urlAbsoluta = `${urlBase}/eboja/${href}`;
-      }
-      
-      // Forzamos que apunte a la página completa del sumario index.html
-      if (!urlAbsoluta.endsWith("index.html") && !urlAbsoluta.endsWith(".html")) {
-        urlAbsoluta = urlAbsoluta.endsWith("/") ? `${urlAbsoluta}index.html` : `${urlAbsoluta}/index.html`;
+      if (i < 5) {
+        console.log(`--- ÍTEM ${i + 1} ---`);
+        console.log(`Título: ${titulo}`);
+        console.log(`Enlace: ${enlace}`);
+        console.log(`Fecha: ${fecha}`);
       }
 
-      urlsBoletinesHoy.add(urlAbsoluta);
-    }
-  });
+      if (titulo && enlace) {
+        // Probamos a evaluar con tu lógica actual para ver si pasa los filtros
+        evaluarYGuardar(titulo, enlace, "JUNTA DE ANDALUCÍA", documentosProcesados);
+      }
+    });
 
-  const listaBoletines = Array.from(urlsBoletinesHoy);
-  console.log(`📌 Procesando ${listaBoletines.length} boletín(es) de hoy:`, listaBoletines);
+    console.log(`🎯 Anuncios relevantes capturados tras evaluar s51.xml: ${documentosProcesados.length}`);
 
-  const documentosProcesados = [];
-
-  for (const urlBoletin of listaBoletines) {
-    if (urlBoletin.endsWith("/BOJA") || urlBoletin.endsWith("/BOJA/index.html")) continue;
-
-    try {
-      console.log(`🔗 Analizando sumario: ${urlBoletin}`);
-      const resSumario = await fetch(urlBoletin, {
-        headers: { "User-Agent": USER_AGENT },
-        signal: AbortSignal.timeout(20000)
-      });
-
-      if (!resSumario.ok) continue;
-
-      const htmlSumario = await resSumario.text();
-      const $ = cheerio.load(htmlSumario);
-
-      $("a[href*='.pdf']").each((_, el) => {
-        let href = $(el).attr("href") || "";
-        
-        // Omitir enlaces a sumarios o verificaciones
-        if (href.toLowerCase().includes("sumario") || href.toLowerCase().includes("verificacion")) return;
-
-        let urlPdfFinal = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
-        
-        // Extraer texto del párrafo, ítem de lista o bloque contenedor
-        let bloquePadre = $(el).closest("li, p, div.disposicion, tr").text().replace(/\s+/g, " ").trim();
-        let textoEnlace = $(el).text().replace(/\s+/g, " ").trim();
-
-        let tituloAnuncio = bloquePadre.length > 30 ? bloquePadre : textoEnlace;
-
-        // Limpiar basura de botones e interfaz
-        tituloAnuncio = tituloAnuncio
-          .replace(/PDF oficial auténtico/gi, "")
-          .replace(/Otros formatos/gi, "")
-          .replace(/Verificar autenticidad/gi, "")
-          .replace(/texto núm\..*$/gi, "")
-          .replace(/páginas?.*$/gi, "")
-          .trim();
-
-        // Descartar encabezados generales de sumario o textos muy cortos
-        if (tituloAnuncio.length > 25 && !tituloAnuncio.toLowerCase().startsWith("sumario")) {
-          evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
-        }
-      });
-
-    } catch (err) {
-      console.log(`⚠️ Error al leer boletín en ${urlBoletin}: ${err.message}`);
-    }
+  } catch (err) {
+    console.error("❌ Excepción al leer el RSS s51.xml:", err.message);
   }
 
-  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
-
-  for (const d of unicos) {
-    try {
-      await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
-        method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify({
-          titulo: d.titulo,
-          url_pdf: d.url_pdf,
-          categoria: d.sector,
-          origen: "BOJA"
-        })
-      });
-    } catch (err) {
-      console.log(`⚠️ Aviso al guardar en Supabase: ${err.message}`);
-    }
-  }
-
-  return unicos;
+  return documentosProcesados;
 }
 
 export { ejecutarCapturadorBoja as ejecutarBOJA };
