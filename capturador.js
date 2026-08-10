@@ -244,44 +244,85 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Consultando el feed oficial RSS/XML del BOJA...");
+  console.log("🚀 Extrayendo anuncios del BOJA desde el boletín HTML del día...");
 
-  // URL del feed RSS oficial con las publicaciones más recientes del BOJA
-  const urlRss = "https://www.juntadeandalucia.es/boja/rss/";
-  let xmlTexto = "";
+  const urlBase = "https://www.juntadeandalucia.es";
+  let htmlSumario = "";
 
   try {
-    const res = await fetch(urlRss, { 
-      headers: { "User-Agent": USER_AGENT }, 
-      signal: AbortSignal.timeout(20000) 
+    // 1. Accedemos a la portada principal para cazar el enlace exacto del boletín de hoy
+    const resPortada = await fetch(`${urlBase}/boja`, { 
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(15000) 
     });
-    if (!res.ok) {
-      console.error(`❌ Error al acceder al RSS del BOJA: ${res.status}`);
+    const htmlPortada = await resPortada.text();
+    const $portada = cheerio.load(htmlPortada);
+
+    // Buscar el enlace al sumario del boletín actual (rutas que contengan el año en curso)
+    const anioActual = new Date().getFullYear();
+    let enlaceSumario = $portada(`a[href*="/eboja/${anioActual}/"]`).first().attr("href");
+
+    if (!enlaceSumario) {
+      // Fallback a la redirección general si no encuentra la ruta específica
+      enlaceSumario = "/eboja.html";
+    }
+
+    const urlUltimoBoletin = enlaceSumario.startsWith("http") ? enlaceSumario : urlBase + enlaceSumario;
+    console.log(`🔗 Sumario localizado en: ${urlUltimoBoletin}`);
+
+    // 2. Descargamos el HTML del sumario real de hoy
+    const resSumario = await fetch(urlUltimoBoletin, { 
+      headers: { "User-Agent": USER_AGENT },
+      redirect: "follow",
+      signal: AbortSignal.timeout(15000) 
+    });
+    
+    if (!resSumario.ok) {
+      console.error(`❌ Error al acceder al sumario HTML: ${resSumario.status}`);
       return [];
     }
-    xmlTexto = await res.text();
+    htmlSumario = await resSumario.text();
   } catch (error) {
-    console.error("❌ Excepción al conectar con el RSS del BOJA:", error.message);
+    console.error("❌ Excepción al conectar con el BOJA:", error.message);
     return [];
   }
 
-  // Parseamos el XML con Cheerio en modo XML
-  const $ = cheerio.load(xmlTexto, { xmlMode: true });
+  const $ = cheerio.load(htmlSumario);
   const documentosProcesados = [];
 
-  $("item").each((_, el) => {
-    const titulo = $(el).find("title").text().replace(/\s+/g, " ").trim();
-    const urlPdf = $(el).find("link").text().trim() || $(el).find("guid").text().trim();
-    const consejeria = $(el).find("category").text().trim() || "JUNTA DE ANDALUCÍA";
+  // 3. Extraemos todos los enlaces a PDFs y sus textos padres
+  $("a[href$='.pdf']").each((_, el) => {
+    let href = $(el).attr("href");
+    
+    // Omitimos el PDF del sumario general o de verificación
+    if (href.includes("sumario") || href.includes("verificacion")) return;
 
-    if (titulo.length > 15) {
-      evaluarYGuardar(titulo, urlPdf, consejeria, documentosProcesados);
+    let urlPdfFinal = href.startsWith("http") ? href : urlBase + href;
+    let textoEnlace = $(el).text().trim();
+    let tituloAnuncio = "";
+
+    // A veces el enlace solo pone "PDF" o pesa "234 KB". En ese caso, tomamos el texto del elemento padre (<li>)
+    if (textoEnlace.toUpperCase() === "PDF" || textoEnlace.toUpperCase().includes("KB") || textoEnlace.length < 15) {
+       tituloAnuncio = $(el).parent().text().replace(/\s+/g, " ").trim();
+    } else {
+       tituloAnuncio = textoEnlace.replace(/\s+/g, " ").trim();
+    }
+
+    // Limpiamos la basura de maquetación del HTML (pesos de archivos y páginas)
+    tituloAnuncio = tituloAnuncio.replace(/PDF\s*-.*$/i, "").trim();
+    tituloAnuncio = tituloAnuncio.replace(/texto núm\..*$/i, "").trim();
+    tituloAnuncio = tituloAnuncio.replace(/páginas?.*$/i, "").trim();
+
+    // Filtramos los títulos que tengan sentido y evaluamos sus keywords
+    if (tituloAnuncio.length > 20) {
+      evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
     }
   });
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes capturados desde el RSS del BOJA: ${unicos.length}`);
+  console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
 
+  // 4. Guardado en Supabase
   for (const d of unicos) {
     try {
       await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
@@ -301,5 +342,4 @@ async function ejecutarCapturadorBoja() {
 
   return unicos;
 }
-
 export { ejecutarCapturadorBoja as ejecutarBOJA };
