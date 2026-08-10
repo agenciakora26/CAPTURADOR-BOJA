@@ -32,35 +32,33 @@ async function supabaseRequest(endpoint, opciones = {}) {
 async function enriquecerTitulosConIA(anuncios) {
   if (!anuncios || anuncios.length === 0) return anuncios;
 
-  console.log(`⚡ Generando resúmenes automáticos avanzados para ${anuncios.length} anuncios...`);
+  console.log(`⚡ Generando resúmenes de alto valor profesional para ${anuncios.length} anuncios...`);
 
   anuncios.forEach(a => {
     let titulo = (a.titulo || "").trim();
     
-    // Si el título viene cortado por el final, le quitamos los puntos suspensivos o coletillas colgadas
-    if (/(para la|se somete a|de|del|en|por|el|la)$/i.test(titulo)) {
-      titulo = titulo.replace(/(para la|se somete a|de|del|en|por|el|la)$/i, "").trim();
-    }
+    // Limpiamos fragmentos huérfanos al inicio si los hubiera
+    titulo = titulo.replace(/^(de|y|la|el|en|por|a)\s+/i, "");
     a.titulo = titulo;
 
-    const tituloLower = titulo.toLowerCase();
-    let explicacion = "Información oficial de interés profesional publicada en el boletín.";
+    const tLower = titulo.toLowerCase();
+    let beneficio = "Documento oficial de relevancia para la gestión y normativa del sector.";
 
-    if (tituloLower.includes("nombr") || tituloLower.includes("cese") || tituloLower.includes("personal eventual")) {
-      explicacion = "Nombramiento, cese o asignación de cargos y personal directivo en la administración.";
-    } else if (tituloLower.includes("subvenc") || tituloLower.includes("ayuda") || tituloLower.includes("concesion") || tituloLower.includes("bases reguladoras")) {
-      explicacion = "Convocatoria o bases de ayudas y subvenciones públicas dirigidas a sectores económicos.";
-    } else if (tituloLower.includes("oposic") || tituloLower.includes("empleo publico") || tituloLower.includes("aspirantes") || tituloLower.includes("plazas")) {
-      explicacion = "Convocatoria de empleo público, plazas vacantes, tribunales o listas de aprobados.";
-    } else if (tituloLower.includes("corrección de errores") || tituloLower.includes("rectificación")) {
-      explicacion = "Corrección oficial de erratas detectadas en decretos o publicaciones anteriores.";
-    } else if (tituloLower.includes("información pública") || tituloLower.includes("autorización ambiental") || tituloLower.includes("impacto")) {
-      explicacion = "Apertura de expediente e información pública para alegaciones sobre proyectos o instalaciones.";
-    } else if (tituloLower.includes("estructura orgánica") || tituloLower.includes("competencias")) {
-      explicacion = "Modificación de la estructura orgánica, delegación de competencias o organización interna.";
+    if (tLower.includes("nombr") || tLower.includes("cese") || tLower.includes("personal")) {
+      beneficio = "Modificación de personal o altos cargos. Esencial para conocer interlocutores y cambios en la estructura directiva.";
+    } else if (tLower.includes("subvenc") || tLower.includes("ayuda") || tLower.includes("bases reguladoras"))  {
+      beneficio = "Nueva línea de financiación o fondos públicos. Clave para evaluar plazos, requisitos y solicitud de incentivos.";
+    } else if (tLower.includes("oposic") || tLower.includes("empleo") || tLower.includes("aspirantes") || tLower.includes("plazas")) {
+      beneficio = "Convocatoria de empleo público o listados de selección. Vital para aspirantes y seguimiento de procesos selectivos.";
+    } else if (tLower.includes("corrección de errores") || tLower.includes("erratas")) {
+      beneficio = "Subsanación de errores en disposiciones anteriores. Importante para asegurar la seguridad jurídica de los datos correctos.";
+    } else if (tLower.includes("información pública") || tLower.includes("somete") || tLower.includes("autorización ambiental")) {
+      beneficio = "Apertura de plazo para alegaciones ciudadanas o empresariales. Oportunidad clave para revisar proyectos o presentar oposiciones.";
+    } else if (tLower.includes("contrat") || tLower.includes("licitacion") || tLower.includes("adjudicacion")) {
+      beneficio = "Expediente de contratación pública. Interesante para empresas y autónomos que buscan licitar con la administración.";
     }
 
-    a.resumenIA = explicacion;
+    a.resumenIA = beneficio;
   });
 
   return anuncios;
@@ -131,9 +129,10 @@ async function iniciarProcesoGlobal() {
       <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #10b981; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
         <span style="font-size: 11px; font-weight: bold; background: #ecfdf5; color: #047857; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
         <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 10px 0; line-height: 1.4;">${r.titulo}</h4>
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 12px; margin-bottom: 12px; border-radius: 4px;">
-          <p style="font-size: 13px; color: #334155; margin: 0; line-height: 1.4;"><strong>¿Por qué te interesa?:</strong> ${r.resumenIA || r.titulo}</p>
-        </div>
+       <div style="background-color: #f8f9fa; border-left: 4px solid #10b981; padding: 10px 15px; margin-top: 10px; border-radius: 4px;">
+  <strong style="color: #065f46; font-size: 13px;">💡 Impacto Profesional:</strong> 
+  <span style="color: #374151; font-size: 13px;">${anuncio.resumenIA}</span>
+</div>
         <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #047857; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
       </div>
     `).join("") : `<p style="font-size: 14px; color: #64748b; font-style: italic; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px dashed #cbd5e1;">No hay ningún anuncio en esta sección.</p>`;
