@@ -327,21 +327,19 @@ async function ejecutarCapturadorBoja() {
       const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
       const pdfDocument = await loadingTask.promise;
 
-      let anunciosPagina = [];
+      let itemsGlobal = [];
 
       for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
         const page = await pdfDocument.getPage(pageNum);
         const textContent = await page.getTextContent();
         const annotations = await page.getAnnotations();
 
-        // Extraemos texto con sus coordenadas
         const items = textContent.items.map(item => ({
           str: item.str.trim(),
           x: item.transform[4],
           y: item.transform[5]
         })).filter(item => item.str.length > 0);
 
-        // Extraemos los enlaces de anotaciones y sus URLs reales
         const links = annotations
           .filter(annot => annot.subtype === "Link" && annot.url)
           .map(annot => ({
@@ -350,77 +348,74 @@ async function ejecutarCapturadorBoja() {
             y: annot.rect[1]
           }));
 
-        // Agrupamos las líneas por posición vertical (y similar) para formar párrafos completos sin cortes
-        let lineasY = {};
         items.forEach(item => {
-          // Redondeamos la coordenada Y para agrupar elementos de la misma línea visual
-          let posY = Math.round(item.y / 8) * 8;
-          if (!lineasY[posY]) lineasY[posY] = [];
-          lineasY[posY].push(item);
-        });
-
-        // Ordenamos las líneas de arriba a abajo
-        const posysOrdenadas = Object.keys(lineasY).map(Number).sort((a, b) => b - a);
-
-        let textoAcumulado = "";
-        let urlAsociadaActual = urlPdfSumario;
-
-        posysOrdenadas.forEach(y => {
-          const lineaItems = lineasY[y].sort((a, b) => a.x - b.x);
-          const textoLinea = lineaItems.map(i => i.str).join(" ");
-
-          // Buscamos si hay un enlace oficial de PDF cerca de esta línea vertical
-          const linkCercano = links.find(l => Math.abs(l.y - y) < 15);
-          if (linkCercano && linkCercano.url) {
-            urlAsociadaActual = linkCercano.url;
+          let urlAsociada = urlPdfSumario; 
+          const matchLink = links.find(l => Math.abs(l.y - item.y) < 15 && Math.abs(l.x - item.x) < 120);
+          if (matchLink) {
+            urlAsociada = matchLink.url;
           }
 
-          // Si detectamos la marca de fin de anuncio del sumario ("texto núm...")
-          if (/texto núm\./i.test(textoLinea)) {
-            textoAcumulado += " " + textoLinea;
-            
-            // Limpiamos la cadena para dejar solo el título limpio del anuncio
-            let tituloFinal = textoAcumulado
-              .replace(/CONSEJERÍA DE [A-ZÁÉÍÓÚÑ,\s]+/g, "")
-              .replace(/AYUNTAMIENTO DE [A-ZÁÉÍÓÚÑ,\s]+/g, "")
-              .replace(/texto núm\.\s*\d+.*?(página[s]?)?/gi, "")
-              .replace(/^[\.,\s]+/, "")
-              .trim();
-
-            if (tituloFinal.length > 25) {
-              // Evitamos títulos partidos o fragmentados al inicio
-              if (!/^(de|y|la|el|en|por)\s/i.test(tituloFinal)) {
-                evaluarYGuardar(tituloFinal, urlAsociadaActual, "General", documentosProcesados);
-              }
-            }
-            textoAcumulado = ""; // Reiniciamos para el siguiente anuncio
-          } else {
-            textoAcumulado += " " + textoLinea;
-          }
+          itemsGlobal.push({
+            texto: item.str,
+            url: urlAsociada,
+            y: item.y,
+            x: item.x
+          });
         });
       }
-    } catch (err) {
-      console.log(`⚠️ Error procesando PDF de sumario: ${err.message}`);
-    }
-  }
 
-  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes totales encontrados en el BOJA: ${unicos.length}`);
+      // Ordenamos de arriba a abajo y de izquierda a derecha
+      itemsGlobal.sort((a, b) => Math.abs(b.y - a.y) > 8 ? b.y - a.y : a.x - b.x);
 
-  for (const d of unicos) {
-    try {
-      await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
-        method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify({
-          titulo: d.titulo,
-          url_pdf: d.url_pdf,
-          categoria: d.sector,
-          origen: "BOJA"
-        })
+      let textoPaginas = "";
+      let mapeoEnlaces = [];
+
+      itemsGlobal.forEach(item => {
+        textoPaginas += " " + item.texto;
+        if (item.url && item.url !== urlPdfSumario) {
+          mapeoEnlaces.push({ texto: item.texto, url: item.url });
+        }
       });
+
+      textoPaginas = textoPaginas.replace(/\s+/g, " ");
+
+      // Troceamos cada anuncio utilizando la marca "texto núm." como separación exacta
+      const bloques = textoPaginas.split(/texto núm\./gi);
+      let consejeriaActual = "JUNTA DE ANDALUCÍA";
+
+      for (let i = 1; i < bloques.length; i++) {
+        const bloque = bloques[i];
+        const partes = bloque.split(/-\s*\d+\s*página[s]?/i);
+        if (partes.length === 0) continue;
+
+        let textoAnuncio = partes[0].trim();
+
+        // Extraer y actualizar la Consejería si aparece en el bloque
+        const matchesConsejeria = textoAnuncio.match(/(CONSEJERÍA DE [A-ZÁÉÍÓÚÑ,\s]+|UNIVERSIDADES|OTRAS ENTIDADES PÚBLICAS)/g);
+        if (matchesConsejeria && matchesConsejeria.length > 0) {
+          consejeriaActual = matchesConsejeria[matchesConsejeria.length - 1].trim();
+          textoAnuncio = textoAnuncio.replace(consejeriaActual, "").trim();
+        }
+
+        // Limpieza de símbolos sobrantes al inicio
+        textoAnuncio = textoAnuncio.replace(/^[\.,\s]+/, "").trim();
+
+        if (textoAnuncio.length > 20) {
+          // Buscamos el enlace específico del PDF asociado
+          let urlEspecifica = urlPdfSumario;
+          for (const m of mapeoEnlaces) {
+            if (textoAnuncio.includes(m.texto.substring(0, 15))) {
+              urlEspecifica = m.url;
+              break;
+            }
+          }
+
+          evaluarYGuardar(textoAnuncio, urlEspecifica, consejeriaActual, documentosProcesados);
+        }
+      }
+
     } catch (err) {
-      console.log(`⚠️ Aviso al guardar anuncio: ${err.message}`);
+      console.log(`⚠️ Error procesando PDF de sumario BOJA: ${err.message}`);
     }
   }
 
