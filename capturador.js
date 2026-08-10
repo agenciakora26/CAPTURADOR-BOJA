@@ -244,315 +244,417 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-    console.log("🚀 [BOJA] Capturador mediante RSS oficial...");
+    console.log("🚀 [BOJA] Capturador completo: ordinarios + extraordinarios + complementarios...");
 
-    const RSS_BOJA = [
-    {
-        nombre: "Disposiciones generales",
-        url: "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
-    },
-    {
-        nombre: "Nombramientos, situaciones e incidencias",
-        url: "https://www.juntadeandalucia.es/boja/distribucion/s52.xml"
-    },
-    {
-        nombre: "Oposiciones, concursos y otras convocatorias",
-        url: "https://www.juntadeandalucia.es/boja/distribucion/s53.xml"
-    },
-    {
-        nombre: "Otras disposiciones",
-        url: "https://www.juntadeandalucia.es/boja/distribucion/s54.xml"
-    },
-    {
-        nombre: "Administración de justicia",
-        url: "https://www.juntadeandalucia.es/boja/distribucion/s55.xml"
-    },
-    {
-        nombre: "Licitaciones públicas y adjudicaciones",
-        url: "https://www.juntadeandalucia.es/boja/distribucion/s56.xml"
-    },
-    {
-        nombre: "Otros anuncios oficiales",
-        url: "https://www.juntadeandalucia.es/boja/distribucion/s57.xml"
-    }
-];
-
+    const urlBase = "https://www.juntadeandalucia.es";
     const documentosProcesados = [];
 
-    // ==========================================================
-    // FUNCIÓN: Obtener el PDF desde la página HTML de la disposición
-    // ==========================================================
-    async function obtenerPDFDesdePublicacion(urlPublicacion) {
-        try {
-            console.log(`🌐 Abriendo publicación BOJA: ${urlPublicacion}`);
+    // ============================================================
+    // 1. FECHA ACTUAL
+    // ============================================================
 
-            const respuesta = await fetch(urlPublicacion, {
-                headers: {
-                    "User-Agent": USER_AGENT
-                },
-                signal: AbortSignal.timeout(20000)
-            });
+    const hoy = new Date();
 
-            console.log(`📡 HTTP publicación: ${respuesta.status}`);
+    const yyyy = hoy.getFullYear();
+    const mm = String(hoy.getMonth() + 1).padStart(2, "0");
+    const dd = String(hoy.getDate()).padStart(2, "0");
 
-            if (!respuesta.ok) {
-                console.log(
-                    `⚠️ No se pudo abrir la publicación: ${respuesta.status}`
-                );
-                return null;
-            }
+    const fechaHoy = `${yyyy}${mm}${dd}`;
 
-            const html = await respuesta.text();
+    console.log(`📅 Fecha de búsqueda: ${fechaHoy}`);
 
-            if (!html || html.length < 100) {
-                console.log("⚠️ La página de publicación está vacía");
-                return null;
-            }
+    // ============================================================
+    // 2. BUSCAR TODOS LOS BOLETINES PUBLICADOS HOY
+    //
+    // Esta página puede contener:
+    // - BOJA ordinario
+    // - BOJA extraordinario
+    // - BOJA complementario
+    // - varios boletines extraordinarios el mismo día
+    //
+    // NO asumimos que el número sea 153, 154, 512, etc.
+    // ============================================================
 
-            const $ = cheerio.load(html);
+    const urlBoletinesDia = `${urlBase}/eboja/${fechaHoy}.html`;
 
-            let urlPDF = null;
+    console.log(`🔎 Consultando boletines del día: ${urlBoletinesDia}`);
 
-            // --------------------------------------------------
-            // Buscar enlaces PDF directamente
-            // --------------------------------------------------
-            $("a").each((_, el) => {
-                if (urlPDF) return;
+    let htmlDia = "";
 
-                const href = $(el).attr("href") || "";
-                const texto = $(el).text().toLowerCase().trim();
+    try {
+        const respuestaDia = await fetch(urlBoletinesDia, {
+            headers: {
+                "User-Agent": USER_AGENT
+            },
+            signal: AbortSignal.timeout(20000)
+        });
 
-                if (!href) return;
+        console.log(`📡 HTTP página de boletines: ${respuestaDia.status}`);
 
-                const hrefLower = href.toLowerCase();
-
-                // PDF directo
-                if (
-                    hrefLower.includes(".pdf") &&
-                    !hrefLower.includes("sumario") &&
-                    !hrefLower.includes("verificacion")
-                ) {
-                    urlPDF = href;
-                    console.log(`📄 PDF encontrado por href: ${href}`);
-                    return;
-                }
-
-                // Enlace cuyo texto indica que es el PDF
-                if (
-                    texto.includes("descargar la disposición en pdf") ||
-                    texto.includes("descargar disposición en pdf") ||
-                    texto.includes("disposición en pdf") ||
-                    texto.includes("pdf oficial")
-                ) {
-                    urlPDF = href;
-                    console.log(`📄 PDF encontrado por texto: ${href}`);
-                }
-            });
-
-            // --------------------------------------------------
-            // Si encontramos PDF, convertirlo en URL absoluta
-            // --------------------------------------------------
-            if (urlPDF) {
-                const urlAbsoluta = new URL(
-                    urlPDF,
-                    urlPublicacion
-                ).href;
-
-                console.log(`✅ URL PDF definitiva: ${urlAbsoluta}`);
-
-                return urlAbsoluta;
-            }
-
+        if (!respuestaDia.ok) {
             console.log(
-                "❌ No se encontró ningún PDF en la página de la disposición"
+                `⚠️ No se pudo consultar la página de boletines del día. HTTP ${respuestaDia.status}`
             );
-
-            return null;
-
-        } catch (error) {
-            console.error(
-                `❌ Error obteniendo PDF desde ${urlPublicacion}:`,
-                error.message
-            );
-
-            return null;
+            return [];
         }
+
+        htmlDia = await respuestaDia.text();
+
+    } catch (error) {
+        console.error(
+            "❌ Error consultando los boletines del día:",
+            error.message
+        );
+        return [];
     }
 
-    // ==========================================================
-    // LEER LOS RSS OFICIALES
-    // ==========================================================
+    if (!htmlDia || htmlDia.length < 100) {
+        console.log("⚠️ La página de boletines del día está vacía.");
+        return [];
+    }
 
-    for (const fuente of RSS_BOJA) {
-        try {
-            console.log(`📡 Leyendo RSS: ${fuente.nombre}`);
-            console.log(`🔗 ${fuente.url}`);
+    const $dia = cheerio.load(htmlDia);
 
-            const respuesta = await fetch(fuente.url, {
-                headers: {
-                    "User-Agent": USER_AGENT
-                },
-                signal: AbortSignal.timeout(20000)
-            });
+    // ============================================================
+    // 3. DETECTAR AUTOMÁTICAMENTE TODOS LOS BOLETINES
+    // ============================================================
 
-            console.log(`📡 Respuesta HTTP: ${respuesta.status}`);
+    const boletinesDetectados = new Map();
 
-            if (!respuesta.ok) {
+    $dia("a").each((_, el) => {
+
+        const href = ($dia(el).attr("href") || "").trim();
+        const texto = $dia(el).text().replace(/\s+/g, " ").trim();
+
+        if (!href) return;
+
+        // Buscamos enlaces que apunten a:
+        //
+        // /boja/2026/153/
+        // /boja/2026/512/
+        // /boja/2026/210202/
+        //
+        // También admitimos enlaces absolutos.
+
+        const urlCompleta = href.startsWith("http")
+            ? href
+            : href.startsWith("/")
+                ? urlBase + href
+                : `${urlBase}/eboja/${href}`;
+
+        const match = urlCompleta.match(
+            /\/(?:boja|eboja)\/(\d{4})\/(\d{2,8})(?:\/|$)/i
+        );
+
+        if (!match) return;
+
+        const anio = match[1];
+        const numero = match[2];
+
+        if (anio !== String(yyyy)) return;
+
+        // Ignoramos enlaces que no parezcan boletines reales.
+        // Nos interesan especialmente enlaces que contengan:
+        // - boletín
+        // - extraordinario
+        // - complementario
+        // - o rutas /boja/YYYY/numero/
+
+        const textoLower = texto.toLowerCase();
+
+        const pareceBoletin =
+            textoLower.includes("boletín") ||
+            textoLower.includes("boletin") ||
+            textoLower.includes("extraordinario") ||
+            textoLower.includes("complementario") ||
+            /\/boja\/\d{4}\/\d{2,8}\//i.test(urlCompleta);
+
+        if (!pareceBoletin) return;
+
+        // Base del boletín.
+        //
+        // Ejemplos:
+        // https://www.juntadeandalucia.es/boja/2026/153/
+        // https://www.juntadeandalucia.es/boja/2026/512/
+        // https://www.juntadeandalucia.es/boja/2026/210202/
+
+        const baseBoletin =
+            `${urlBase}/boja/${anio}/${numero}/`;
+
+        boletinesDetectados.set(baseBoletin, {
+            anio,
+            numero,
+            url: baseBoletin,
+            texto
+        });
+    });
+
+    // ============================================================
+    // 4. SEGUNDA COMPROBACIÓN:
+    // SI LA PÁGINA DEL DÍA TIENE ENLACES DIRECTOS A /eboja/
+    // LOS DETECTAMOS TAMBIÉN.
+    // ============================================================
+
+    $dia("a").each((_, el) => {
+
+        const href = ($dia(el).attr("href") || "").trim();
+
+        if (!href) return;
+
+        const urlCompleta = href.startsWith("http")
+            ? href
+            : href.startsWith("/")
+                ? urlBase + href
+                : `${urlBase}/eboja/${href}`;
+
+        const match = urlCompleta.match(
+            /\/(?:boja|eboja)\/(\d{4})\/(\d{2,8})(?:\/|$)/i
+        );
+
+        if (!match) return;
+
+        const anio = match[1];
+        const numero = match[2];
+
+        if (anio !== String(yyyy)) return;
+
+        const baseBoletin =
+            `${urlBase}/boja/${anio}/${numero}/`;
+
+        boletinesDetectados.set(baseBoletin, {
+            anio,
+            numero,
+            url: baseBoletin,
+            texto: $dia(el).text().replace(/\s+/g, " ").trim()
+        });
+    });
+
+    const boletines = Array.from(boletinesDetectados.values());
+
+    console.log("======================================");
+    console.log(`📚 BOLETINES DETECTADOS HOY: ${boletines.length}`);
+    console.log("======================================");
+
+    if (boletines.length === 0) {
+        console.log("ℹ️ No se han detectado boletines publicados hoy.");
+        return [];
+    }
+
+    boletines.forEach((boletin, index) => {
+        console.log(
+            `📖 ${index + 1}. BOJA ${boletin.numero} → ${boletin.url}`
+        );
+    });
+
+    // ============================================================
+    // 5. SECCIONES OFICIALES DEL BOJA
+    //
+    // NO usamos s58/s59 porque la estructura oficial actual llega
+    // hasta 5.2, representada aquí por s57.
+    //
+    // Si alguna sección no existe en un boletín concreto,
+    // simplemente se ignora.
+    // ============================================================
+
+    const secciones = [
+        "s51.html", // 1. Disposiciones generales
+        "s52.html", // 2.1 Nombramientos, situaciones e incidencias
+        "s53.html", // 2.2 Oposiciones, concursos y convocatorias
+        "s54.html", // 3. Otras disposiciones
+        "s55.html", // 4. Administración de justicia
+        "s56.html", // 5.1 Licitaciones públicas y adjudicaciones
+        "s57.html"  // 5.2 Otros anuncios oficiales
+    ];
+
+    // ============================================================
+    // 6. PROCESAR CADA BOLETÍN
+    // ============================================================
+
+    for (const boletin of boletines) {
+
+        console.log("");
+        console.log("======================================");
+        console.log(
+            `📖 PROCESANDO BOJA ${boletin.numero}`
+        );
+        console.log(
+            `🔗 ${boletin.url}`
+        );
+        console.log("======================================");
+
+        for (const seccion of secciones) {
+
+            const urlSeccion = boletin.url + seccion;
+
+            try {
+
+                console.log(`📑 Comprobando ${seccion}: ${urlSeccion}`);
+
+                const respuesta = await fetch(urlSeccion, {
+                    headers: {
+                        "User-Agent": USER_AGENT
+                    },
+                    signal: AbortSignal.timeout(15000)
+                });
+
+                if (!respuesta.ok) {
+                    console.log(
+                        `↪️ ${seccion} no disponible (HTTP ${respuesta.status})`
+                    );
+                    continue;
+                }
+
+                const html = await respuesta.text();
+
+                if (!html || html.length < 100) {
+                    console.log(
+                        `↪️ ${seccion} está vacía`
+                    );
+                    continue;
+                }
+
+                const $ = cheerio.load(html);
+
                 console.log(
-                    `⚠️ RSS ${fuente.nombre} respondió HTTP ${respuesta.status}`
+                    `✅ ${seccion} disponible`
                 );
-                continue;
-            }
 
-            const xml = await respuesta.text();
+                // ====================================================
+                // 7. BUSCAR TODOS LOS PDF OFICIALES
+                // ====================================================
 
-            console.log(
-                `📄 Longitud del XML: ${xml.length} caracteres`
-            );
+                $("a").each((_, linkEl) => {
 
-            if (!xml || xml.length < 50) {
-                console.log(
-                    `⚠️ El RSS ${fuente.nombre} está vacío`
-                );
-                continue;
-            }
+                    let hrefPdf = ($(linkEl).attr("href") || "").trim();
 
-            const $rss = cheerio.load(xml, {
-                xmlMode: true
-            });
+                    if (!hrefPdf) return;
 
-            // ==================================================
-            // IMPORTANTE:
-            // El BOJA utiliza ATOM, por lo que buscamos "entry"
-            // y NO "item".
-            // ==================================================
+                    const hrefLower = hrefPdf.toLowerCase();
 
-            const entradas = $rss("entry");
+                    // Solo PDF
+                    if (!hrefLower.includes(".pdf")) return;
 
-            console.log(
-                `📚 ${fuente.nombre}: ${entradas.length} publicaciones encontradas`
-            );
+                    // Evitar sumarios y verificaciones
+                    if (hrefLower.includes("sumario")) return;
+                    if (hrefLower.includes("verificacion")) return;
+                    if (hrefLower.includes("verificación")) return;
 
-            // ==================================================
-            // PROCESAR CADA PUBLICACIÓN
-            // ==================================================
+                    // =================================================
+                    // CONSTRUIR URL ABSOLUTA
+                    // =================================================
 
-            for (let i = 0; i < entradas.length; i++) {
+                    let urlPdfFinal = "";
 
-                const entry = entradas[i];
-                const $entry = $rss(entry);
+                    if (hrefPdf.startsWith("http://") ||
+                        hrefPdf.startsWith("https://")) {
 
-                const titulo = $entry
-                    .find("title")
-                    .first()
-                    .text()
-                    .trim();
+                        urlPdfFinal = hrefPdf;
 
-                const descripcion = $entry
-                    .find("content")
-                    .first()
-                    .text()
-                    .trim();
+                    } else if (hrefPdf.startsWith("/")) {
 
-                const fecha = $entry
-                    .find("updated")
-                    .first()
-                    .text()
-                    .trim();
+                        urlPdfFinal = urlBase + hrefPdf;
 
-                // --------------------------------------------------
-                // En Atom el enlace está normalmente en:
-                // <link href="...">
-                // --------------------------------------------------
+                    } else {
 
-                let enlace = "";
+                        urlPdfFinal = boletin.url + hrefPdf;
+                    }
 
-                $entry.find("link").each((_, linkEl) => {
-                    if (enlace) return;
+                    // =================================================
+                    // OBTENER TÍTULO DEL ANUNCIO
+                    // =================================================
 
-                    const href = $rss(linkEl).attr("href") || "";
+                    const $contenedor = $(linkEl).closest(
+                        "p, li, div.disposicion, tr, article"
+                    );
+
+                    const $clon = $contenedor.clone();
+
+                    $clon.find("a, script, style").remove();
+
+                    let tituloAnuncio = $clon
+                        .text()
+                        .replace(/\s+/g, " ")
+                        .trim();
+
+                    // Si el contenedor no contiene suficiente texto,
+                    // utilizamos el texto del propio enlace.
+
+                    if (tituloAnuncio.length < 25) {
+
+                        tituloAnuncio = $(linkEl)
+                            .text()
+                            .replace(/\s+/g, " ")
+                            .trim();
+                    }
+
+                    // =================================================
+                    // LIMPIEZA DEL TÍTULO
+                    // =================================================
+
+                    tituloAnuncio = tituloAnuncio
+                        .replace(/PDF oficial auténtico/gi, "")
+                        .replace(/Otros formatos/gi, "")
+                        .replace(/Verificar autenticidad/gi, "")
+                        .replace(/texto núm\..*$/gi, "")
+                        .replace(/páginas?.*$/gi, "")
+                        .replace(/\s+/g, " ")
+                        .trim();
+
+                    // =================================================
+                    // VALIDAR TÍTULO
+                    // =================================================
 
                     if (
-                        href &&
-                        !href.includes("distribucions51.xml")
+                        tituloAnuncio.length > 20 &&
+                        !tituloAnuncio.toLowerCase().startsWith("sumario")
                     ) {
-                        enlace = href;
+
+                        console.log(
+                            `📄 PDF encontrado: ${urlPdfFinal}`
+                        );
+
+                        evaluarYGuardar(
+                            tituloAnuncio,
+                            urlPdfFinal,
+                            "JUNTA DE ANDALUCÍA",
+                            documentosProcesados
+                        );
                     }
                 });
 
-                if (!titulo || !enlace) {
-                    console.log(
-                        "⚠️ Publicación ignorada: falta título o enlace"
-                    );
-                    continue;
-                }
+            } catch (error) {
 
-                console.log("----------------------------------------");
-                console.log(`📰 Título: ${titulo}`);
-                console.log(`🔗 Publicación: ${enlace}`);
-                console.log(`📅 Fecha: ${fecha}`);
-
-                // --------------------------------------------------
-                // Buscar el PDF dentro de la página de la publicación
-                // --------------------------------------------------
-
-                const urlPDF = await obtenerPDFDesdePublicacion(
-                    enlace
-                );
-
-                if (!urlPDF) {
-                    console.log(
-                        "⚠️ No se encontró PDF para esta publicación"
-                    );
-                    continue;
-                }
-
-                console.log(`📄 PDF oficial: ${urlPDF}`);
-
-                // --------------------------------------------------
-                // Clasificar y guardar
-                // --------------------------------------------------
-
-                evaluarYGuardar(
-                    titulo,
-                    urlPDF,
-                    "JUNTA DE ANDALUCÍA",
-                    documentosProcesados
+                // Es normal que un boletín no tenga alguna sección.
+                console.log(
+                    `↪️ ${seccion} omitida: ${error.message}`
                 );
             }
-
-        } catch (error) {
-            console.error(
-                `❌ Error leyendo RSS ${fuente.nombre}:`,
-                error.message
-            );
         }
     }
 
-    // ==========================================================
-    // ELIMINAR DUPLICADOS
-    // ==========================================================
+    // ============================================================
+    // 8. ELIMINAR DUPLICADOS
+    // ============================================================
 
     const unicos = Array.from(
         new Map(
-            documentosProcesados.map(d => [
-                d.url_pdf,
-                d
-            ])
+            documentosProcesados.map(d => [d.url_pdf, d])
         ).values()
     );
 
+    console.log("");
     console.log("======================================");
     console.log(
-        `🎯 Anuncios relevantes encontrados: ${unicos.length}`
+        `🎯 ANUNCIOS RELEVANTES ENCONTRADOS: ${unicos.length}`
     );
     console.log("======================================");
 
-    // ==========================================================
-    // GUARDAR EN SUPABASE
-    // ==========================================================
+    // ============================================================
+    // 9. GUARDAR EN SUPABASE
+    // ============================================================
 
     for (const d of unicos) {
+
         try {
 
             await supabaseRequest(
@@ -585,23 +687,20 @@ async function ejecutarCapturadorBoja() {
         }
     }
 
+    console.log("");
+    console.log("======================================");
+    console.log("🏁 CAPTURADOR BOJA FINALIZADO");
+    console.log("======================================");
+
     return unicos;
 }
-
-
-// ==========================================================
-// FUNCIÓN DE PRUEBA DEL RSS
-// ==========================================================
 
 async function probarRSSBOJA() {
 
     const url =
         "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
 
-    console.log(
-        "📡 Probando RSS oficial del BOJA:"
-    );
-
+    console.log("📡 Probando RSS oficial del BOJA:");
     console.log(url);
 
     try {
@@ -610,34 +709,17 @@ async function probarRSSBOJA() {
             headers: {
                 "User-Agent": USER_AGENT
             },
-
             signal: AbortSignal.timeout(20000)
         });
 
-        console.log(
-            "📡 HTTP:",
-            res.status
-        );
-
-        console.log(
-            "📡 OK:",
-            res.ok
-        );
+        console.log("📡 HTTP:", res.status);
+        console.log("📡 OK:", res.ok);
 
         const xml = await res.text();
 
-        console.log(
-            "📄 Longitud XML:",
-            xml.length
-        );
-
-        console.log(
-            "📋 Primeros 5000 caracteres:"
-        );
-
-        console.log(
-            xml.substring(0, 5000)
-        );
+        console.log("📄 Longitud XML:", xml.length);
+        console.log("📋 Primeros 5000 caracteres:");
+        console.log(xml.substring(0, 5000));
 
         return xml;
 
@@ -652,11 +734,4 @@ async function probarRSSBOJA() {
     }
 }
 
-
-// ==========================================================
-// EXPORTACIÓN
-// ==========================================================
-
-export {
-    ejecutarCapturadorBoja as ejecutarBOJA
-};
+export { ejecutarCapturadorBoja as ejecutarBOJA };
