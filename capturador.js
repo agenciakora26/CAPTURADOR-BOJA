@@ -244,262 +244,395 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 [BOJA] Probando captación mediante RSS oficial...");
+    console.log("🚀 [BOJA] Capturador mediante RSS oficial...");
 
-  const RSS_BOJA = [
-    {
-      nombre: "Disposiciones generales",
-      url: "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
+    const RSS_BOJA = [
+        {
+            nombre: "Disposiciones generales",
+            url: "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
+        }
+    ];
+
+    const documentosProcesados = [];
+
+    // ==========================================================
+    // FUNCIÓN: Obtener el PDF desde la página HTML de la disposición
+    // ==========================================================
+    async function obtenerPDFDesdePublicacion(urlPublicacion) {
+        try {
+            console.log(`🌐 Abriendo publicación BOJA: ${urlPublicacion}`);
+
+            const respuesta = await fetch(urlPublicacion, {
+                headers: {
+                    "User-Agent": USER_AGENT
+                },
+                signal: AbortSignal.timeout(20000)
+            });
+
+            console.log(`📡 HTTP publicación: ${respuesta.status}`);
+
+            if (!respuesta.ok) {
+                console.log(
+                    `⚠️ No se pudo abrir la publicación: ${respuesta.status}`
+                );
+                return null;
+            }
+
+            const html = await respuesta.text();
+
+            if (!html || html.length < 100) {
+                console.log("⚠️ La página de publicación está vacía");
+                return null;
+            }
+
+            const $ = cheerio.load(html);
+
+            let urlPDF = null;
+
+            // --------------------------------------------------
+            // Buscar enlaces PDF directamente
+            // --------------------------------------------------
+            $("a").each((_, el) => {
+                if (urlPDF) return;
+
+                const href = $(el).attr("href") || "";
+                const texto = $(el).text().toLowerCase().trim();
+
+                if (!href) return;
+
+                const hrefLower = href.toLowerCase();
+
+                // PDF directo
+                if (
+                    hrefLower.includes(".pdf") &&
+                    !hrefLower.includes("sumario") &&
+                    !hrefLower.includes("verificacion")
+                ) {
+                    urlPDF = href;
+                    console.log(`📄 PDF encontrado por href: ${href}`);
+                    return;
+                }
+
+                // Enlace cuyo texto indica que es el PDF
+                if (
+                    texto.includes("descargar la disposición en pdf") ||
+                    texto.includes("descargar disposición en pdf") ||
+                    texto.includes("disposición en pdf") ||
+                    texto.includes("pdf oficial")
+                ) {
+                    urlPDF = href;
+                    console.log(`📄 PDF encontrado por texto: ${href}`);
+                }
+            });
+
+            // --------------------------------------------------
+            // Si encontramos PDF, convertirlo en URL absoluta
+            // --------------------------------------------------
+            if (urlPDF) {
+                const urlAbsoluta = new URL(
+                    urlPDF,
+                    urlPublicacion
+                ).href;
+
+                console.log(`✅ URL PDF definitiva: ${urlAbsoluta}`);
+
+                return urlAbsoluta;
+            }
+
+            console.log(
+                "❌ No se encontró ningún PDF en la página de la disposición"
+            );
+
+            return null;
+
+        } catch (error) {
+            console.error(
+                `❌ Error obteniendo PDF desde ${urlPublicacion}:`,
+                error.message
+            );
+
+            return null;
+        }
     }
-  ];
 
-  const documentosProcesados = [];
+    // ==========================================================
+    // LEER LOS RSS OFICIALES
+    // ==========================================================
 
-  for (const fuente of RSS_BOJA) {
-    try {
-      console.log(`📡 Leyendo RSS: ${fuente.nombre}`);
-      console.log(`🔗 ${fuente.url}`);
+    for (const fuente of RSS_BOJA) {
+        try {
+            console.log(`📡 Leyendo RSS: ${fuente.nombre}`);
+            console.log(`🔗 ${fuente.url}`);
 
-      const respuesta = await fetch(fuente.url, {
-        headers: {
-          "User-Agent": USER_AGENT
-        },
-        signal: AbortSignal.timeout(20000)
-      });
+            const respuesta = await fetch(fuente.url, {
+                headers: {
+                    "User-Agent": USER_AGENT
+                },
+                signal: AbortSignal.timeout(20000)
+            });
 
-      console.log(`📡 Respuesta HTTP: ${respuesta.status}`);
+            console.log(`📡 Respuesta HTTP: ${respuesta.status}`);
 
-      if (!respuesta.ok) {
-        console.log(
-          `⚠️ RSS ${fuente.nombre} respondió HTTP ${respuesta.status}`
-        );
-        continue;
-      }
+            if (!respuesta.ok) {
+                console.log(
+                    `⚠️ RSS ${fuente.nombre} respondió HTTP ${respuesta.status}`
+                );
+                continue;
+            }
 
-      const xml = await respuesta.text();
+            const xml = await respuesta.text();
 
-      console.log(`📄 Longitud del XML: ${xml.length} caracteres`);
+            console.log(
+                `📄 Longitud del XML: ${xml.length} caracteres`
+            );
 
-      if (!xml || xml.length < 50) {
-        console.log(`⚠️ El RSS ${fuente.nombre} está vacío`);
-        continue;
-      }
+            if (!xml || xml.length < 50) {
+                console.log(
+                    `⚠️ El RSS ${fuente.nombre} está vacío`
+                );
+                continue;
+            }
 
-      console.log("📋 Primeros 3000 caracteres del RSS:");
-      console.log(xml.substring(0, 3000));
+            const $rss = cheerio.load(xml, {
+                xmlMode: true
+            });
 
-      const $rss = cheerio.load(xml, {
-        xmlMode: true
-      });
+            // ==================================================
+            // IMPORTANTE:
+            // El BOJA utiliza ATOM, por lo que buscamos "entry"
+            // y NO "item".
+            // ==================================================
 
-      // ==========================================
-      // LA JUNTA UTILIZA ATOM (<entry>), NO <item>
-      // Aceptamos ambos formatos por seguridad
-      // ==========================================
-      const items = $rss("entry, item");
+            const entradas = $rss("entry");
 
-      console.log(
-        `📚 ${fuente.nombre}: ${items.length} publicaciones encontradas`
-      );
+            console.log(
+                `📚 ${fuente.nombre}: ${entradas.length} publicaciones encontradas`
+            );
 
-      items.each((_, item) => {
-        const $item = $rss(item);
+            // ==================================================
+            // PROCESAR CADA PUBLICACIÓN
+            // ==================================================
 
-        // ==========================================
-        // 1. TÍTULO
-        // ==========================================
-        const titulo = $item
-          .find("title")
-          .first()
-          .text()
-          .replace(/\s+/g, " ")
-          .trim();
+            for (let i = 0; i < entradas.length; i++) {
 
-        if (!titulo) {
-          console.log("⚠️ Publicación ignorada porque no tiene título");
-          return;
+                const entry = entradas[i];
+                const $entry = $rss(entry);
+
+                const titulo = $entry
+                    .find("title")
+                    .first()
+                    .text()
+                    .trim();
+
+                const descripcion = $entry
+                    .find("content")
+                    .first()
+                    .text()
+                    .trim();
+
+                const fecha = $entry
+                    .find("updated")
+                    .first()
+                    .text()
+                    .trim();
+
+                // --------------------------------------------------
+                // En Atom el enlace está normalmente en:
+                // <link href="...">
+                // --------------------------------------------------
+
+                let enlace = "";
+
+                $entry.find("link").each((_, linkEl) => {
+                    if (enlace) return;
+
+                    const href = $rss(linkEl).attr("href") || "";
+
+                    if (
+                        href &&
+                        !href.includes("distribucions51.xml")
+                    ) {
+                        enlace = href;
+                    }
+                });
+
+                if (!titulo || !enlace) {
+                    console.log(
+                        "⚠️ Publicación ignorada: falta título o enlace"
+                    );
+                    continue;
+                }
+
+                console.log("----------------------------------------");
+                console.log(`📰 Título: ${titulo}`);
+                console.log(`🔗 Publicación: ${enlace}`);
+                console.log(`📅 Fecha: ${fecha}`);
+
+                // --------------------------------------------------
+                // Buscar el PDF dentro de la página de la publicación
+                // --------------------------------------------------
+
+                const urlPDF = await obtenerPDFDesdePublicacion(
+                    enlace
+                );
+
+                if (!urlPDF) {
+                    console.log(
+                        "⚠️ No se encontró PDF para esta publicación"
+                    );
+                    continue;
+                }
+
+                console.log(`📄 PDF oficial: ${urlPDF}`);
+
+                // --------------------------------------------------
+                // Clasificar y guardar
+                // --------------------------------------------------
+
+                evaluarYGuardar(
+                    titulo,
+                    urlPDF,
+                    "JUNTA DE ANDALUCÍA",
+                    documentosProcesados
+                );
+            }
+
+        } catch (error) {
+            console.error(
+                `❌ Error leyendo RSS ${fuente.nombre}:`,
+                error.message
+            );
         }
-
-        // ==========================================
-        // 2. RECOPILAR TODOS LOS ENLACES
-        // ==========================================
-        const enlaces = [];
-
-        $item.find("link").each((_, linkEl) => {
-          const $link = $rss(linkEl);
-
-          // Formato Atom:
-          // <link href="https://...pdf" />
-          const href = $link.attr("href");
-
-          if (href) {
-            enlaces.push(href.trim());
-          }
-
-          // Formato RSS clásico:
-          // <link>https://...</link>
-          const textoLink = $link.text().trim();
-
-          if (textoLink) {
-            enlaces.push(textoLink);
-          }
-        });
-
-        // ==========================================
-        // 3. BUSCAR EL PDF OFICIAL
-        // ==========================================
-        const enlacePdf = enlaces.find(url =>
-          url.toLowerCase().includes(".pdf")
-        );
-
-        // Enlace a la publicación HTML del BOJA
-        const enlacePublicacion = enlaces.find(url =>
-          url.toLowerCase().includes("/boja/")
-        );
-
-        // ==========================================
-        // 4. DESCRIPCIÓN / CONTENIDO
-        // ==========================================
-        const descripcion =
-          $item.find("content").first().text().trim() ||
-          $item.find("description").first().text().trim() ||
-          "";
-
-        // ==========================================
-        // 5. FECHA
-        // ==========================================
-        const fecha =
-          $item.find("updated").first().text().trim() ||
-          $item.find("published").first().text().trim() ||
-          $item.find("pubDate").first().text().trim() ||
-          "";
-
-        console.log("────────────────────────────────────");
-        console.log(`📰 Título: ${titulo}`);
-        console.log(`📅 Fecha: ${fecha}`);
-        console.log(`🔗 Enlaces encontrados: ${enlaces.length}`);
-
-        if (enlacePdf) {
-          console.log(`📄 PDF OFICIAL: ${enlacePdf}`);
-        } else {
-          console.log("⚠️ No se encontró PDF directamente en el RSS");
-
-          if (enlacePublicacion) {
-            console.log(`🌐 Publicación BOJA: ${enlacePublicacion}`);
-          }
-        }
-
-        console.log(
-          `📝 Descripción: ${descripcion.substring(0, 500)}`
-        );
-
-        // ==========================================
-        // 6. GUARDAR EL DOCUMENTO
-        //
-        // Si existe PDF usamos el PDF.
-        // Si todavía no existe, usamos el enlace
-        // de la publicación para poder comprobarlo.
-        // ==========================================
-        const enlaceFinal = enlacePdf || enlacePublicacion;
-
-        if (!enlaceFinal) {
-          console.log(
-            "⚠️ Publicación ignorada porque no tiene ningún enlace válido"
-          );
-          return;
-        }
-
-        documentosProcesados.push({
-          titulo: titulo,
-          enlace: enlaceFinal,
-          url_pdf: enlacePdf || null,
-          descripcion: descripcion,
-          fecha: fecha,
-          fuente: fuente.nombre
-        });
-      });
-
-    } catch (error) {
-      console.error(
-        `❌ Error leyendo RSS ${fuente.nombre}:`,
-        error.message
-      );
     }
-  }
 
-  console.log("======================================");
-  console.log(
-    `🎯 Total de publicaciones RSS detectadas: ${documentosProcesados.length}`
-  );
-  console.log("======================================");
+    // ==========================================================
+    // ELIMINAR DUPLICADOS
+    // ==========================================================
 
-  // Mostrar un resumen de los PDFs encontrados
-  const pdfsEncontrados = documentosProcesados.filter(
-    d => d.url_pdf
-  );
-
-  console.log(
-    `📄 PDFs oficiales encontrados: ${pdfsEncontrados.length}`
-  );
-
-  pdfsEncontrados.forEach((d, index) => {
-    console.log(
-      `   ${index + 1}. ${d.titulo}`
+    const unicos = Array.from(
+        new Map(
+            documentosProcesados.map(d => [
+                d.url_pdf,
+                d
+            ])
+        ).values()
     );
+
+    console.log("======================================");
     console.log(
-      `      ${d.url_pdf}`
+        `🎯 Anuncios relevantes encontrados: ${unicos.length}`
     );
-  });
+    console.log("======================================");
 
-  /*
-   * IMPORTANTE:
-   * En esta fase NO guardamos todavía nada en Supabase.
-   *
-   * Primero comprobamos que:
-   * 1. El RSS se lee correctamente.
-   * 2. Se detectan los <entry>.
-   * 3. Se obtiene el título.
-   * 4. Se encuentra el enlace PDF oficial.
-   *
-   * Cuando esto funcione, añadiremos la clasificación
-   * por sectores y el guardado definitivo en Supabase.
-   */
+    // ==========================================================
+    // GUARDAR EN SUPABASE
+    // ==========================================================
 
-  return documentosProcesados;
+    for (const d of unicos) {
+        try {
+
+            await supabaseRequest(
+                "anuncios_boja?on_conflict=url_pdf",
+                {
+                    method: "POST",
+
+                    headers: {
+                        Prefer: "resolution=merge-duplicates"
+                    },
+
+                    body: JSON.stringify({
+                        titulo: d.titulo,
+                        url_pdf: d.url_pdf,
+                        categoria: d.sector,
+                        origen: "BOJA"
+                    })
+                }
+            );
+
+            console.log(
+                `✅ Guardado en Supabase: ${d.titulo}`
+            );
+
+        } catch (err) {
+
+            console.log(
+                `⚠️ Aviso al guardar en Supabase: ${err.message}`
+            );
+        }
+    }
+
+    return unicos;
 }
 
+
+// ==========================================================
+// FUNCIÓN DE PRUEBA DEL RSS
+// ==========================================================
 
 async function probarRSSBOJA() {
-  const url =
-    "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
 
-  console.log("📡 Probando RSS oficial del BOJA:");
-  console.log(url);
+    const url =
+        "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
 
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": USER_AGENT
-      },
-      signal: AbortSignal.timeout(20000)
-    });
+    console.log(
+        "📡 Probando RSS oficial del BOJA:"
+    );
 
-    console.log("📡 HTTP:", res.status);
-    console.log("📡 OK:", res.ok);
+    console.log(url);
 
-    const xml = await res.text();
+    try {
 
-    console.log("📄 Longitud XML:", xml.length);
-    console.log("📋 Contenido del RSS:");
-    console.log(xml.substring(0, 5000));
+        const res = await fetch(url, {
+            headers: {
+                "User-Agent": USER_AGENT
+            },
 
-    return xml;
+            signal: AbortSignal.timeout(20000)
+        });
 
-  } catch (error) {
-    console.error("❌ ERROR RSS:", error.message);
-    return null;
-  }
+        console.log(
+            "📡 HTTP:",
+            res.status
+        );
+
+        console.log(
+            "📡 OK:",
+            res.ok
+        );
+
+        const xml = await res.text();
+
+        console.log(
+            "📄 Longitud XML:",
+            xml.length
+        );
+
+        console.log(
+            "📋 Primeros 5000 caracteres:"
+        );
+
+        console.log(
+            xml.substring(0, 5000)
+        );
+
+        return xml;
+
+    } catch (error) {
+
+        console.error(
+            "❌ ERROR RSS:",
+            error.message
+        );
+
+        return null;
+    }
 }
 
 
-export { ejecutarCapturadorBoja as ejecutarBOJA };
+// ==========================================================
+// EXPORTACIÓN
+// ==========================================================
+
+export {
+    ejecutarCapturadorBoja as ejecutarBOJA
+};
