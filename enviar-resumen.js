@@ -293,7 +293,7 @@ Formato obligatorio:
         const respuestaGemini =
             await ai.models.generateContent({
 
-                model: "gemini-2.5-flash",
+                model: "gemini-1.5-flash", // 👈 Cambiado de 2.5-flash a 1.5-flash (o gemini-2.0-flash)
 
                 contents: [
 
