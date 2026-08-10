@@ -244,7 +244,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Extrayendo anuncios del BOJA directamente desde los índices de los boletines...");
+  console.log("🚀 [BOJA] Iniciando extracción definitiva con escaneo dinámico de subsecciones...");
 
   const urlBase = "https://www.juntadeandalucia.es";
   
@@ -263,7 +263,6 @@ async function ejecutarCapturadorBoja() {
       headers: { "User-Agent": USER_AGENT },
       signal: AbortSignal.timeout(15000)
     });
-
     if (!resDia.ok) {
       console.log(`⚠️ No se encontró la página del día ${fechaFormateada}`);
       return [];
@@ -282,7 +281,7 @@ async function ejecutarCapturadorBoja() {
     let href = $dia(el).attr("href") || "";
     let texto = $dia(el).text().toLowerCase();
 
-    if (href && !href.endsWith(".pdf") && (href.includes(`/${yyyy}/`) || texto.includes("boletín"))) {
+    if (href && !href.toLowerCase().endsWith(".pdf") && (href.includes(`/${yyyy}/`) || texto.includes("boletín"))) {
       let urlAbsoluta = "";
       if (href.startsWith("http")) {
         urlAbsoluta = href;
@@ -307,22 +306,37 @@ async function ejecutarCapturadorBoja() {
 
   const documentosProcesados = [];
 
-  // 2. Por cada boletín, leemos su índice principal y todas las secciones del menú lateral (s51, s52, s53, s55)
+  // 2. Por cada boletín, leemos su índice y descubrimos todas sus páginas de secciones internas de forma dinámica
   for (const urlIndice of listaIndices) {
     try {
-      console.log(`🔗 Leyendo boletín: ${urlIndice}`);
-      
-      // Derivamos las URLs estándar de las secciones a partir de la URL del boletín (ej: .../2026/153/)
-      const baseUrlBoletin = urlIndice.substring(0, urlIndice.lastIndexOf("/") + 1);
-      const paginasAEvaluar = [
-        urlIndice,
-        `${baseUrlBoletin}s51.html`, // Disposiciones generales
-        `${baseUrlBoletin}s52.html`, // Autoridades y personal
-        `${baseUrlBoletin}s53.html`, // Otras disposiciones
-        `${baseUrlBoletin}s55.html`  // Anuncios
-      ];
+      console.log(`🔗 Analizando boletín: ${urlIndice}`);
+      const resIndice = await fetch(urlIndice, {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(15000)
+      });
+      if (!resIndice.ok) continue;
 
-      for (const urlPagina of paginasAEvaluar) {
+      const htmlIndice = await resIndice.text();
+      const $idx = cheerio.load(htmlIndice);
+
+      const paginasAScanear = new Set([urlIndice]);
+      const baseUrlBoletin = urlIndice.substring(0, urlIndice.lastIndexOf("/") + 1);
+
+      // Descubrimos dinámicamente cualquier enlace HTML interno del boletín (secciones, apartados, etc.)
+      $idx("a").each((_, el) => {
+        let href = $idx(el).attr("href") || "";
+        if (href && !href.startsWith("http") && !href.startsWith("#") && !href.includes("sumario") && !href.includes("verificacion")) {
+          if (href.endsWith(".html") || !href.includes(".")) {
+            let urlSec = baseUrlBoletin + href;
+            paginasAScanear.add(urlSec);
+          }
+        }
+      });
+
+      console.log(`📂 Páginas/Secciones a escanear en este boletín: ${paginasAScanear.size}`);
+
+      // 3. Escaneamos cada subpágina encontrada buscando enlaces a PDF de forma insensible a mayúsculas
+      for (const urlPagina of paginasAScanear) {
         try {
           const resPag = await fetch(urlPagina, {
             headers: { "User-Agent": USER_AGENT },
@@ -333,22 +347,24 @@ async function ejecutarCapturadorBoja() {
           const htmlPag = await resPag.text();
           const $ = cheerio.load(htmlPag);
 
-          // Buscamos los enlaces a los PDF oficiales
-          $("a[href*='.pdf']").each((_, el) => {
-            let hrefPdf = $(el).attr("href") || "";
+          // Recorremos TODOS los enlaces buscando la extensión .pdf (insensible a mayúsculas)
+          $("a").each((_, linkEl) => {
+            let hrefPdf = $(linkEl).attr("href") || "";
+            
+            if (!hrefPdf.toLowerCase().includes(".pdf")) return;
             if (hrefPdf.toLowerCase().includes("sumario") || hrefPdf.toLowerCase().includes("verificacion")) return;
 
-            let urlPdfFinal = hrefPdf.startsWith("http") ? hrefPdf : urlBase + (hrefPdf.startsWith("/") ? hrefPdf : "/" + hrefPdf);
-            
-            // Extraemos el texto del bloque contenedor de la disposición
-            const $contenedor = $(el).closest("p, li, div.disposicion, tr, article");
+            let urlPdfFinal = hrefPdf.startsWith("http") ? hrefPdf : urlBase + (hrefPdf.startsWith("/") ? hrefPdf : baseUrlBoletin + hrefPdf);
+
+            // Aislamos el texto puro del contenedor eliminando enlaces internos
+            const $contenedor = $(linkEl).closest("p, li, div.disposicion, tr, article");
             const $clon = $contenedor.clone();
             $clon.find("a, script, style").remove();
             
             let tituloAnuncio = $clon.text().replace(/\s+/g, " ").trim();
 
             if (tituloAnuncio.length < 25) {
-              tituloAnuncio = $(el).text().replace(/\s+/g, " ").trim();
+              tituloAnuncio = $(linkEl).text().replace(/\s+/g, " ").trim();
             }
 
             tituloAnuncio = tituloAnuncio
@@ -365,7 +381,7 @@ async function ejecutarCapturadorBoja() {
           });
 
         } catch (subErr) {
-          // Sección no disponible en este boletín, pasamos a la siguiente
+          // Ignoramos errores puntuales de subpáginas
         }
       }
 
@@ -378,7 +394,7 @@ async function ejecutarCapturadorBoja() {
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
   console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
 
-  // 3. Guardado en Supabase
+  // 4. Guardado en Supabase
   for (const d of unicos) {
     try {
       await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
