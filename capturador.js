@@ -244,56 +244,94 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Extrayendo anuncios del BOJA desde las fuentes RSS oficiales XML...");
+  console.log("🚀 Extrayendo anuncios del BOJA desde la estructura HTML del boletín del día...");
 
-  // Las rutas oficiales extraídas de la documentación de la Junta
-  const feedsOficiales = [
-    "https://www.juntadeandalucia.es/boja/distribucion/s51.xml", // 1. Disposiciones generales
-    "https://www.juntadeandalucia.es/boja/distribucion/s52.xml", // 2. Autoridades y personal
-    "https://www.juntadeandalucia.es/boja/distribucion/s53.xml", // 3. Otras disposiciones
-    "https://www.juntadeandalucia.es/boja/distribucion/s55.xml"  // 5. Anuncios
-  ];
+  const urlBase = "https://www.juntadeandalucia.es";
+  const anioActual = new Date().getFullYear();
+  
+  let htmlBoletin = "";
+  let urlBoletinActual = "";
 
+  // Intentamos obtener el número de boletín más reciente o el sumario directo
+  try {
+    // 1. Buscamos en la portada principal el enlace numérico del año actual (ej. /eboja/2026/152/index.html)
+    const resPortada = await fetch(`${urlBase}/boja`, { 
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(15000) 
+    });
+    const htmlPortada = await resPortada.text();
+    const $p = cheerio.load(htmlPortada);
+
+    // Buscamos cualquier enlace que apunte a un número de boletín del año en curso
+    let enlaceEncontrado = "";
+    $p(`a[href*="/eboja/${anioActual}/"]`).each((_, el) => {
+      const href = $p(el).attr("href");
+      if (href && (href.includes("index.html") || href.match(/\/\d+\/?$/))) {
+        enlaceEncontrado = href;
+        return false; // rompe el bucle en el primero (el más reciente)
+      }
+    });
+
+    if (enlaceEncontrado) {
+      urlBoletinActual = enlaceEncontrado.startsWith("http") ? enlaceEncontrado : urlBase + enlaceEncontrado;
+    } else {
+      urlBoletinActual = `${urlBase}/eboja/${anioActual}/`;
+    }
+
+    console.log(`🔗 Accediendo al boletín activo en: ${urlBoletinActual}`);
+
+    const resBoletin = await fetch(urlBoletinActual, { 
+      headers: { "User-Agent": USER_AGENT },
+      redirect: "follow",
+      signal: AbortSignal.timeout(20000) 
+    });
+
+    if (!resBoletin.ok) {
+      console.error(`❌ Error al conectar con el boletín: ${resBoletin.status}`);
+      return [];
+    }
+
+    htmlBoletin = await resBoletin.text();
+  } catch (error) {
+    console.error("❌ Excepción al obtener el HTML del BOJA:", error.message);
+    return [];
+  }
+
+  const $ = cheerio.load(htmlBoletin);
   const documentosProcesados = [];
 
-  for (const urlRss of feedsOficiales) {
-    try {
-      console.log(`🔗 Leyendo feed: ${urlRss.split('/').pop()}`);
-      const res = await fetch(urlRss, { 
-        headers: { "User-Agent": USER_AGENT }, 
-        signal: AbortSignal.timeout(15000) 
-      });
-      
-      if (!res.ok) {
-        console.error(`❌ Error al acceder a ${urlRss}: ${res.status}`);
-        continue;
-      }
-      
-      const xmlTexto = await res.text();
-      const $ = cheerio.load(xmlTexto, { xmlMode: true });
+  // 2. Extraemos las disposiciones navegando los párrafos/listas del boletín
+  $("a[href*='.pdf']").each((_, el) => {
+    const href = $(el).attr("href") || "";
+    
+    // Descartamos enlaces no relevantes
+    if (href.includes("sumario") || href.includes("verificacion") || href.includes("certificad")) return;
 
-      $("item").each((_, el) => {
-        let tituloAnuncio = $(el).find("title").text().replace(/\s+/g, " ").trim();
-        let enlaceOficial = $(el).find("link").text().trim() || $(el).find("guid").text().trim();
-        
-        // Limpiamos un poco el título por si trae la fecha al inicio
-        tituloAnuncio = tituloAnuncio.replace(/^Resolución de \d{1,2} de [a-z]+ de \d{4},? /i, "Resolución: ").trim();
-
-        if (tituloAnuncio.length > 20 && enlaceOficial) {
-          // Usamos la misma función de filtrado semántico que ya tienes
-          evaluarYGuardar(tituloAnuncio, enlaceOficial, "JUNTA DE ANDALUCÍA", documentosProcesados);
-        }
-      });
-
-    } catch (error) {
-      console.error(`❌ Excepción al procesar el feed ${urlRss}:`, error.message);
+    let urlPdfFinal = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
+    
+    // En la maquetación del BOJA HTML, el título de la disposición precede al enlace "PDF oficial auténtico"
+    let tituloAnuncio = $(el).parent().text().replace(/\s+/g, " ").trim();
+    
+    // Si el padre no tiene texto suficiente, buscamos en el contenedor anterior/padre hermano
+    if (tituloAnuncio.length < 25) {
+      tituloAnuncio = $(el).closest("li, p, div").text().replace(/\s+/g, " ").trim();
     }
-  }
+
+    // Limpieza de etiquetas de control y peso de archivos
+    tituloAnuncio = tituloAnuncio.replace(/PDF oficial auténtico.*$/i, "").trim();
+    tituloAnuncio = tituloAnuncio.replace(/Otros formatos.*$/i, "").trim();
+    tituloAnuncio = tituloAnuncio.replace(/Verificar autenticidad.*$/i, "").trim();
+    tituloAnuncio = tituloAnuncio.replace(/texto núm\..*$/i, "").trim();
+
+    if (tituloAnuncio.length > 20) {
+      evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
+    }
+  });
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
 
-  // Guardado en Supabase
+  // 3. Guardado en Supabase
   for (const d of unicos) {
     try {
       await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
