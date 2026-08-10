@@ -244,11 +244,10 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Extrayendo anuncios del BOJA usando la URL fija por fecha del día...");
+  console.log("🚀 Extrayendo anuncios del BOJA desde los sumarios activos...");
 
   const urlBase = "https://www.juntadeandalucia.es";
   
-  // 1. Generamos la fecha de hoy en formato YYYYMMDD
   const hoy = new Date();
   const yyyy = hoy.getFullYear();
   const mm = String(hoy.getMonth() + 1).padStart(2, '0');
@@ -266,7 +265,7 @@ async function ejecutarCapturadorBoja() {
     });
 
     if (!resDia.ok) {
-      console.log(`⚠️ No se encontró boletín publicado para la fecha ${fechaFormateada} (status ${resDia.status}).`);
+      console.log(`⚠️ No se encontró boletín publicado para la fecha ${fechaFormateada}`);
       return [];
     }
 
@@ -276,7 +275,6 @@ async function ejecutarCapturadorBoja() {
     return [];
   }
 
-  // 2. Leemos las URLs absolutas correctas asegurando el prefijo /eboja/
   const $dia = cheerio.load(htmlDia);
   const urlsBoletinesHoy = new Set();
 
@@ -285,7 +283,6 @@ async function ejecutarCapturadorBoja() {
     let texto = $dia(el).text().toLowerCase();
 
     if (href && !href.endsWith(".pdf") && (href.includes(`/${yyyy}/`) || texto.includes("boletín"))) {
-      // Corregimos URLs relativas asegurando el prefijo /eboja/ si no viene en el href
       let urlAbsoluta = "";
       if (href.startsWith("http")) {
         urlAbsoluta = href;
@@ -297,24 +294,22 @@ async function ejecutarCapturadorBoja() {
         urlAbsoluta = `${urlBase}/eboja/${href}`;
       }
       
+      // Forzamos que apunte a la página completa del sumario index.html
+      if (!urlAbsoluta.endsWith("index.html") && !urlAbsoluta.endsWith(".html")) {
+        urlAbsoluta = urlAbsoluta.endsWith("/") ? `${urlAbsoluta}index.html` : `${urlAbsoluta}/index.html`;
+      }
+
       urlsBoletinesHoy.add(urlAbsoluta);
     }
   });
 
   const listaBoletines = Array.from(urlsBoletinesHoy);
-  console.log(`📌 Se han encontrado ${listaBoletines.length} boletín(es) para el día de hoy:`, listaBoletines);
-
-  if (listaBoletines.length === 0) {
-    console.log("📭 No hay enlaces a boletines en la página del día.");
-    return [];
-  }
+  console.log(`📌 Procesando ${listaBoletines.length} boletín(es) de hoy:`, listaBoletines);
 
   const documentosProcesados = [];
 
-  // 3. Recorremos cada boletín del día
   for (const urlBoletin of listaBoletines) {
-    // Descartamos la portada genérica /BOJA para evitar ruido
-    if (urlBoletin.endsWith("/BOJA") || urlBoletin.endsWith("/BOJA/")) continue;
+    if (urlBoletin.endsWith("/BOJA") || urlBoletin.endsWith("/BOJA/index.html")) continue;
 
     try {
       console.log(`🔗 Analizando sumario: ${urlBoletin}`);
@@ -328,18 +323,21 @@ async function ejecutarCapturadorBoja() {
       const htmlSumario = await resSumario.text();
       const $ = cheerio.load(htmlSumario);
 
-      // DIAGNÓSTICO: Ver cuántos enlaces de PDF existen realmente en la página renderizada
-      const enlacesPdf = $("a[href*='.pdf']");
-      console.log(`🔍 [DIAGNÓSTICO] Enlaces .pdf encontrados en ${urlBoletin}: ${enlacesPdf.length}`);
-
-      enlacesPdf.each((i, el) => {
+      $("a[href*='.pdf']").each((_, el) => {
         let href = $(el).attr("href") || "";
-        if (href.includes("sumario") || href.includes("verificacion")) return;
+        
+        // Omitir enlaces a sumarios o verificaciones
+        if (href.toLowerCase().includes("sumario") || href.toLowerCase().includes("verificacion")) return;
 
         let urlPdfFinal = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
-        let bloquePadre = $(el).closest("p, li, div, tr").text().replace(/\s+/g, " ").trim();
-        let tituloAnuncio = bloquePadre.length > 30 ? bloquePadre : $(el).text().replace(/\s+/g, " ").trim();
+        
+        // Extraer texto del párrafo, ítem de lista o bloque contenedor
+        let bloquePadre = $(el).closest("li, p, div.disposicion, tr").text().replace(/\s+/g, " ").trim();
+        let textoEnlace = $(el).text().replace(/\s+/g, " ").trim();
 
+        let tituloAnuncio = bloquePadre.length > 30 ? bloquePadre : textoEnlace;
+
+        // Limpiar basura de botones e interfaz
         tituloAnuncio = tituloAnuncio
           .replace(/PDF oficial auténtico/gi, "")
           .replace(/Otros formatos/gi, "")
@@ -348,25 +346,20 @@ async function ejecutarCapturadorBoja() {
           .replace(/páginas?.*$/gi, "")
           .trim();
 
-        // DIAGNÓSTICO: Imprimir los primeros 3 títulos encontrados para verificar el texto
-        if (i < 3) {
-          console.log(`📝 [TITULO ${i+1}]: "${tituloAnuncio.substring(0, 80)}..."`);
-        }
-
-        if (tituloAnuncio.length > 15) {
+        // Descartar encabezados generales de sumario o textos muy cortos
+        if (tituloAnuncio.length > 25 && !tituloAnuncio.toLowerCase().startsWith("sumario")) {
           evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
         }
       });
 
     } catch (err) {
-      console.log(`⚠️ Error al leer el boletín en ${urlBoletin}: ${err.message}`);
+      console.log(`⚠️ Error al leer boletín en ${urlBoletin}: ${err.message}`);
     }
   }
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
 
-  // 4. Guardado en Supabase
   for (const d of unicos) {
     try {
       await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
