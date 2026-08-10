@@ -244,144 +244,161 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 [BOJA] Extracción directa por secciones oficiales...");
+  console.log("🚀 [BOJA] Capturador mediante RSS oficial...");
 
-  const urlBase = "https://www.juntadeandalucia.es";
-  
-  const hoy = new Date();
-  const yyyy = hoy.getFullYear();
-  const mm = String(hoy.getMonth() + 1).padStart(2, '0');
-  const dd = String(hoy.getDate()).padStart(2, '0');
-  const fechaFormateada = `${yyyy}${mm}${dd}`;
-  
-  const urlDia = `${urlBase}/eboja/${fechaFormateada}.html`;
-  console.log(`🔗 Accediendo a la página del día: ${urlDia}`);
-
-  let htmlDia = "";
-  try {
-    const resDia = await fetch(urlDia, {
-      headers: { "User-Agent": USER_AGENT },
-      signal: AbortSignal.timeout(15000)
-    });
-    if (!resDia.ok) {
-      console.log(`⚠️ No se encontró la página del día ${fechaFormateada}`);
-      return [];
+  const RSS_BOJA = [
+    {
+      nombre: "Disposiciones generales",
+      url: "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
     }
-    htmlDia = await resDia.text();
-  } catch (error) {
-    console.error("❌ Excepción al conectar con la página del día:", error.message);
-    return [];
-  }
-
-  const $dia = cheerio.load(htmlDia);
-  const urlsIndicesBoletines = new Set();
-
-  $dia("a").each((_, el) => {
-    let href = $dia(el).attr("href") || "";
-    let texto = $dia(el).text().toLowerCase();
-
-    if (href && !href.toLowerCase().endsWith(".pdf") && (href.includes(`/${yyyy}/`) || texto.includes("boletín"))) {
-      let urlAbsoluta = "";
-      if (href.startsWith("http")) {
-        urlAbsoluta = href;
-      } else if (href.startsWith("/eboja/")) {
-        urlAbsoluta = urlBase + href;
-      } else if (href.startsWith("/")) {
-        urlAbsoluta = `${urlBase}/eboja${href}`;
-      } else {
-        urlAbsoluta = `${urlBase}/eboja/${href}`;
-      }
-      
-      let basePath = urlAbsoluta.substring(0, urlAbsoluta.lastIndexOf("/") + 1);
-      if (basePath.includes(`/${yyyy}/`)) {
-        urlsIndicesBoletines.add(basePath);
-      }
-    }
-  });
-
-  const basesBoletines = Array.from(urlsIndicesBoletines);
-  console.log(`📌 Bases de boletines detectadas para hoy:`, basesBoletines);
+  ];
 
   const documentosProcesados = [];
 
-  for (const basePath of basesBoletines) {
-    // Las secciones oficiales fijas del BOJA donde se publican las disposiciones y ayudas
-    const subpaginas = [
-      basePath + "index.html",
-      basePath + "s51.html",
-      basePath + "s52.html",
-      basePath + "s53.html",
-      basePath + "s55.html"
-    ];
+  for (const fuente of RSS_BOJA) {
+    try {
+      console.log(`📡 Leyendo RSS: ${fuente.nombre}`);
+      console.log(`🔗 ${fuente.url}`);
 
-    for (const urlPagina of subpaginas) {
-      try {
-        const resPag = await fetch(urlPagina, {
-          headers: { "User-Agent": USER_AGENT },
-          signal: AbortSignal.timeout(10000)
-        });
-        if (!resPag.ok) continue;
+      const respuesta = await fetch(fuente.url, {
+        headers: {
+          "User-Agent": USER_AGENT
+        },
+        signal: AbortSignal.timeout(20000)
+      });
 
-        const htmlPag = await resPag.text();
-        const $ = cheerio.load(htmlPag);
-
-        $("a").each((_, linkEl) => {
-          let hrefPdf = $(linkEl).attr("href") || "";
-          
-          if (!hrefPdf.toLowerCase().includes(".pdf")) return;
-          if (hrefPdf.toLowerCase().includes("sumario") || hrefPdf.toLowerCase().includes("verificacion")) return;
-
-          let urlPdfFinal = hrefPdf.startsWith("http") ? hrefPdf : urlBase + (hrefPdf.startsWith("/") ? hrefPdf : basePath + hrefPdf);
-
-          const $contenedor = $(linkEl).closest("p, li, div.disposicion, tr, article");
-          const $clon = $contenedor.clone();
-          $clon.find("a, script, style").remove();
-          
-          let tituloAnuncio = $clon.text().replace(/\s+/g, " ").trim();
-
-          if (tituloAnuncio.length < 25) {
-            tituloAnuncio = $(linkEl).text().replace(/\s+/g, " ").trim();
-          }
-
-          tituloAnuncio = tituloAnuncio
-            .replace(/PDF oficial auténtico/gi, "")
-            .replace(/Otros formatos/gi, "")
-            .replace(/Verificar autenticidad/gi, "")
-            .replace(/texto núm\..*$/gi, "")
-            .replace(/páginas?.*$/gi, "")
-            .trim();
-
-          if (tituloAnuncio.length > 20 && !tituloAnuncio.toLowerCase().startsWith("sumario")) {
-            evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
-          }
-        });
-      } catch (e) {
-        // Sección no existente en este boletín, se omite de forma segura
+      if (!respuesta.ok) {
+        console.log(
+          `⚠️ RSS ${fuente.nombre} respondió HTTP ${respuesta.status}`
+        );
+        continue;
       }
+
+      const xml = await respuesta.text();
+
+      if (!xml || xml.length < 50) {
+        console.log(`⚠️ El RSS ${fuente.nombre} está vacío`);
+        continue;
+      }
+
+      const $rss = cheerio.load(xml, {
+        xmlMode: true
+      });
+
+      const items = $rss("item");
+
+      console.log(
+        `📄 ${fuente.nombre}: ${items.length} publicaciones encontradas`
+      );
+
+      items.each((_, item) => {
+        const $item = $rss(item);
+
+        const titulo = $item.find("title").first().text().trim();
+        const enlace = $item.find("link").first().text().trim();
+        const descripcion = $item.find("description").first().text().trim();
+
+        if (!titulo || !enlace) {
+          return;
+        }
+
+        console.log(`📰 ${titulo}`);
+        console.log(`🔗 ${enlace}`);
+
+        /*
+         * IMPORTANTE:
+         * El RSS puede proporcionar el enlace de la publicación
+         * y no directamente el PDF.
+         *
+         * Por eso primero guardamos la publicación para procesarla
+         * posteriormente.
+         */
+
+        const textoClasificacion = `${titulo} ${descripcion}`;
+
+        evaluarYGuardar(
+          titulo,
+          enlace,
+          "JUNTA DE ANDALUCÍA",
+          documentosProcesados
+        );
+      });
+
+    } catch (error) {
+      console.error(
+        `❌ Error leyendo RSS ${fuente.nombre}:`,
+        error.message
+      );
     }
   }
 
-  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
-  console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
+  /*
+   * Eliminar duplicados por URL
+   */
+  const unicos = Array.from(
+    new Map(
+      documentosProcesados.map(d => [d.url_pdf, d])
+    ).values()
+  );
 
+  console.log(
+    `🎯 Publicaciones relevantes encontradas: ${unicos.length}`
+  );
+
+  /*
+   * Guardar en Supabase
+   */
   for (const d of unicos) {
     try {
-      await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
-        method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify({
-          titulo: d.titulo,
-          url_pdf: d.url_pdf,
-          categoria: d.sector,
-          origen: "BOJA"
-        })
-      });
+      await supabaseRequest(
+        "anuncios_boja?on_conflict=url_pdf",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "resolution=merge-duplicates"
+          },
+          body: JSON.stringify({
+            titulo: d.titulo,
+            url_pdf: d.url_pdf,
+            categoria: d.sector,
+            origen: "BOJA"
+          })
+        }
+      );
+
+      console.log(`✅ Guardado: ${d.titulo}`);
+
     } catch (err) {
-      console.log(`⚠️ Aviso al guardar en Supabase: ${err.message}`);
+      console.log(
+        `⚠️ Aviso al guardar en Supabase: ${err.message}`
+      );
     }
   }
 
   return unicos;
 }
+async function probarRSSBOJA() {
+  const url = "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
 
+  console.log("📡 Probando RSS:", url);
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": USER_AGENT
+      },
+      signal: AbortSignal.timeout(20000)
+    });
+
+    console.log("HTTP:", res.status);
+
+    const xml = await res.text();
+
+    console.log("Longitud XML:", xml.length);
+    console.log(xml.substring(0, 3000));
+
+  } catch (error) {
+    console.error("❌ ERROR RSS:", error);
+  }
+}
 export { ejecutarCapturadorBoja as ejecutarBOJA };
