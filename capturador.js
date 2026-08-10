@@ -311,8 +311,11 @@ async function ejecutarCapturadorBoja() {
 
   const documentosProcesados = [];
 
-  // 3. Recorremos cada boletín del día y extraemos todos los bloques de disposiciones
+  // 3. Recorremos cada boletín del día
   for (const urlBoletin of listaBoletines) {
+    // Descartamos la portada genérica /BOJA para evitar ruido
+    if (urlBoletin.endsWith("/BOJA") || urlBoletin.endsWith("/BOJA/")) continue;
+
     try {
       console.log(`🔗 Analizando sumario: ${urlBoletin}`);
       const resSumario = await fetch(urlBoletin, {
@@ -325,20 +328,18 @@ async function ejecutarCapturadorBoja() {
       const htmlSumario = await resSumario.text();
       const $ = cheerio.load(htmlSumario);
 
-      // Buscamos enlaces a PDF o contenedores de disposiciones en la página
-      $("a[href*='.pdf']").each((_, el) => {
+      // DIAGNÓSTICO: Ver cuántos enlaces de PDF existen realmente en la página renderizada
+      const enlacesPdf = $("a[href*='.pdf']");
+      console.log(`🔍 [DIAGNÓSTICO] Enlaces .pdf encontrados en ${urlBoletin}: ${enlacesPdf.length}`);
+
+      enlacesPdf.each((i, el) => {
         let href = $(el).attr("href") || "";
         if (href.includes("sumario") || href.includes("verificacion")) return;
 
         let urlPdfFinal = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
-        
-        // Tomamos el texto del elemento padre contenedor para garantizar la frase completa
-        let bloquePadre = $(el).closest("p, li, div").text().replace(/\s+/g, " ").trim();
-
-        // Si el contenedor padre es muy corto, usamos el texto directo del enlace
+        let bloquePadre = $(el).closest("p, li, div, tr").text().replace(/\s+/g, " ").trim();
         let tituloAnuncio = bloquePadre.length > 30 ? bloquePadre : $(el).text().replace(/\s+/g, " ").trim();
 
-        // Limpiamos los textos de botones accisorios de la interfaz web
         tituloAnuncio = tituloAnuncio
           .replace(/PDF oficial auténtico/gi, "")
           .replace(/Otros formatos/gi, "")
@@ -347,7 +348,12 @@ async function ejecutarCapturadorBoja() {
           .replace(/páginas?.*$/gi, "")
           .trim();
 
-        if (tituloAnuncio.length > 20) {
+        // DIAGNÓSTICO: Imprimir los primeros 3 títulos encontrados para verificar el texto
+        if (i < 3) {
+          console.log(`📝 [TITULO ${i+1}]: "${tituloAnuncio.substring(0, 80)}..."`);
+        }
+
+        if (tituloAnuncio.length > 15) {
           evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
         }
       });
