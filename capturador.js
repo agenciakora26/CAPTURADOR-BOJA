@@ -1,7 +1,9 @@
+import * as cheerio from "cheerio";
 import fetch from "node-fetch";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
+const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
 const SECTORES = {
   "Oposiciones y Empleo": {
