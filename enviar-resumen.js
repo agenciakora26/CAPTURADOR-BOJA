@@ -63,10 +63,10 @@ async function enriquecerTitulosConIA(anuncios) {
 
   return anuncios;
 }
+
 async function iniciarProcesoGlobal() {
   console.log("🚀 Iniciando proceso unificado BOJA y BOE...");
 
-  // Opcional: Ejecutamos los capturadores para que inserten los nuevos si procede
   try {
     await ejecutarBOJA();
   } catch (err) {
@@ -79,7 +79,7 @@ async function iniciarProcesoGlobal() {
     console.error("❌ Error en BOE:", err.message);
   }
 
-  // CONSULTA DIRECTA A SUPABASE DE LOS PENDIENTES QUE HAS MARCADO A FALSE
+  // CONSULTA DIRECTA A SUPABASE DE LOS PENDIENTES QUE ESTÁN A FALSE
   console.log("📥 Consultando anuncios pendientes en Supabase...");
   const anunciosPendientes = await supabaseRequest("anuncios_boja?enviado=eq.false&select=*");
 
@@ -90,13 +90,11 @@ async function iniciarProcesoGlobal() {
 
   console.log(`📌 Encontrados ${anunciosPendientes.length} anuncios pendientes en base de datos. Procesando...`);
 
-  // Aplicamos los resúmenes automáticos inteligentes que ya funcionan
+  // Aplicamos los resúmenes automáticos inteligentes
   const anunciosProcesados = await enriquecerTitulosConIA(anunciosPendientes);
 
   const documentosBoja = anunciosProcesados.filter(d => d.origen === "BOJA" || !d.origen);
   const documentosBoe = anunciosProcesados.filter(d => d.origen === "BOE");
-
-  // Resto del código de envío de emails...
 
   console.log("👥 Consultando usuarios suscritos...");
   const usuarios = await supabaseRequest("perfiles_usuarios?select=email,sectores_suscritos&estado_suscripcion=eq.activa");
@@ -129,10 +127,10 @@ async function iniciarProcesoGlobal() {
       <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #10b981; padding: 15px; margin-bottom: 15px; border-radius: 6px;">
         <span style="font-size: 11px; font-weight: bold; background: #ecfdf5; color: #047857; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">${r.categoria || r.sector}</span>
         <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 10px 0; line-height: 1.4;">${r.titulo}</h4>
-       <div style="background-color: #f8f9fa; border-left: 4px solid #10b981; padding: 10px 15px; margin-top: 10px; border-radius: 4px;">
-  <strong style="color: #065f46; font-size: 13px;">💡 Impacto Profesional:</strong> 
-  <span style="color: #374151; font-size: 13px;">${r.resumenIA}</span>
-</div>
+        <div style="background-color: #f8f9fa; border-left: 4px solid #10b981; padding: 10px 15px; margin-top: 10px; border-radius: 4px;">
+          <strong style="color: #065f46; font-size: 13px;">💡 Impacto Profesional:</strong> 
+          <span style="color: #374151; font-size: 13px;">${r.resumenIA}</span>
+        </div>
         <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #047857; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
       </div>
     `).join("") : `<p style="font-size: 14px; color: #64748b; font-style: italic; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px dashed #cbd5e1;">No hay ningún anuncio en esta sección.</p>`;
@@ -172,6 +170,7 @@ async function iniciarProcesoGlobal() {
         </div>
       </div>
     `;
+
     try {
       await resend.emails.send({
         from: 'BoletínHoy <alertas@boletinhoy.es>',
@@ -182,6 +181,21 @@ async function iniciarProcesoGlobal() {
       console.log(`✅ Correo enviado con éxito a ${usuario.email}`);
     } catch (emailErr) {
       console.error(`❌ Error al enviar email con Resend a ${usuario.email}:`, emailErr.message);
+    }
+  }
+
+  // MARCADO AUTOMÁTICO: Actualizamos los anuncios procesados a enviado = true en Supabase
+  console.log("🔄 Actualizando estado de los anuncios a 'enviado: true' en Supabase...");
+  for (const anuncio of anunciosProcesados) {
+    if (anuncio.id) {
+      try {
+        await supabaseRequest(`anuncios_boja?id=eq.${anuncio.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enviado: true })
+        });
+      } catch (patchErr) {
+        console.log(`⚠️ Aviso al actualizar estado del anuncio ID ${anuncio.id}: ${patchErr.message}`);
+      }
     }
   }
 
