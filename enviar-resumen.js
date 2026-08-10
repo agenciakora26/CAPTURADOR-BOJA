@@ -114,115 +114,67 @@ function obtenerSectoresUsuario(usuario) {
 }
 
 // ============================================================
-// 6. ANALIZAR PDF REAL CON GEMINI (CON REINTENTOS PARA 429)
+// 6. ANALIZAR ANUNCIO CON GEMINI (MODO TEXTO OPTIMIZADO)
 // ============================================================
 
 async function analizarPDFConGemini(anuncio) {
 
     const titulo = String(anuncio.titulo || "").trim();
-    const urlPdf = String(anuncio.url_pdf || "").trim();
     const categoria = String(
         anuncio.categoria ||
         anuncio.sector ||
         ""
     ).trim();
+    const urlPdf = String(anuncio.url_pdf || "").trim();
 
-    if (!urlPdf) {
-        console.log(`⚠️ ${titulo} no tiene URL PDF.`);
+    if (!titulo) {
         return {
-            resumen: "No se ha podido analizar el documento oficial porque no dispone de una URL PDF.",
+            resumen: "No se ha podido analizar el documento oficial porque no dispone de título.",
             impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: ""
         };
     }
 
     console.log("🤖 ------------------------------------------------");
-    console.log("🤖 Analizando documento con Gemini");
+    console.log("🤖 Analizando anuncio con Gemini (Modo Texto Oficial)");
     console.log(`🤖 Título: ${titulo}`);
     console.log(`🤖 Categoría: ${categoria}`);
-    console.log(`🤖 PDF: ${urlPdf}`);
 
     try {
-        const respuestaPDF = await fetch(urlPdf, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (compatible; BoletinHoy/1.0; +https://boletinhoy.es)"
-            },
-            signal: AbortSignal.timeout(30000)
-        });
-
-        if (!respuestaPDF.ok) {
-            throw new Error(`El PDF respondió HTTP ${respuestaPDF.status}`);
-        }
-
-        const arrayBuffer = await respuestaPDF.arrayBuffer();
-        const bufferPDF = Buffer.from(arrayBuffer);
-
-        console.log(`📄 PDF descargado: ${Math.round(bufferPDF.length / 1024)} KB`);
-
-        if (bufferPDF.length < 1000) {
-            throw new Error("El archivo descargado parece demasiado pequeño para ser un PDF válido.");
-        }
-
-        const pdfBase64 = bufferPDF.toString("base64");
-
         const prompt = `
 Eres el analista profesional de BoletínHoy.
-Debes analizar COMPLETAMENTE el documento oficial que se adjunta.
-Tu objetivo NO es repetir el título ni describir de forma obvia que se trata de una resolución o anuncio.
-Debes INTERPRETAR el contenido real del documento y explicar qué significa para una persona, empresa, autónomo, trabajador o profesional al que pueda afectar.
+A partir del título oficial y la categoría de la publicación del boletín oficial que se indica a continuación, redacta un resumen ejecutivo profesional, claro y útil.
 
-DATOS DEL DOCUMENTO:
-Título: ${titulo}
-Sector: ${categoria}
-URL oficial: ${urlPdf}
+DATOS DE LA PUBLICACIÓN:
+Título oficial: ${titulo}
+Sector / Categoría: ${categoria}
 
 REGLAS IMPORTANTES:
-- Lee el documento completo antes de responder.
-- No inventes información ni supongas plazos o importes que no aparezcan.
-- Explica qué cambia, qué se anuncia, qué se concede, qué se convoca o qué oportunidad existe.
-- Si existen fechas, plazos o importes relevantes, intégralos en el resumen.
+- No repitas el título de forma obvia.
+- Interpreta qué se está aprobando, convocando, notificando o regulando y a quién afecta en la práctica.
+- Si el título menciona becas, ayudas, oposiciones, licitaciones o normativas, explícalo de forma divulgativa y profesional.
+- No inventes plazos, importes o requisitos que no se deriven directamente del título.
+- Extensión aproximada: Entre 60 y 140 palabras.
 
-Extensión aproximada: Entre 80 y 180 palabras.
-
-RESPONDE EXCLUSIVAMENTE CON JSON VÁLIDO con esta estructura:
+RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO con esta estructura exactísima:
 {
-    "resumen": "Resumen ejecutivo profesional, concreto y basado en el contenido real del documento."
+    "resumen": "Resumen ejecutivo profesional y concreto basado en el contenido del título oficial."
 }
 `;
 
-        // Función auxiliar interna para reintentar si da error 429 de cuota
-        const llamarConReintentos = async (maxIntentos = 3) => {
-            for (let intento = 1; intento <= maxIntentos; intento++) {
-                try {
-                    return await ai.models.generateContent({
-                        model: "gemini-2.0-flash",
-                        contents: [
-                            {
-                                role: "user",
-                                parts: [
-                                    { inlineData: { mimeType: "application/pdf", data: pdfBase64 } },
-                                    { text: prompt }
-                                ]
-                            }
-                        ],
-                        config: {
-                            temperature: 0.2,
-                            responseMimeType: "application/json"
-                        }
-                    });
-                } catch (err) {
-                    const esRateLimit = err.message && (err.message.includes("429") || err.message.includes("RESOURCE_EXHAUSTED") || err.message.includes("quota"));
-                    if (esRateLimit && intento < maxIntentos) {
-                        const esperaMs = intento * 12000; // Espera progresiva: 12s, 24s...
-                        console.log(`⚠️ Cuota de Gemini excedida (429). Reintentando automáticamente en ${esperaMs / 1000}s (Intento ${intento}/${maxIntentos})...`);
-                        await new Promise(r => setTimeout(r, esperaMs));
-                    } else {
-                        throw err;
-                    }
+        const respuestaGemini = await ai.models.generateContent({
+            model: "gemini-2.0-flash",
+            contents: [
+                {
+                    role: "user",
+                    parts: [{ text: prompt }]
                 }
+            ],
+            config: {
+                temperature: 0.2,
+                responseMimeType: "application/json"
             }
-        };
+        });
 
-        const respuestaGemini = await llamarConReintentos();
         const textoRespuesta = respuestaGemini.text;
 
         if (!textoRespuesta) {
@@ -247,16 +199,16 @@ RESPONDE EXCLUSIVAMENTE CON JSON VÁLIDO con esta estructura:
         };
 
     } catch (error) {
-        console.error(`❌ Error analizando PDF con Gemini: ${error.message}`);
+        console.error(`❌ Error analizando con Gemini: ${error.message}`);
         return {
-            resumen: "No se ha podido realizar el análisis automático del documento oficial debido a restricciones temporales de la API.",
+            resumen: `Publicación oficial enmarcada en el sector de ${categoria}. Consulte el documento original para conocer todos los detalles y el texto íntegro.`,
             impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: ""
         };
     }
 }
 
 // ============================================================
-// 7. ENRIQUECER ANUNCIOS CON IA (CON PAUSA DE SEGURIDAD)
+// 7. ENRIQUECER ANUNCIOS CON IA
 // ============================================================
 
 async function enriquecerTitulosConIA(anuncios) {
@@ -274,7 +226,7 @@ async function enriquecerTitulosConIA(anuncios) {
 
         const url = String(anuncio.url_pdf || "").trim();
         if (!url) {
-            anuncio.resumenIA = "No se ha encontrado el PDF oficial asociado a esta publicación.";
+            anuncio.resumenIA = "No se ha encontrado el enlace oficial asociado a esta publicación.";
             anuncio.analisisIA = { resumen: anuncio.resumenIA, impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: "" };
             continue;
         }
@@ -291,9 +243,8 @@ async function enriquecerTitulosConIA(anuncios) {
         anuncio.analisisIA = analisis;
         anuncio.resumenIA = analisis.resumen;
 
-        // PAUSA DE SEGURIDAD DE 5 SEGUNDOS ENTRE PETICIONES PARA EVITAR EL ERROR 429
-        console.log("⏳ Esperando 5 segundos para respetar los límites de la API de Gemini...");
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Breve pausa para fluidez
+        await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     return anuncios;
