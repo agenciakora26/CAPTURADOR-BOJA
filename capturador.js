@@ -244,70 +244,43 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Extrayendo anuncios del BOJA desde la portada HTML oficial de hoy...");
+  console.log("🚀 Consultando el feed oficial RSS/XML del BOJA...");
 
-  const urlPortada = "https://www.juntadeandalucia.es/boja";
-  let html;
+  // URL del feed RSS oficial con las publicaciones más recientes del BOJA
+  const urlRss = "https://www.juntadeandalucia.es/eboja/rss";
+  let xmlTexto = "";
 
   try {
-    const res = await fetch(urlPortada, { 
+    const res = await fetch(urlRss, { 
       headers: { "User-Agent": USER_AGENT }, 
-      signal: AbortSignal.timeout(15000) 
+      signal: AbortSignal.timeout(20000) 
     });
     if (!res.ok) {
-      console.error(`❌ Error al acceder a la portada del BOJA: ${res.status}`);
+      console.error(`❌ Error al acceder al RSS del BOJA: ${res.status}`);
       return [];
     }
-    html = await res.text();
+    xmlTexto = await res.text();
   } catch (error) {
-    console.error("❌ Excepción al conectar con la portada del BOJA:", error.message);
+    console.error("❌ Excepción al conectar con el RSS del BOJA:", error.message);
     return [];
   }
 
-  const $ = cheerio.load(html);
+  // Parseamos el XML con Cheerio en modo XML
+  const $ = cheerio.load(xmlTexto, { xmlMode: true });
   const documentosProcesados = [];
-  let consejeriaActual = "JUNTA DE ANDALUCÍA";
 
-  // Recorremos la estructura del boletín en la web (secciones y enlaces de disposiciones)
-  $("div.sumario, div.boletin, #contenido, main").find("h2, h3, h4, li, p, a").each((_, el) => {
-    const textoNodo = $(el).text().replace(/\s+/g, " ").trim();
+  $("item").each((_, el) => {
+    const titulo = $(el).find("title").text().replace(/\s+/g, " ").trim();
+    const urlPdf = $(el).find("link").text().trim() || $(el).find("guid").text().trim();
+    const consejeria = $(el).find("category").text().trim() || "JUNTA DE ANDALUCÍA";
 
-    // Actualizar Consejería / Orgánisno activo según los encabezados
-    if (textoNodo.toUpperCase().includes("CONSEJERÍA DE") || textoNodo.toUpperCase().includes("UNIVERSIDADES")) {
-      consejeriaActual = textoNodo;
-      return;
-    }
-
-    // Si es un enlace a un PDF individual de disposición
-    const href = $(el).attr("href") || $(el).find("a").attr("href") || "";
-    if (href.includes(".pdf") && !href.includes("sumario") && !href.includes("verificacion")) {
-      let urlPdfFinal = href.startsWith("http") ? href : `https://www.juntadeandalucia.es${href}`;
-      let tituloAnuncio = $(el).text().replace(/\s+/g, " ").trim();
-
-      // Limpieza de textos o numeraciones de página al final
-      tituloAnuncio = tituloAnuncio.replace(/texto núm\..*$/i, "").replace(/páginas?.*$/i, "").trim();
-
-      if (tituloAnuncio.length > 20) {
-        evaluarYGuardar(tituloAnuncio, urlPdfFinal, consejeriaActual, documentosProcesados);
-      }
+    if (titulo.length > 15) {
+      evaluarYGuardar(titulo, urlPdf, consejeria, documentosProcesados);
     }
   });
 
-  // Si el selector genérico no encuentra enlaces suficientes, buscamos todos los elementos <a> del sumario
-  if (documentosProcesados.length === 0) {
-    $("a[href*='.pdf']").each((_, el) => {
-      const href = $(el).attr("href") || "";
-      const texto = $(el).text().replace(/\s+/g, " ").trim();
-
-      if (!href.includes("sumario") && !href.includes("verificacion") && texto.length > 20) {
-        let urlPdfFinal = href.startsWith("http") ? href : `https://www.juntadeandalucia.es${href}`;
-        evaluarYGuardar(texto, urlPdfFinal, consejeriaActual, documentosProcesados);
-      }
-    });
-  }
-
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
+  console.log(`🎯 Anuncios relevantes capturados desde el RSS del BOJA: ${unicos.length}`);
 
   for (const d of unicos) {
     try {
