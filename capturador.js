@@ -418,7 +418,25 @@ async function ejecutarCapturadorBoja() {
       console.log(`⚠️ Error procesando PDF de sumario BOJA: ${err.message}`);
     }
   }
+const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
+  console.log(`🎯 Anuncios relevantes totales encontrados en el BOJA: ${unicos.length}`);
 
+  for (const d of unicos) {
+    try {
+      await supabaseRequest("anuncios_boja?on_conflict=url_pdf", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify({
+          titulo: d.titulo,
+          url_pdf: d.url_pdf,
+          categoria: d.sector,
+          origen: "BOJA"
+        })
+      });
+    } catch (err) {
+      console.log(`⚠️ Aviso al guardar anuncio: ${err.message}`);
+    }
+  }
   return unicos;
 }
 
