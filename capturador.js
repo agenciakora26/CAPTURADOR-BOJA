@@ -247,11 +247,35 @@ async function ejecutarCapturadorBoja() {
     console.log("🚀 [BOJA] Capturador mediante RSS oficial...");
 
     const RSS_BOJA = [
-        {
-            nombre: "Disposiciones generales",
-            url: "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
-        }
-    ];
+    {
+        nombre: "Disposiciones generales",
+        url: "https://www.juntadeandalucia.es/boja/distribucion/s51.xml"
+    },
+    {
+        nombre: "Nombramientos, situaciones e incidencias",
+        url: "https://www.juntadeandalucia.es/boja/distribucion/s52.xml"
+    },
+    {
+        nombre: "Oposiciones, concursos y otras convocatorias",
+        url: "https://www.juntadeandalucia.es/boja/distribucion/s53.xml"
+    },
+    {
+        nombre: "Otras disposiciones",
+        url: "https://www.juntadeandalucia.es/boja/distribucion/s54.xml"
+    },
+    {
+        nombre: "Administración de justicia",
+        url: "https://www.juntadeandalucia.es/boja/distribucion/s55.xml"
+    },
+    {
+        nombre: "Licitaciones públicas y adjudicaciones",
+        url: "https://www.juntadeandalucia.es/boja/distribucion/s56.xml"
+    },
+    {
+        nombre: "Otros anuncios oficiales",
+        url: "https://www.juntadeandalucia.es/boja/distribucion/s57.xml"
+    }
+];
 
     const documentosProcesados = [];
 
