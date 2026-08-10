@@ -1,9 +1,7 @@
-import * as cheerio from "cheerio";
-import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+import fetch from "node-fetch";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
-const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
 const SECTORES = {
   "Oposiciones y Empleo": {
@@ -160,38 +158,27 @@ function normalizar(texto = "") {
 
 function evaluarYGuardar(texto, urlBase, seccion, destino) {
   const textoLimpio = texto.replace(/\s+/g, " ").trim();
-  
-  console.log(`🔎 Evaluando texto (${textoLimpio.length} chars) [${seccion}]: "${textoLimpio.substring(0, 80)}..."`);
-  
   const sectorEncontrado = clasificarTexto(textoLimpio, seccion);
 
   if (sectorEncontrado) {
-    console.log(`✅ ¡Anuncio clasificado en "${sectorEncontrado}"!`);
     destino.push({
       titulo: textoLimpio, 
       url_pdf: urlBase,
       sector: sectorEncontrado
     });
-  } else {
-    console.log(`❌ Descartado (no alcanza umbral o no coincide con sectores).`);
   }
 }
 
 function clasificarTexto(texto, seccion) {
-  // Unimos la cabecera (Consejería) y el texto para evaluar el contexto completo
   const textoAnalizar = (seccion + " " + texto).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  
   let mejorSector = null;
   let maxPuntuacion = 0;
-
-  // Detectamos si es un decreto de estructura de los boletines extraordinarios
   const esEstructura = textoAnalizar.includes("estructura organica") || textoAnalizar.includes("competencias");
 
   for (const [sector, reglas] of Object.entries(SECTORES)) {
     let puntuacion = 0;
     let descartar = false;
 
-    // Comprobamos palabras excluyentes
     if (reglas.excluirSiContiene) {
       for (const exc of reglas.excluirSiContiene) {
         if (textoAnalizar.includes(exc.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
@@ -203,7 +190,6 @@ function clasificarTexto(texto, seccion) {
 
     if (descartar) continue;
 
-    // Evaluamos palabras fuertes
     if (reglas.fuertes) {
       reglas.fuertes.forEach(r => {
         if (textoAnalizar.includes(r.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
@@ -212,7 +198,6 @@ function clasificarTexto(texto, seccion) {
       });
     }
 
-    // Evaluamos palabras medias
     if (reglas.medias) {
       reglas.medias.forEach(r => {
         if (textoAnalizar.includes(r.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
@@ -221,22 +206,17 @@ function clasificarTexto(texto, seccion) {
       });
     }
     
-    // BONUS: Si es un decreto organizativo, buscamos si el nombre de la consejería coincide con tu sector
     if (esEstructura) {
       const nombreSectorLimpio = sector.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       const seccionLimpia = seccion.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      
-      // Separamos el nombre del sector (ej: "Agricultura y Ganadería" -> "agricultura", "ganaderia")
       const palabrasClaveSector = nombreSectorLimpio.split(" y ");
       for (const palabra of palabrasClaveSector) {
-        // Si la palabra clave está en el nombre de la Consejería, aprueba directo
         if (palabra.length > 3 && seccionLimpia.includes(palabra)) {
           puntuacion += reglas.threshold; 
         }
       }
     }
 
-    // Guardamos el sector con mayor puntuación que supere su umbral
     if (puntuacion >= reglas.threshold && puntuacion > maxPuntuacion) {
       maxPuntuacion = puntuacion;
       mejorSector = sector;
@@ -261,165 +241,40 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-// Definimos la función completa donde vive toda la lógica del BOJA
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Iniciando capturador inteligente del BOJA...");
+  console.log("🚀 Consultando la API oficial de Datos Abiertos del BOJA...");
 
-  const urlPortada = "https://www.juntadeandalucia.es/BOJA";
-  let htmlPortada;
+  const anioActual = new Date().getFullYear();
+  const urlApi = `https://datos.juntadeandalucia.es/api/v0/boja/all?year=${anioActual}&format=json`;
+
+  let registros = [];
   try {
-    const res = await fetch(urlPortada, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
-    if (!res.ok) return [];
-    htmlPortada = await res.text();
-  } catch (error) {
-    console.error("Error al conectar con la portada del BOJA:", error);
-    return [];
-  }
-
-  const $ = cheerio.load(htmlPortada);
-  let urlsPdfSumarios = [];
-
-  $("a").each((_, el) => {
-    const texto = $(el).text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-    const href = $(el).attr("href") || "";
-    
-    if (href.endsWith(".pdf") && (texto.includes("sumario") || href.includes("sumario"))) {
-      if (href.includes("verificacion")) return;
-
-      let urlFinal = "";
-      if (href.startsWith("http")) {
-        urlFinal = href;
-      } else {
-        const nombreArchivo = href.split("/").pop().trim();
-        const matchBoja = nombreArchivo.match(/BOJA(\d{2})-(\d+)-/i);
-        
-        if (matchBoja) {
-          const anio = `20${matchBoja[1]}`; 
-          const numBoletin = matchBoja[2]; 
-          urlFinal = `https://www.juntadeandalucia.es/eboja/${anio}/${numBoletin}/${nombreArchivo}`;
-        } else {
-          const anioActual = new Date().getFullYear();
-          urlFinal = `https://www.juntadeandalucia.es/eboja/${anioActual}/${nombreArchivo}`;
-        }
-      }
-
-      if (urlFinal && !urlsPdfSumarios.includes(urlFinal)) {
-        urlsPdfSumarios.push(urlFinal);
-      }
+    const res = await fetch(urlApi, { signal: AbortSignal.timeout(25000) });
+    if (!res.ok) {
+      console.error(`❌ Error al conectar con la API del BOJA: ${res.status}`);
+      return [];
     }
-  });
-
-  console.log(`📄 PDFs de sumarios oficiales detectados:`, urlsPdfSumarios);
-
-  if (urlsPdfSumarios.length === 0) {
-    console.log("⚠️ No se ha encontrado el PDF de sumario boletín oficial.");
+    registros = await res.json();
+  } catch (error) {
+    console.error("❌ Excepción al conectar con la API del BOJA:", error);
     return [];
   }
 
+  console.log(`📦 Registros totales obtenidos de la API del BOJA: ${registros.length}`);
   const documentosProcesados = [];
 
-  for (const urlPdfSumario of urlsPdfSumarios) {
-    try {
-      const pdfRes = await fetch(urlPdfSumario, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(20000) });
-      if (!pdfRes.ok) continue;
-      const buffer = Buffer.from(await pdfRes.arrayBuffer());
-      
-      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-      const pdfDocument = await loadingTask.promise;
+  for (const item of registros) {
+    const titulo = item.titulo || item.descripcion || "";
+    const urlPdf = item.url || item.enlace || item.pdf || "https://www.juntadeandalucia.es/BOJA";
+    const organismo = item.origen || item.organismo || item.conseja || "Junta de Andalucía";
 
-      let itemsGlobal = [];
-
-      for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-        const page = await pdfDocument.getPage(pageNum);
-        const textContent = await page.getTextContent();
-        const annotations = await page.getAnnotations();
-
-        const items = textContent.items.map(item => ({
-          str: item.str.trim(),
-          x: item.transform[4],
-          y: item.transform[5]
-        })).filter(item => item.str.length > 0);
-
-        const links = annotations
-          .filter(annot => annot.subtype === "Link" && annot.url)
-          .map(annot => ({
-            url: annot.url,
-            x: annot.rect[0],
-            y: annot.rect[1]
-          }));
-
-        items.forEach(item => {
-          let urlAsociada = urlPdfSumario; 
-          const matchLink = links.find(l => Math.abs(l.y - item.y) < 15 && Math.abs(l.x - item.x) < 120);
-          if (matchLink) {
-            urlAsociada = matchLink.url;
-          }
-
-          itemsGlobal.push({
-            texto: item.str,
-            url: urlAsociada,
-            y: item.y,
-            x: item.x
-          });
-        });
-      }
-
-      // Ordenamos de arriba a abajo y de izquierda a derecha
-      itemsGlobal.sort((a, b) => Math.abs(b.y - a.y) > 8 ? b.y - a.y : a.x - b.x);
-
-      let textoPaginas = "";
-      let mapeoEnlaces = [];
-
-      itemsGlobal.forEach(item => {
-        textoPaginas += " " + item.texto;
-        if (item.url && item.url !== urlPdfSumario) {
-          mapeoEnlaces.push({ texto: item.texto, url: item.url });
-        }
-      });
-
-      textoPaginas = textoPaginas.replace(/\s+/g, " ");
-
-      // Troceamos cada anuncio utilizando la marca "texto núm." como separación exacta
-      const bloques = textoPaginas.split(/texto núm\./gi);
-      let consejeriaActual = "JUNTA DE ANDALUCÍA";
-
-      for (let i = 1; i < bloques.length; i++) {
-        const bloque = bloques[i];
-        const partes = bloque.split(/-\s*\d+\s*página[s]?/i);
-        if (partes.length === 0) continue;
-
-        let textoAnuncio = partes[0].trim();
-
-        // Extraer y actualizar la Consejería si aparece en el bloque
-        const matchesConsejeria = textoAnuncio.match(/(CONSEJERÍA DE [A-ZÁÉÍÓÚÑ,\s]+|UNIVERSIDADES|OTRAS ENTIDADES PÚBLICAS)/g);
-        if (matchesConsejeria && matchesConsejeria.length > 0) {
-          consejeriaActual = matchesConsejeria[matchesConsejeria.length - 1].trim();
-          textoAnuncio = textoAnuncio.replace(consejeriaActual, "").trim();
-        }
-
-        // Limpieza de símbolos sobrantes al inicio
-        textoAnuncio = textoAnuncio.replace(/^[\.,\s]+/, "").trim();
-
-        if (textoAnuncio.length > 20) {
-          // Buscamos el enlace específico del PDF asociado
-          let urlEspecifica = urlPdfSumario;
-          for (const m of mapeoEnlaces) {
-            if (textoAnuncio.includes(m.texto.substring(0, 15))) {
-              urlEspecifica = m.url;
-              break;
-            }
-          }
-
-          evaluarYGuardar(textoAnuncio, urlEspecifica, consejeriaActual, documentosProcesados);
-        }
-      }
-
-    } catch (err) {
-      console.log(`⚠️ Error procesando PDF de sumario BOJA: ${err.message}`);
+    if (titulo.length > 15) {
+      evaluarYGuardar(titulo, urlPdf, organismo, documentosProcesados);
     }
   }
-const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes totales encontrados en el BOJA: ${unicos.length}`);
+
+  const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
+  console.log(`🎯 Anuncios relevantes filtrados en el BOJA: ${unicos.length}`);
 
   for (const d of unicos) {
     try {
@@ -434,9 +289,10 @@ const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).
         })
       });
     } catch (err) {
-      console.log(`⚠️ Aviso al guardar anuncio: ${err.message}`);
+      console.log(`⚠️ Aviso al guardar anuncio BOJA en Supabase: ${err.message}`);
     }
   }
+
   return unicos;
 }
 
