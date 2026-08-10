@@ -244,76 +244,51 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Extrayendo anuncios del BOJA desde el boletín HTML del día...");
+  console.log("🚀 Extrayendo anuncios del BOJA desde las fuentes RSS oficiales XML...");
 
-  const urlBase = "https://www.juntadeandalucia.es";
-  let htmlSumario = "";
-
-  // Lista de URLs canónicas del sumario del día por orden de preferencia
-  const urlsSumarioPosibles = [
-    `${urlBase}/boja/sumario`,
-    `${urlBase}/eboja/ultimoboletin`
+  // Las rutas oficiales extraídas de la documentación de la Junta
+  const feedsOficiales = [
+    "https://www.juntadeandalucia.es/boja/distribucion/s51.xml", // 1. Disposiciones generales
+    "https://www.juntadeandalucia.es/boja/distribucion/s52.xml", // 2. Autoridades y personal
+    "https://www.juntadeandalucia.es/boja/distribucion/s53.xml", // 3. Otras disposiciones
+    "https://www.juntadeandalucia.es/boja/distribucion/s55.xml"  // 5. Anuncios
   ];
 
-  for (const urlSumario of urlsSumarioPosibles) {
-    try {
-      console.log(`🔗 Intentando conectar con sumario en: ${urlSumario}`);
-      const resSumario = await fetch(urlSumario, { 
-        headers: { "User-Agent": USER_AGENT },
-        redirect: "follow",
-        signal: AbortSignal.timeout(20000) 
-      });
-      
-      if (resSumario.ok) {
-        htmlSumario = await resSumario.text();
-        // Comprobamos si realmente hemos obtenido el HTML del sumario con contenido
-        if (htmlSumario.includes(".pdf") || htmlSumario.toLowerCase().includes("sumario")) {
-          console.log(`✅ Sumario descargado con éxito desde: ${urlSumario}`);
-          break;
-        }
-      }
-    } catch (error) {
-      console.log(`⚠️ Intento fallido en ${urlSumario}: ${error.message}`);
-    }
-  }
-
-  if (!htmlSumario) {
-    console.error("❌ No se pudo descargar el HTML del sumario del BOJA desde ninguna URL.");
-    return [];
-  }
-
-  const $ = cheerio.load(htmlSumario);
   const documentosProcesados = [];
 
-  // Extraemos todos los enlaces a PDFs e inspeccionamos sus contenedores
-  $("a[href*='.pdf']").each((_, el) => {
-    let href = $(el).attr("href") || "";
-    
-    // Omitimos el PDF del sumario general, certificados o verificación
-    if (href.includes("sumario") || href.includes("verificacion") || href.includes("certificad")) return;
+  for (const urlRss of feedsOficiales) {
+    try {
+      console.log(`🔗 Leyendo feed: ${urlRss.split('/').pop()}`);
+      const res = await fetch(urlRss, { 
+        headers: { "User-Agent": USER_AGENT }, 
+        signal: AbortSignal.timeout(15000) 
+      });
+      
+      if (!res.ok) {
+        console.error(`❌ Error al acceder a ${urlRss}: ${res.status}`);
+        continue;
+      }
+      
+      const xmlTexto = await res.text();
+      const $ = cheerio.load(xmlTexto, { xmlMode: true });
 
-    let urlPdfFinal = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
-    let textoEnlace = $(el).text().trim();
-    let tituloAnuncio = "";
+      $("item").each((_, el) => {
+        let tituloAnuncio = $(el).find("title").text().replace(/\s+/g, " ").trim();
+        let enlaceOficial = $(el).find("link").text().trim() || $(el).find("guid").text().trim();
+        
+        // Limpiamos un poco el título por si trae la fecha al inicio
+        tituloAnuncio = tituloAnuncio.replace(/^Resolución de \d{1,2} de [a-z]+ de \d{4},? /i, "Resolución: ").trim();
 
-    // Si el texto del enlace es genérico ("PDF", peso de archivo, etc.), rescatamos el texto del elemento padre
-    if (textoEnlace.toUpperCase() === "PDF" || textoEnlace.toUpperCase().includes("KB") || textoEnlace.length < 15) {
-       // Buscamos en el padre directo o contenedor li/div más cercano
-       tituloAnuncio = $(el).closest("li, div, p").text().replace(/\s+/g, " ").trim();
-    } else {
-       tituloAnuncio = textoEnlace.replace(/\s+/g, " ").trim();
+        if (tituloAnuncio.length > 20 && enlaceOficial) {
+          // Usamos la misma función de filtrado semántico que ya tienes
+          evaluarYGuardar(tituloAnuncio, enlaceOficial, "JUNTA DE ANDALUCÍA", documentosProcesados);
+        }
+      });
+
+    } catch (error) {
+      console.error(`❌ Excepción al procesar el feed ${urlRss}:`, error.message);
     }
-
-    // Limpiamos muletillas y maquetación sobrante del HTML
-    tituloAnuncio = tituloAnuncio.replace(/PDF\s*-.*$/i, "").trim();
-    tituloAnuncio = tituloAnuncio.replace(/texto núm\..*$/i, "").trim();
-    tituloAnuncio = tituloAnuncio.replace(/páginas?.*$/i, "").trim();
-
-    // Validamos que el título tenga una longitud mínima representativa
-    if (tituloAnuncio.length > 20) {
-      evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
-    }
-  });
+  }
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
   console.log(`🎯 Anuncios relevantes capturados en el BOJA de hoy: ${unicos.length}`);
