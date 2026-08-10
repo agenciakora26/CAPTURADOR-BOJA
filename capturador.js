@@ -276,14 +276,16 @@ async function ejecutarCapturadorBoja() {
     return [];
   }
 
-  // 2. Leemos los enlaces a los boletines del día (Boletín principal + Complementarios)
+  // 2. Leemos ÚNICAMENTE los enlaces a los boletines reales descartando menús
   const $dia = cheerio.load(htmlDia);
   const urlsBoletinesHoy = new Set();
 
-  $dia("a[href*='/eboja/']").each((_, el) => {
+  $dia("a").each((_, el) => {
     let href = $dia(el).attr("href") || "";
-    // Filtramos para asegurar que entramos a las páginas del boletín y no a calendarios
-    if (href && !href.endsWith(".pdf") && !href.endsWith(`${fechaFormateada}.html`)) {
+    let texto = $dia(el).text().toLowerCase();
+
+    // Solo tomamos enlaces que contengan /2026/ o la palabra "boletín"
+    if (href && !href.endsWith(".pdf") && (href.includes(`/eboja/${yyyy}/`) || texto.includes("boletín"))) {
       let urlAbsoluta = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
       urlsBoletinesHoy.add(urlAbsoluta);
     }
@@ -299,7 +301,7 @@ async function ejecutarCapturadorBoja() {
 
   const documentosProcesados = [];
 
-  // 3. Recorremos cada boletín del día y extraemos los títulos completos
+  // 3. Recorremos cada boletín real del día y extraemos los títulos completos
   for (const urlBoletin of listaBoletines) {
     try {
       console.log(`🔗 Analizando sumario: ${urlBoletin}`);
@@ -318,14 +320,11 @@ async function ejecutarCapturadorBoja() {
         const textoEnlace = $(el).text().replace(/\s+/g, " ").trim();
         const href = $(el).attr("href") || "";
 
-        // Si es el enlace oficial al PDF
         if ((textoEnlace.includes("PDF oficial auténtico") || href.endsWith(".pdf")) && !href.includes("sumario")) {
           let urlPdfFinal = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
           
-          // Rescatamos el texto del contenedor padre (párrafo o div que contiene la disposición entera)
           let bloquePadre = $(el).closest("p, li, div").text().replace(/\s+/g, " ").trim();
 
-          // Limpiamos los nombres de los botones de acción para quedarnos con el título puro
           let tituloAnuncio = bloquePadre
             .replace(/PDF oficial auténtico/gi, "")
             .replace(/Otros formatos/gi, "")
