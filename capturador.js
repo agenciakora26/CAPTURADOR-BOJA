@@ -242,14 +242,19 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 Consultando la API oficial de Datos Abiertos del BOJA...");
+  console.log("🚀 Consultando la API oficial del BOJA para el día de hoy...");
 
-  const anioActual = new Date().getFullYear();
-  const urlApi = `https://datos.juntadeandalucia.es/api/v0/boja/all?year=${anioActual}&format=json`;
+  const hoy = new Date();
+  const anio = hoy.getFullYear();
+  const mes = String(hoy.getMonth() + 1).padStart(2, '0');
+  const dia = String(hoy.getDate()).padStart(2, '0');
+  const fechaHoyStr = `${anio}-${mes}-${dia}`; // Formato: YYYY-MM-DD
+
+  // Consultamos el endpoint filtrando por año
+  const urlApi = `https://datos.juntadeandalucia.es/api/v0/boja/all?year=${anio}&format=json`;
 
   let registros = [];
   try {
-    // Realizamos la petición sin límite de timeout estricto para evitar abortos
     const res = await fetch(urlApi);
     if (!res.ok) {
       console.error(`❌ Error al conectar con la API del BOJA: ${res.status}`);
@@ -261,13 +266,25 @@ async function ejecutarCapturadorBoja() {
     return [];
   }
 
-  console.log(`📦 Registros totales obtenidos de la API del BOJA: ${registros.length}`);
+  // Filtrar ÚNICAMENTE los anuncios del día de hoy
+  const registrosHoy = registros.filter(item => {
+    const fechaItem = item.fecha || item.fecha_publicacion || item.fechaPublicacion || item.date || "";
+    // Si la API trae la fecha completa, la comparamos; si no trae campo fecha, procesamos el bloque de hoy
+    return fechaItem ? fechaItem.startsWith(fechaHoyStr) : true;
+  });
+
+  console.log(`📦 Registros del BOJA de hoy (${fechaHoyStr}): ${registrosHoy.length}`);
+  
+  // Si la API del año trajo demasiados datos sin filtrar bien por fecha en origen, tomamos el último bloque publicado
+  const datasetProcesar = registrosHoy.length > 0 ? registrosHoy : registros.slice(-100);
+
   const documentosProcesados = [];
 
-  for (const item of registros) {
-    const titulo = item.titulo || item.descripcion || "";
-    const urlPdf = item.url || item.enlace || item.pdf || "https://www.juntadeandalucia.es/BOJA";
-    const organismo = item.origen || item.organismo || item.conseja || "Junta de Andalucía";
+  for (const item of datasetProcesar) {
+    // Mapeo flexible de nombres de propiedades de la API
+    const titulo = (item.titulo || item.descripcion || item.denominacion || item.sumario || "").trim();
+    const urlPdf = item.url || item.enlace || item.pdf || item.url_pdf || "https://www.juntadeandalucia.es/BOJA";
+    const organismo = item.origen || item.organismo || item.consejería || item.seccion || "Junta de Andalucía";
 
     if (titulo.length > 15) {
       evaluarYGuardar(titulo, urlPdf, organismo, documentosProcesados);
@@ -275,7 +292,7 @@ async function ejecutarCapturadorBoja() {
   }
 
   const unicos = Array.from(new Map(documentosProcesados.map(d => [d.titulo, d])).values());
-  console.log(`🎯 Anuncios relevantes filtrados en el BOJA: ${unicos.length}`);
+  console.log(`🎯 Anuncios relevantes filtrados en el BOJA de hoy: ${unicos.length}`);
 
   for (const d of unicos) {
     try {
