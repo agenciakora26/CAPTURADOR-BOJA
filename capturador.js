@@ -244,7 +244,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-  console.log("🚀 [BOJA] Iniciando extracción definitiva con escaneo dinámico de subsecciones...");
+  console.log("🚀 [BOJA] Iniciando extracción con depuración de títulos...");
 
   const urlBase = "https://www.juntadeandalucia.es";
   
@@ -306,12 +306,12 @@ async function ejecutarCapturadorBoja() {
 
   const documentosProcesados = [];
 
-  // 2. Por cada boletín, leemos su índice y descubrimos todas sus páginas de secciones internas de forma dinámica
+  // 2. Por cada boletín, leemos su índice y descubrimos todas sus páginas de secciones internas
   for (const urlIndice of listaIndices) {
     try {
       console.log(`🔗 Analizando boletín: ${urlIndice}`);
       const resIndice = await fetch(urlIndice, {
-        headers: { "User-Agent": USER_AGENT },
+        headers: { "User-Agent": USER_Agent },
         signal: AbortSignal.timeout(15000)
       });
       if (!resIndice.ok) continue;
@@ -322,7 +322,6 @@ async function ejecutarCapturadorBoja() {
       const paginasAScanear = new Set([urlIndice]);
       const baseUrlBoletin = urlIndice.substring(0, urlIndice.lastIndexOf("/") + 1);
 
-      // Descubrimos dinámicamente cualquier enlace HTML interno del boletín (secciones, apartados, etc.)
       $idx("a").each((_, el) => {
         let href = $idx(el).attr("href") || "";
         if (href && !href.startsWith("http") && !href.startsWith("#") && !href.includes("sumario") && !href.includes("verificacion")) {
@@ -335,7 +334,7 @@ async function ejecutarCapturadorBoja() {
 
       console.log(`📂 Páginas/Secciones a escanear en este boletín: ${paginasAScanear.size}`);
 
-      // 3. Escaneamos cada subpágina encontrada buscando enlaces a PDF de forma insensible a mayúsculas
+      // 3. Escaneamos cada subpágina buscando enlaces a PDF
       for (const urlPagina of paginasAScanear) {
         try {
           const resPag = await fetch(urlPagina, {
@@ -347,7 +346,6 @@ async function ejecutarCapturadorBoja() {
           const htmlPag = await resPag.text();
           const $ = cheerio.load(htmlPag);
 
-          // Recorremos TODOS los enlaces buscando la extensión .pdf (insensible a mayúsculas)
           $("a").each((_, linkEl) => {
             let hrefPdf = $(linkEl).attr("href") || "";
             
@@ -356,7 +354,6 @@ async function ejecutarCapturadorBoja() {
 
             let urlPdfFinal = hrefPdf.startsWith("http") ? hrefPdf : urlBase + (hrefPdf.startsWith("/") ? hrefPdf : baseUrlBoletin + hrefPdf);
 
-            // Aislamos el texto puro del contenedor eliminando enlaces internos
             const $contenedor = $(linkEl).closest("p, li, div.disposicion, tr, article");
             const $clon = $contenedor.clone();
             $clon.find("a, script, style").remove();
@@ -376,12 +373,14 @@ async function ejecutarCapturadorBoja() {
               .trim();
 
             if (tituloAnuncio.length > 20 && !tituloAnuncio.toLowerCase().startsWith("sumario")) {
+              // CHIVATO DE DEPURACIÓN: Imprimimos el título que ha encontrado para ver si pasa el filtro
+              console.log(`📝 [CANDIDATO ENCONTRADO]: "${tituloAnuncio.substring(0, 70)}..."`);
               evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
             }
           });
 
         } catch (subErr) {
-          // Ignoramos errores puntuales de subpáginas
+          // Ignorar errores puntuales
         }
       }
 
