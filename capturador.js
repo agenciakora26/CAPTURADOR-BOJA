@@ -248,7 +248,7 @@ async function ejecutarCapturadorBoja() {
 
   const urlBase = "https://www.juntadeandalucia.es";
   
-  // 1. Generamos la fecha de hoy en formato YYYYMMDD (ejemplo: 20260810)
+  // 1. Generamos la fecha de hoy en formato YYYYMMDD
   const hoy = new Date();
   const yyyy = hoy.getFullYear();
   const mm = String(hoy.getMonth() + 1).padStart(2, '0');
@@ -276,7 +276,7 @@ async function ejecutarCapturadorBoja() {
     return [];
   }
 
-  // 2. Leemos ÚNICAMENTE los enlaces a los boletines reales descartando menús
+  // 2. Leemos las URLs absolutas correctas asegurando el prefijo /eboja/
   const $dia = cheerio.load(htmlDia);
   const urlsBoletinesHoy = new Set();
 
@@ -284,9 +284,19 @@ async function ejecutarCapturadorBoja() {
     let href = $dia(el).attr("href") || "";
     let texto = $dia(el).text().toLowerCase();
 
-    // Solo tomamos enlaces que contengan /2026/ o la palabra "boletín"
-    if (href && !href.endsWith(".pdf") && (href.includes(`/eboja/${yyyy}/`) || texto.includes("boletín"))) {
-      let urlAbsoluta = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
+    if (href && !href.endsWith(".pdf") && (href.includes(`/${yyyy}/`) || texto.includes("boletín"))) {
+      // Corregimos URLs relativas asegurando el prefijo /eboja/ si no viene en el href
+      let urlAbsoluta = "";
+      if (href.startsWith("http")) {
+        urlAbsoluta = href;
+      } else if (href.startsWith("/eboja/")) {
+        urlAbsoluta = urlBase + href;
+      } else if (href.startsWith("/")) {
+        urlAbsoluta = `${urlBase}/eboja${href}`;
+      } else {
+        urlAbsoluta = `${urlBase}/eboja/${href}`;
+      }
+      
       urlsBoletinesHoy.add(urlAbsoluta);
     }
   });
@@ -301,7 +311,7 @@ async function ejecutarCapturadorBoja() {
 
   const documentosProcesados = [];
 
-  // 3. Recorremos cada boletín real del día y extraemos los títulos completos
+  // 3. Recorremos cada boletín del día y extraemos todos los bloques de disposiciones
   for (const urlBoletin of listaBoletines) {
     try {
       console.log(`🔗 Analizando sumario: ${urlBoletin}`);
@@ -315,27 +325,30 @@ async function ejecutarCapturadorBoja() {
       const htmlSumario = await resSumario.text();
       const $ = cheerio.load(htmlSumario);
 
-      // Buscamos directamente los enlaces "PDF oficial auténtico"
-      $("a").each((_, el) => {
-        const textoEnlace = $(el).text().replace(/\s+/g, " ").trim();
-        const href = $(el).attr("href") || "";
+      // Buscamos enlaces a PDF o contenedores de disposiciones en la página
+      $("a[href*='.pdf']").each((_, el) => {
+        let href = $(el).attr("href") || "";
+        if (href.includes("sumario") || href.includes("verificacion")) return;
 
-        if ((textoEnlace.includes("PDF oficial auténtico") || href.endsWith(".pdf")) && !href.includes("sumario")) {
-          let urlPdfFinal = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
-          
-          let bloquePadre = $(el).closest("p, li, div").text().replace(/\s+/g, " ").trim();
+        let urlPdfFinal = href.startsWith("http") ? href : urlBase + (href.startsWith("/") ? href : "/" + href);
+        
+        // Tomamos el texto del elemento padre contenedor para garantizar la frase completa
+        let bloquePadre = $(el).closest("p, li, div").text().replace(/\s+/g, " ").trim();
 
-          let tituloAnuncio = bloquePadre
-            .replace(/PDF oficial auténtico/gi, "")
-            .replace(/Otros formatos/gi, "")
-            .replace(/Verificar autenticidad/gi, "")
-            .replace(/texto núm\..*$/gi, "")
-            .replace(/páginas?.*$/gi, "")
-            .trim();
+        // Si el contenedor padre es muy corto, usamos el texto directo del enlace
+        let tituloAnuncio = bloquePadre.length > 30 ? bloquePadre : $(el).text().replace(/\s+/g, " ").trim();
 
-          if (tituloAnuncio.length > 20) {
-            evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
-          }
+        // Limpiamos los textos de botones accisorios de la interfaz web
+        tituloAnuncio = tituloAnuncio
+          .replace(/PDF oficial auténtico/gi, "")
+          .replace(/Otros formatos/gi, "")
+          .replace(/Verificar autenticidad/gi, "")
+          .replace(/texto núm\..*$/gi, "")
+          .replace(/páginas?.*$/gi, "")
+          .trim();
+
+        if (tituloAnuncio.length > 20) {
+          evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
         }
       });
 
