@@ -249,7 +249,8 @@ async function ejecutarCapturadorBoja() {
 
   let registros = [];
   try {
-    const res = await fetch(urlApi, { signal: AbortSignal.timeout(25000) });
+    // Ampliamos el timeout a 60 segundos para evitar cortes
+    const res = await fetch(urlApi, { signal: AbortSignal.timeout(60000) });
     if (!res.ok) {
       console.error(`❌ Error al conectar con la API del BOJA: ${res.status}`);
       return [];
