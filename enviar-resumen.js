@@ -131,7 +131,7 @@ async function iniciarProcesoGlobal() {
         <h4 style="font-size: 15px; color: #1e293b; margin: 10px 0 10px 0; line-height: 1.4;">${r.titulo}</h4>
        <div style="background-color: #f8f9fa; border-left: 4px solid #10b981; padding: 10px 15px; margin-top: 10px; border-radius: 4px;">
   <strong style="color: #065f46; font-size: 13px;">💡 Impacto Profesional:</strong> 
-  <span style="color: #374151; font-size: 13px;">${anuncio.resumenIA}</span>
+  <span style="color: #374151; font-size: 13px;">${d.resumenIA}</span>
 </div>
         <a href="${r.url_pdf}" target="_blank" style="font-size: 12px; color: #047857; font-weight: bold; text-decoration: none;">📄 Ver PDF Oficial &rarr;</a>
       </div>
