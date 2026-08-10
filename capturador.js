@@ -311,7 +311,7 @@ async function ejecutarCapturadorBoja() {
     try {
       console.log(`🔗 Analizando boletín: ${urlIndice}`);
       const resIndice = await fetch(urlIndice, {
-        headers: { "User-Agent": USER_Agent },
+        headers: { "User-Agent": USER_AGENT },
         signal: AbortSignal.timeout(15000)
       });
       if (!resIndice.ok) continue;
@@ -373,7 +373,6 @@ async function ejecutarCapturadorBoja() {
               .trim();
 
             if (tituloAnuncio.length > 20 && !tituloAnuncio.toLowerCase().startsWith("sumario")) {
-              // CHIVATO DE DEPURACIÓN: Imprimimos el título que ha encontrado para ver si pasa el filtro
               console.log(`📝 [CANDIDATO ENCONTRADO]: "${tituloAnuncio.substring(0, 70)}..."`);
               evaluarYGuardar(tituloAnuncio, urlPdfFinal, "JUNTA DE ANDALUCÍA", documentosProcesados);
             }
