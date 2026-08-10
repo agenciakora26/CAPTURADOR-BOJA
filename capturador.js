@@ -292,70 +292,69 @@ async function ejecutarCapturadorBoja() {
         xmlMode: true
       });
 
-      const items = $rss("item");
+      const items = $rss("entry");
 
-      console.log(
-        `📚 ${fuente.nombre}: ${items.length} publicaciones encontradas`
-      );
+console.log(
+  `📄 ${fuente.nombre}: ${items.length} publicaciones encontradas`
+);
 
-      items.each((_, item) => {
-        const $item = $rss(item);
+items.each((_, item) => {
+  const $item = $rss(item);
 
-        const titulo = $item.find("title").first().text().trim();
-        const enlace = $item.find("link").first().text().trim();
-        const descripcion = $item.find("description").first().text().trim();
-        const fecha = $item.find("pubDate").first().text().trim();
+  const titulo = $item.find("title").first().text().trim();
 
-        if (!titulo || !enlace) {
-          console.log("⚠️ Item ignorado porque no tiene título o enlace");
-          return;
-        }
+  // El BOJA utiliza Atom: el enlace está en el atributo href
+  const enlace = $item.find("link").first().attr("href") || "";
 
-        console.log("────────────────────────────────────");
-        console.log(`📰 Título: ${titulo}`);
-        console.log(`🔗 Enlace: ${enlace}`);
-        console.log(`📅 Fecha: ${fecha}`);
-        console.log(`📝 Descripción: ${descripcion.substring(0, 500)}`);
+  const descripcion =
+    $item.find("content").first().text().trim() ||
+    $item.find("summary").first().text().trim();
 
-        documentosProcesados.push({
-          titulo: titulo,
-          enlace: enlace,
-          descripcion: descripcion,
-          fecha: fecha,
-          fuente: fuente.nombre
-        });
-      });
+  const fecha =
+    $item.find("updated").first().text().trim() ||
+    $item.find("published").first().text().trim();
 
-    } catch (error) {
-      console.error(
-        `❌ Error leyendo RSS ${fuente.nombre}:`,
-        error.message
-      );
-    }
+  if (!titulo || !enlace) {
+    console.log("⚠️ Entrada ignorada: falta título o enlace");
+    return;
   }
 
-  console.log("======================================");
-  console.log(
-    `🎯 Total de publicaciones RSS detectadas: ${documentosProcesados.length}`
-  );
-  console.log("======================================");
+  console.log("────────────────────────────────────");
+  console.log(`📰 Título: ${titulo}`);
+  console.log(`🔗 Enlace: ${enlace}`);
+  console.log(`📅 Fecha: ${fecha}`);
 
-  /*
-   * IMPORTANTE:
-   * En esta primera fase NO guardamos todavía nada en Supabase.
-   *
-   * Primero comprobamos qué enlace proporciona realmente
-   * el RSS oficial de la Junta.
-   *
-   * Si el enlace lleva directamente al PDF, podremos guardarlo.
-   * Si lleva a una página HTML del BOJA, añadiremos el paso
-   * intermedio para localizar el PDF oficial.
-   */
+  // El RSS del BOJA proporciona directamente el PDF oficial
+  if (enlace.toLowerCase().includes(".pdf")) {
 
-  return documentosProcesados;
-}
+    console.log("📄 PDF oficial detectado");
 
+    documentosProcesados.push({
+      titulo: titulo,
+      url_pdf: enlace,
+      descripcion: descripcion,
+      fecha: fecha,
+      sector: "JUNTA DE ANDALUCÍA",
+      fuente: fuente.nombre
+    });
 
+  } else {
+
+    console.log(
+      "ℹ️ La entrada no apunta directamente a PDF:",
+      enlace
+    );
+
+    documentosProcesados.push({
+      titulo: titulo,
+      url_pdf: enlace,
+      descripcion: descripcion,
+      fecha: fecha,
+      sector: "JUNTA DE ANDALUCÍA",
+      fuente: fuente.nombre
+    });
+  }
+});
 async function probarRSSBOJA() {
   const url =
     "https://www.juntadeandalucia.es/boja/distribucion/s51.xml";
