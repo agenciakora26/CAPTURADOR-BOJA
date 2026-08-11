@@ -113,7 +113,7 @@ function obtenerSectoresUsuario(usuario) {
 // 6. ANALIZAR PDF REAL MEDIANTE EXTRACCIÓN DE TEXTO Y GROQ
 // ============================================================
 
-async function analizarPDFConGroq(anuncio) {
+async function analizarPDFConGroq(anuncio, intento = 1) {
 
     const titulo = String(anuncio.titulo || "").trim();
     const urlPdf = String(anuncio.url_pdf || "").trim();
@@ -131,7 +131,7 @@ async function analizarPDFConGroq(anuncio) {
     }
 
     console.log("🤖 ------------------------------------------------");
-    console.log(`🤖 Analizando contenido real del PDF con Groq: ${titulo}`);
+    console.log(`🤖 Analizando contenido real del PDF con Groq (Intento ${intento}): ${titulo}`);
 
     try {
         const respuestaPDF = await fetch(urlPdf, {
@@ -152,7 +152,6 @@ async function analizarPDFConGroq(anuncio) {
             throw new Error("El archivo descargado es demasiado pequeño.");
         }
 
-        // Extraemos el texto plano del PDF con pdf-parse
         const datosPdf = await pdfParse(bufferPDF);
         let textoPdf = datosPdf.text ? datosPdf.text.trim() : "";
 
@@ -160,7 +159,7 @@ async function analizarPDFConGroq(anuncio) {
             textoPdf = titulo;
         }
 
-        const textoAcotado = textoPdf.substring(0, 10000);
+        const textoAcotado = textoPdf.substring(0, 8000);
 
         const prompt = `
 Eres el analista experto y redactor jefe de BoletínHoy. 
@@ -207,6 +206,13 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO con esta estructura:
             })
         });
 
+        if (resGroq.status === 429 && intento <= 3) {
+            const esperaMs = intento * 5000;
+            console.log(`⚠️ Límite de Groq alcanzado (429). Reintentando en ${esperaMs / 1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, esperaMs));
+            return analizarPDFConGroq(anuncio, intento + 1);
+        }
+
         if (!resGroq.ok) {
             const errText = await resGroq.text();
             throw new Error(`Error HTTP Groq ${resGroq.status}: ${errText}`);
@@ -241,7 +247,7 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO con esta estructura:
     } catch (error) {
         console.error(`❌ Error analizando el PDF: ${error.message}`);
         return {
-            resumen: `Publicación oficial correspondiente a ${categoria}. ${titulo}. Consulte el enlace oficial para revisar el expediente completo.`,
+            resumen: `Publicación oficial correspondiente a ${categoria}. ${titulo}.`,
             impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: ""
         };
     }
@@ -283,13 +289,12 @@ async function enriquecerTitulosConIA(anuncios) {
         anuncio.analisisIA = analisis;
         anuncio.resumenIA = analisis.resumen;
 
-        // Breve pausa para fluidez
-        await new Promise(resolve => setTimeout(resolve, 300));
+        // Pausa de 3 segundos entre peticiones para respetar la cuota gratuita de Groq
+        await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
     return anuncios;
 }
-
 // ============================================================
 // 8. PROCESO GLOBAL BOJA + BOE
 // ============================================================
