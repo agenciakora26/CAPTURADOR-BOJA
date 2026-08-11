@@ -1,4 +1,4 @@
-import * as cheerio from "cheerio";
+import { XMLParser } from "fast-xml-parser";
 import fetch from "node-fetch";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
@@ -59,7 +59,7 @@ const SECTORES = {
     threshold: 4,
     fuertes: [
       { texto: "licitacion", puntos: 5 },
-      { texto: "contratacion", points: 4 },
+      { texto: "contratacion", puntos: 4 },
       { texto: "contrato de obras", points: 5 },
       { texto: "contrato de servicios", points: 4 },
       { texto: "suministros", points: 4 },
@@ -78,9 +78,9 @@ const SECTORES = {
     threshold: 3,
     fuertes: [
       { texto: "agricultura", puntos: 4 },
-      { texto: "ganaderia", points: 4 },
-      { texto: "pesca", points: 4 },
-      { texto: "explotaciones agrarias", points: 5 },
+      { texto: "ganaderia", puntos: 4 },
+      { texto: "pesca", puntos: 4 },
+      { texto: "explotaciones agrarias", puntos: 5 },
       { texto: "pac", points: 4 },
       { texto: "produccion ecologica", points: 4 },
       { texto: "ayudas", points: 2 }
@@ -154,10 +154,6 @@ const SECTORES = {
   }
 };
 
-function normalizar(texto = "") {
-  return texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
 function evaluarYGuardar(texto, urlBase, seccion, destino) {
   const textoLimpio = texto.replace(/\s+/g, " ").trim();
   const sectorEncontrado = clasificarTexto(textoLimpio, seccion);
@@ -207,17 +203,6 @@ function clasificarTexto(texto, seccion) {
         }
       });
     }
-    
-    if (esEstructura) {
-      const nombreSectorLimpio = sector.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const seccionLimpia = seccion.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const palabrasClaveSector = nombreSectorLimpio.split(" y ");
-      for (const palabra of palabrasClaveSector) {
-        if (palabra.length > 3 && seccionLimpia.includes(palabra)) {
-          puntuacion += reglas.threshold; 
-        }
-      }
-    }
 
     if (puntuacion >= reglas.threshold && puntuacion > maxPuntuacion) {
       maxPuntuacion = puntuacion;
@@ -243,20 +228,39 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+function extraerItemsRecursivo(obj) {
+  let encontrados = [];
+  if (!obj || typeof obj !== 'object') return encontrados;
+  for (const key of Object.keys(obj)) {
+    if (key.toLowerCase() === 'item' || key.toLowerCase() === 'entry') {
+      const val = obj[key];
+      if (Array.isArray(val)) encontrados.push(...val);
+      else encontrados.push(val);
+    } else if (typeof obj[key] === 'object') {
+      encontrados.push(...extraerItemsRecursivo(obj[key]));
+    }
+  }
+  return encontrados;
+}
+
 async function ejecutarCapturadorBoja() {
-    console.log("🚀 [BOJA] Capturando mediante canales RSS oficiales...");
+    console.log("🚀 [BOJA] Capturando mediante canales RSS con fast-xml-parser...");
 
     const urlBase = "https://www.juntadeandalucia.es";
     const documentosProcesados = [];
+    const parser = new XMLParser({
+        ignoreAttributes: false,
+        removeNamespace: true
+    });
 
     const xmlFiles = [
-        "s51.xml", // Disposiciones generales
-        "s52.xml", // Nombramientos, situaciones e incidencias
-        "s53.xml", // Oposiciones, concursos y convocatorias
-        "s54.xml", // Otras disposiciones
-        "s55.xml", // Administración de justicia
-        "s56.xml", // Licitaciones públicas y adjudicaciones
-        "s57.xml"  // Otros anuncios oficiales
+        "s51.xml",
+        "s52.xml",
+        "s53.xml",
+        "s54.xml",
+        "s55.xml",
+        "s56.xml",
+        "s57.xml"
     ];
 
     for (const xmlFile of xmlFiles) {
@@ -276,13 +280,16 @@ async function ejecutarCapturadorBoja() {
             const xmlText = await respuesta.text();
             if (!xmlText || xmlText.length < 50) continue;
 
-            const $ = cheerio.load(xmlText, { xmlMode: true });
+            const jsonObj = parser.parse(xmlText);
+            const items = extraerItemsRecursivo(jsonObj);
 
-            $("item").each((_, el) => {
-                const titulo = $(el).find("title").text().replace(/\s+/g, " ").trim();
-                const link = $(el).find("link").text().trim() || $(el).find("guid").text().trim();
+            console.log(`📦 Elementos extraídos en ${xmlFile}: ${items.length}`);
 
-                if (!titulo || !link) return;
+            for (const item of items) {
+                const titulo = String(item.title || "").replace(/\s+/g, " ").trim();
+                const link = String(item.link || item.guid || "").trim();
+
+                if (!titulo || !link) continue;
 
                 let urlPdfFinal = link;
                 if (!urlPdfFinal.startsWith("http")) {
@@ -304,7 +311,7 @@ async function ejecutarCapturadorBoja() {
                         documentosProcesados
                     );
                 }
-            });
+            }
 
         } catch (error) {
             console.log(`↪️ Error procesando ${xmlFile}: ${error.message}`);
