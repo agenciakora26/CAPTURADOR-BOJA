@@ -3,22 +3,23 @@ import fetch from "node-fetch";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
-const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
+const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 const SECTORES = {
   "Oposiciones y Empleo": {
-    threshold: 4,
+    threshold: 3,
     fuertes: [
       { texto: "oposicion", puntos: 5 },
       { texto: "concurso-oposicion", puntos: 5 },
       { texto: "bolsa de trabajo", puntos: 5 },
-      { texto: "bolsa de empleo", puntos: 5 },
-      { texto: "oferta de empleo publico", puntos: 5 },
-      { texto: "proceso selectivo", puntos: 4 },
-      { texto: "pruebas selectivas", puntos: 4 },
-      { texto: "personal funcionario", puntos: 4 },
+      { texto: "bolsa de empleo", points: 5 },
+      { texto: "oferta de empleo publico", points: 5 },
+      { texto: "proceso selectivo", points: 4 },
+      { texto: "pruebas selectivas", points: 4 },
+      { texto: "personal funcionario", points: 4 },
       { texto: "personal laboral", points: 4 },
-      { texto: "convocatoria", puntos: 3 }
+      { texto: "convocatoria", points: 3 },
+      { texto: "plazas", points: 3 }
     ],
     medias: [
       { texto: "plaza", points: 2 },
@@ -30,10 +31,10 @@ const SECTORES = {
       { texto: "personal", points: 1 }
     ],
     negativas: [
-      { texto: "cese", puntos: -3 },
-      { texto: "jubilacion", puntos: -3 }
+      { texto: "cese", points: -3 },
+      { texto: "jubilacion", points: -3 }
     ],
-    excluirSiContiene: ["nombramiento"]
+    excluirSiContiene: []
   },
   "Subvenciones y Ayudas": {
     threshold: 3,
@@ -53,13 +54,13 @@ const SECTORES = {
       { texto: "emprendimiento", points: 3 }
     ],
     negativas: [],
-    excluirSiContiene: ["nombramiento"]
+    excluirSiContiene: []
   },
   "Licitaciones y Contratación": {
-    threshold: 4,
+    threshold: 3,
     fuertes: [
-      { texto: "licitacion", puntos: 5 },
-      { texto: "contratacion", puntos: 4 },
+      { texto: "licitacion", points: 5 },
+      { texto: "contratacion", points: 4 },
       { texto: "contrato de obras", points: 5 },
       { texto: "contrato de servicios", points: 4 },
       { texto: "suministros", points: 4 },
@@ -72,15 +73,15 @@ const SECTORES = {
       { texto: "procedimiento abierto", points: 3 }
     ],
     negativas: [],
-    excluirSiContiene: ["nombramiento"]
+    excluirSiContiene: []
   },
   "Agricultura y Ganadería": {
     threshold: 3,
     fuertes: [
-      { texto: "agricultura", puntos: 4 },
-      { texto: "ganaderia", puntos: 4 },
-      { texto: "pesca", puntos: 4 },
-      { texto: "explotaciones agrarias", puntos: 5 },
+      { texto: "agricultura", points: 4 },
+      { texto: "ganaderia", points: 4 },
+      { texto: "pesca", points: 4 },
+      { texto: "explotaciones agrarias", points: 5 },
       { texto: "pac", points: 4 },
       { texto: "produccion ecologica", points: 4 },
       { texto: "ayudas", points: 2 }
@@ -89,11 +90,10 @@ const SECTORES = {
       { texto: "agrario", points: 2 },
       { texto: "rural", points: 2 },
       { texto: "olivar", points: 3 },
-      { texto: "vinedo", points: 3 },
-      { texto: "subvencion", points: 2 }
+      { texto: "vinedo", points: 3 }
     ],
     negativas: [],
-    excluirSiContiene: ["nombramiento"]
+    excluirSiContiene: []
   },
   "Urbanismo y Medio Ambiente": {
     threshold: 3,
@@ -111,7 +111,7 @@ const SECTORES = {
       { texto: "transporte", points: 2 }
     ],
     negativas: [],
-    excluirSiContiene: ["nombramiento"]
+    excluirSiContiene: []
   },
   "Sanidad y Asuntos Sociales": {
     threshold: 3,
@@ -126,11 +126,10 @@ const SECTORES = {
     medias: [
       { texto: "salud", points: 2 },
       { texto: "social", points: 2 },
-      { texto: "atencion primaria", points: 3 },
-      { texto: "ayudas", points: 2 }
+      { texto: "atencion primaria", points: 3 }
     ],
     negativas: [],
-    excluirSiContiene: ["nombramiento"]
+    excluirSiContiene: []
   },
   "Educación y Universidades": {
     threshold: 3,
@@ -146,11 +145,10 @@ const SECTORES = {
     medias: [
       { texto: "ensenanza", points: 2 },
       { texto: "curso", points: 2 },
-      { texto: "ayudas", points: 2 },
-      { texto: "subvenciones", points: 2 }
+      { texto: "ayudas", points: 2 }
     ],
     negativas: [],
-    excluirSiContiene: ["nombramiento"]
+    excluirSiContiene: []
   }
 };
 
@@ -171,7 +169,6 @@ function clasificarTexto(texto, seccion) {
   const textoAnalizar = (seccion + " " + texto).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   let mejorSector = null;
   let maxPuntuacion = 0;
-  const esEstructura = textoAnalizar.includes("estructura organica") || textoAnalizar.includes("competencias");
 
   for (const [sector, reglas] of Object.entries(SECTORES)) {
     let puntuacion = 0;
@@ -191,7 +188,7 @@ function clasificarTexto(texto, seccion) {
     if (reglas.fuertes) {
       reglas.fuertes.forEach(r => {
         if (textoAnalizar.includes(r.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-          puntuacion += (r.puntos || r.points || 5);
+          puntuacion += r.puntos;
         }
       });
     }
@@ -199,7 +196,7 @@ function clasificarTexto(texto, seccion) {
     if (reglas.medias) {
       reglas.medias.forEach(r => {
         if (textoAnalizar.includes(r.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-          puntuacion += (r.puntos || r.points || 2);
+          puntuacion += r.points;
         }
       });
     }
@@ -244,7 +241,7 @@ function extraerItemsRecursivo(obj) {
 }
 
 async function ejecutarCapturadorBoja() {
-    console.log("🚀 [BOJA] Capturando mediante canales RSS con fast-xml-parser...");
+    console.log("🚀 [BOJA] Capturando mediante canales RSS oficiales corregidos...");
 
     const urlBase = "https://www.juntadeandalucia.es";
     const documentosProcesados = [];
@@ -266,16 +263,12 @@ async function ejecutarCapturadorBoja() {
     for (const xmlFile of xmlFiles) {
         const urlRss = `${urlBase}/boja/distribucion/${xmlFile}`;
         try {
-            console.log(`📑 Consultando RSS: ${urlRss}`);
             const respuesta = await fetch(urlRss, {
                 headers: { "User-Agent": USER_AGENT },
                 signal: AbortSignal.timeout(15000)
             });
 
-            if (!respuesta.ok) {
-                console.log(`↪️ ${xmlFile} no disponible (HTTP ${respuesta.status})`);
-                continue;
-            }
+            if (!respuesta.ok) continue;
 
             const xmlText = await respuesta.text();
             if (!xmlText || xmlText.length < 50) continue;
@@ -283,19 +276,28 @@ async function ejecutarCapturadorBoja() {
             const jsonObj = parser.parse(xmlText);
             const items = extraerItemsRecursivo(jsonObj);
 
-            console.log(`📦 Elementos extraídos en ${xmlFile}: ${items.length}`);
-
             for (const item of items) {
                 const titulo = String(item.title || "").replace(/\s+/g, " ").trim();
-                const link = String(item.link || item.guid || "").trim();
+                
+                // Obtener enlace válido (priorizando enlaces directos o estructurados del BOJA)
+                let link = "";
+                if (typeof item.link === 'string') {
+                    link = item.link;
+                } else if (item.link && typeof item.link === 'object' && item.link['#text']) {
+                    link = item.link['#text'];
+                } else if (item.guid) {
+                    link = typeof item.guid === 'object' ? item.guid['#text'] : item.guid;
+                }
 
                 if (!titulo || !link) continue;
 
-                let urlPdfFinal = link;
+                let urlPdfFinal = link.trim();
                 if (!urlPdfFinal.startsWith("http")) {
                     urlPdfFinal = urlPdfFinal.startsWith("/") ? urlBase + urlPdfFinal : `${urlBase}/${urlPdfFinal}`;
                 }
 
+                // Asegurar que si es HTML del BOJA o PDF, apunte correctamente
+                // Si el enlace contiene .html o .pdf, lo respetamos, si es una ruta relativa del BOJA la normalizamos
                 const tituloLimpio = titulo
                     .replace(/PDF oficial auténtico/gi, "")
                     .replace(/Otros formatos/gi, "")
@@ -303,7 +305,7 @@ async function ejecutarCapturadorBoja() {
                     .replace(/\s+/g, " ")
                     .trim();
 
-                if (tituloLimpio.length > 20 && !tituloLimpio.toLowerCase().startsWith("sumario")) {
+                if (tituloLimpio.length > 15 && !tituloLimpio.toLowerCase().startsWith("sumario")) {
                     evaluarYGuardar(
                         tituloLimpio,
                         urlPdfFinal,
@@ -334,10 +336,7 @@ async function ejecutarCapturadorBoja() {
                 method: "GET"
             });
 
-            if (existentes && existentes.length > 0) {
-                console.log(`ℹ️ El anuncio ya existe en Supabase, se omite: ${d.titulo.substring(0, 40)}...`);
-                continue;
-            }
+            if (existentes && existentes.length > 0) continue;
 
             await supabaseRequest(
                 "anuncios_boja",
@@ -359,11 +358,6 @@ async function ejecutarCapturadorBoja() {
             console.log(`⚠️ Aviso al guardar en Supabase (BOJA): ${err.message}`);
         }
     }
-
-    console.log("");
-    console.log("======================================");
-    console.log("🏁 CAPTURADOR BOJA FINALIZADO");
-    console.log("======================================");
 
     return unicos;
 }
