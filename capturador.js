@@ -1,4 +1,4 @@
-import { XMLParser } from "fast-xml-parser";
+import * as cheerio from "cheerio";
 import fetch from "node-fetch";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
@@ -12,13 +12,13 @@ const SECTORES = {
       { texto: "oposicion", puntos: 5 },
       { texto: "concurso-oposicion", puntos: 5 },
       { texto: "bolsa de trabajo", puntos: 5 },
-      { texto: "bolsa de empleo", points: 5 },
-      { texto: "oferta de empleo publico", points: 5 },
-      { texto: "proceso selectivo", points: 4 },
-      { texto: "pruebas selectivas", points: 4 },
-      { texto: "personal funcionario", points: 4 },
-      { texto: "personal laboral", points: 4 },
-      { texto: "convocatoria", points: 3 },
+      { texto: "bolsa de empleo", puntos: 5 },
+      { texto: "oferta de empleo publico", puntos: 5 },
+      { texto: "proceso selectivo", puntos: 4 },
+      { texto: "pruebas selectivas", puntos: 4 },
+      { texto: "personal funcionario", puntos: 4 },
+      { texto: "personal laboral", puntos: 4 },
+      { texto: "convocatoria", puntos: 3 },
       { texto: "plazas", points: 3 }
     ],
     medias: [
@@ -27,8 +27,7 @@ const SECTORES = {
       { texto: "seleccion", points: 2 },
       { texto: "aspirantes", points: 2 },
       { texto: "turno libre", points: 3 },
-      { texto: "promocion interna", points: 2 },
-      { texto: "personal", points: 1 }
+      { texto: "promocion interna", points: 2 }
     ],
     negativas: [
       { texto: "cese", points: -3 },
@@ -50,8 +49,7 @@ const SECTORES = {
     medias: [
       { texto: "beneficiarios", points: 2 },
       { texto: "solicitudes", points: 2 },
-      { texto: "fomento", points: 2 },
-      { texto: "emprendimiento", points: 3 }
+      { texto: "fomento", points: 2 }
     ],
     negativas: [],
     excluirSiContiene: []
@@ -88,9 +86,7 @@ const SECTORES = {
     ],
     medias: [
       { texto: "agrario", points: 2 },
-      { texto: "rural", points: 2 },
-      { texto: "olivar", points: 3 },
-      { texto: "vinedo", points: 3 }
+      { texto: "rural", points: 2 }
     ],
     negativas: [],
     excluirSiContiene: []
@@ -102,13 +98,11 @@ const SECTORES = {
       { texto: "medio ambiente", points: 4 },
       { texto: "plan general", points: 4 },
       { texto: "sostenibilidad", points: 4 },
-      { texto: "energia", points: 3 },
-      { texto: "industrial", points: 3 }
+      { texto: "energia", points: 3 }
     ],
     medias: [
       { texto: "territorio", points: 2 },
-      { texto: "ambiental", points: 2 },
-      { texto: "transporte", points: 2 }
+      { texto: "ambiental", points: 2 }
     ],
     negativas: [],
     excluirSiContiene: []
@@ -120,13 +114,11 @@ const SECTORES = {
       { texto: "servicio andaluz de salud", points: 5 },
       { texto: "dependencia", points: 4 },
       { texto: "servicios sociales", points: 4 },
-      { texto: "discapacidad", points: 4 },
-      { texto: "prestaciones", points: 3 }
+      { texto: "discapacidad", points: 4 }
     ],
     medias: [
       { texto: "salud", points: 2 },
-      { texto: "social", points: 2 },
-      { texto: "atencion primaria", points: 3 }
+      { texto: "social", points: 2 }
     ],
     negativas: [],
     excluirSiContiene: []
@@ -138,32 +130,16 @@ const SECTORES = {
       { texto: "formacion profesional", points: 5 },
       { texto: "becas", points: 5 },
       { texto: "centros docentes", points: 4 },
-      { texto: "universidad", points: 4 },
-      { texto: "profesorado", points: 4 },
-      { texto: "alumnado", points: 3 }
+      { texto: "universidad", points: 4 }
     ],
     medias: [
       { texto: "ensenanza", points: 2 },
-      { texto: "curso", points: 2 },
-      { texto: "ayudas", points: 2 }
+      { texto: "curso", points: 2 }
     ],
     negativas: [],
     excluirSiContiene: []
   }
 };
-
-function evaluarYGuardar(texto, urlBase, seccion, destino) {
-  const textoLimpio = texto.replace(/\s+/g, " ").trim();
-  const sectorEncontrado = clasificarTexto(textoLimpio, seccion);
-
-  if (sectorEncontrado) {
-    destino.push({
-      titulo: textoLimpio, 
-      url_pdf: urlBase,
-      sector: sectorEncontrado
-    });
-  }
-}
 
 function clasificarTexto(texto, seccion) {
   const textoAnalizar = (seccion + " " + texto).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -172,41 +148,21 @@ function clasificarTexto(texto, seccion) {
 
   for (const [sector, reglas] of Object.entries(SECTORES)) {
     let puntuacion = 0;
-    let descartar = false;
-
-    if (reglas.excluirSiContiene) {
-      for (const exc of reglas.excluirSiContiene) {
-        if (textoAnalizar.includes(exc.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-          descartar = true;
-          break;
-        }
+    for (const fuerte of (reglas.fuertes || [])) {
+      if (textoAnalizar.includes(fuerte.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
+        puntuacion += fuerte.puntos;
       }
     }
-
-    if (descartar) continue;
-
-    if (reglas.fuertes) {
-      reglas.fuertes.forEach(r => {
-        if (textoAnalizar.includes(r.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-          puntuacion += r.puntos;
-        }
-      });
+    for (const media of (reglas.medias || [])) {
+      if (textoAnalizar.includes(media.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
+        puntuacion += media.points;
+      }
     }
-
-    if (reglas.medias) {
-      reglas.medias.forEach(r => {
-        if (textoAnalizar.includes(r.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-          puntuacion += r.points;
-        }
-      });
-    }
-
     if (puntuacion >= reglas.threshold && puntuacion > maxPuntuacion) {
       maxPuntuacion = puntuacion;
       mejorSector = sector;
     }
   }
-
   return mejorSector;
 }
 
@@ -225,39 +181,14 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-function extraerItemsRecursivo(obj) {
-  let encontrados = [];
-  if (!obj || typeof obj !== 'object') return encontrados;
-  for (const key of Object.keys(obj)) {
-    if (key.toLowerCase() === 'item' || key.toLowerCase() === 'entry') {
-      const val = obj[key];
-      if (Array.isArray(val)) encontrados.push(...val);
-      else encontrados.push(val);
-    } else if (typeof obj[key] === 'object') {
-      encontrados.push(...extraerItemsRecursivo(obj[key]));
-    }
-  }
-  return encontrados;
-}
-
 async function ejecutarCapturadorBoja() {
-    console.log("🚀 [BOJA] Capturando mediante canales RSS oficiales corregidos...");
+    console.log("🚀 [BOJA] Capturando mediante lectura directa de canales de distribución...");
 
-    const urlBase = "https://www.juntadeandalucia.es";
     const documentosProcesados = [];
-    const parser = new XMLParser({
-        ignoreAttributes: false,
-        removeNamespace: true
-    });
+    const urlBase = "https://www.juntadeandalucia.es";
 
     const xmlFiles = [
-        "s51.xml",
-        "s52.xml",
-        "s53.xml",
-        "s54.xml",
-        "s55.xml",
-        "s56.xml",
-        "s57.xml"
+        "s51.xml", "s52.xml", "s53.xml", "s54.xml", "s55.xml", "s56.xml", "s57.xml"
     ];
 
     for (const xmlFile of xmlFiles) {
@@ -270,50 +201,37 @@ async function ejecutarCapturadorBoja() {
 
             if (!respuesta.ok) continue;
 
-            const xmlText = await respuesta.text();
-            if (!xmlText || xmlText.length < 50) continue;
+            const html = await respuesta.text();
+            const $ = cheerio.load(html);
 
-            const jsonObj = parser.parse(xmlText);
-            const items = extraerItemsRecursivo(jsonObj);
+            // Buscamos los enlaces de "Descargar la disposición en PDF"
+            $("a").each((_, el) => {
+                const textoEnlace = $(el).text().trim();
+                const href = $(el).attr("href");
 
-            for (const item of items) {
-                const titulo = String(item.title || "").replace(/\s+/g, " ").trim();
-                
-                // Obtener enlace válido (priorizando enlaces directos o estructurados del BOJA)
-                let link = "";
-                if (typeof item.link === 'string') {
-                    link = item.link;
-                } else if (item.link && typeof item.link === 'object' && item.link['#text']) {
-                    link = item.link['#text'];
-                } else if (item.guid) {
-                    link = typeof item.guid === 'object' ? item.guid['#text'] : item.guid;
+                if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
+                    const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
+
+                    // El texto del anuncio suele estar en el nodo de texto siguiente o en el párrafo contenedor
+                    const $padre = $(el).parent();
+                    let textoAnuncio = $padre.text()
+                        .replace("Descargar la disposición en PDF", "")
+                        .replace(/http:\/\/.*$/, "") // Limpia la URL residual pegada al texto
+                        .replace(/\s+/g, " ")
+                        .trim();
+
+                    if (textoAnuncio.length > 20) {
+                        const sectorEncontrado = clasificarTexto(textoAnuncio, "");
+                        if (sectorEncontrado) {
+                            documentosProcesados.push({
+                                titulo: textoAnuncio,
+                                url_pdf: urlPdfFinal,
+                                sector: sectorEncontrado
+                            });
+                        }
+                    }
                 }
-
-                if (!titulo || !link) continue;
-
-                let urlPdfFinal = link.trim();
-                if (!urlPdfFinal.startsWith("http")) {
-                    urlPdfFinal = urlPdfFinal.startsWith("/") ? urlBase + urlPdfFinal : `${urlBase}/${urlPdfFinal}`;
-                }
-
-                // Asegurar que si es HTML del BOJA o PDF, apunte correctamente
-                // Si el enlace contiene .html o .pdf, lo respetamos, si es una ruta relativa del BOJA la normalizamos
-                const tituloLimpio = titulo
-                    .replace(/PDF oficial auténtico/gi, "")
-                    .replace(/Otros formatos/gi, "")
-                    .replace(/Verificar autenticidad/gi, "")
-                    .replace(/\s+/g, " ")
-                    .trim();
-
-                if (tituloLimpio.length > 15 && !tituloLimpio.toLowerCase().startsWith("sumario")) {
-                    evaluarYGuardar(
-                        tituloLimpio,
-                        urlPdfFinal,
-                        "JUNTA DE ANDALUCÍA",
-                        documentosProcesados
-                    );
-                }
-            }
+            });
 
         } catch (error) {
             console.log(`↪️ Error procesando ${xmlFile}: ${error.message}`);
@@ -321,9 +239,7 @@ async function ejecutarCapturadorBoja() {
     }
 
     const unicos = Array.from(
-        new Map(
-            documentosProcesados.map(d => [d.url_pdf, d])
-        ).values()
+        new Map(documentosProcesados.map(d => [d.url_pdf, d])).values()
     );
 
     console.log("======================================");
