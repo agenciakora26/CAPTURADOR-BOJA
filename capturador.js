@@ -18,7 +18,7 @@ const SECTORES = {
       { texto: "pruebas selectivas", puntos: 4 },
       { texto: "personal funcionario", puntos: 4 },
       { texto: "personal laboral", puntos: 4 },
-      { texto: "convocatoria", points: 3 },
+      { texto: "convocatoria", puntos: 3 },
       { texto: "plazas", points: 3 }
     ],
     medias: [
@@ -222,7 +222,7 @@ async function ejecutarCapturadorBoja() {
                 if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
 
-                    // Recorremos los nodos hermanos hacia atrás hasta el enlace anterior
+                    // Recorremos los nodos hermanos hacia atrás extrayendo todo el bloque previo al enlace
                     let node = el.previousSibling;
                     const pedazos = [];
 
@@ -230,28 +230,35 @@ async function ejecutarCapturadorBoja() {
                         if (node.type === 'tag' && node.name === 'a' && $(node).text().includes("Descargar la disposición en PDF")) {
                             break;
                         }
-                        const txt = node.nodeType === 3 ? node.nodeValue : $(node).text();
-                        if (txt) pedazos.unshift(txt);
+                        if (node.type === 'text' && node.data) {
+                            pedazos.unshift(node.data);
+                        } else if (node.type === 'tag') {
+                            pedazos.unshift($(node).text());
+                        }
                         node = node.previousSibling;
                     }
 
                     let fragmentoTexto = pedazos.join(" ").replace(/\s+/g, " ").trim();
 
-                    // Respaldo de seguridad si el fragmento queda corto
                     if (!fragmentoTexto || fragmentoTexto.length < 10) {
                         fragmentoTexto = $(el).parent().text() || $(el).text();
                     }
 
-                    let tituloLimpio = fragmentoTexto
-                        .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
-                        .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
-                        .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
-                        .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
-                        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
-                        .replace(/Junta de Andalucía/g, "")
-                        .replace(/http:\/\/.*$/, "")
-                        .replace(/\s+/g, " ")
-                        .trim();
+                    // Extraer limpiamente el título real del anuncio cortando justo antes de "Boletín:"
+                    let tituloLimpio = fragmentoTexto.split(/Boletín:|Organismo:|Administración:|Sección:/i)[0].trim();
+
+                    if (!tituloLimpio || tituloLimpio.length < 10) {
+                        tituloLimpio = fragmentoTexto
+                            .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
+                            .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
+                            .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
+                            .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
+                            .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
+                            .replace(/Junta de Andalucía/g, "")
+                            .replace(/http:\/\/.*$/, "")
+                            .replace(/\s+/g, " ")
+                            .trim();
+                    }
 
                     if (!tituloLimpio || tituloLimpio.length < 10) {
                         tituloLimpio = fragmentoTexto.replace(/\s+/g, " ").trim();
