@@ -204,7 +204,7 @@ async function ejecutarCapturadorBoja() {
             const html = await respuesta.text();
             const $ = cheerio.load(html);
 
-            // Buscamos de forma independiente cada enlace de descarga de PDF
+            // Buscamos cada enlace de PDF de forma individual
             $("a").each((_, el) => {
                 const textoEnlace = $(el).text().trim();
                 const href = $(el).attr("href");
@@ -212,35 +212,33 @@ async function ejecutarCapturadorBoja() {
                 if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
 
-                    // Subimos hasta un contenedor estable o cogemos el bloque de texto previo al enlace
-                    // Como vienen encadenados, extraemos el texto que hay justo antes del enlace de este PDF específico
-                    const $container = $(el).closest("div, p, td, body");
-                    
-                    // Clonamos para manipular sin romper el DOM
-                    const $clon = $(el).parent().clone();
-                    $clon.find("a, script").remove();
-
-                    let textoBloque = $clon.text()
-                        .replace("Descargar la disposición en PDF", "")
-                        .replace(/http:\/\/.*$/, "")
-                        .replace(/\s+/g, " ")
-                        .trim();
-
-                    // Limpieza específica para extraer el título real del anuncio ignorando ruidos de otros bloques
-                    let tituloLimpio = textoBloque;
-
-                    // Si el bloque arrastra texto del final del anuncio anterior, cortamos a partir de la última fecha o "Junta de Andalucía"
-                    const indiceCorte = tituloLimpio.lastIndexOf("Junta de Andalucía");
-                    if (indiceCorte !== -1) {
-                        tituloLimpio = tituloLimpio.substring(indiceCorte + "Junta de Andalucía".length).trim();
+                    // Recorremos los nodos hacia atrás hasta encontrar el enlace anterior o el inicio,
+                    // extrayendo únicamente el texto específico de este anuncio.
+                    let textParts = [];
+                    let prev = el.previousSibling;
+                    while (prev) {
+                        // Si encontramos el enlace del PDF del anuncio anterior, paramos
+                        if (prev.type === 'tag' && prev.name === 'a' && $(prev).text().includes("Descargar la disposición en PDF")) {
+                            break;
+                        }
+                        if (prev.type === 'text') {
+                            textParts.unshift($(prev).text());
+                        } else if (prev.type === 'tag') {
+                            textParts.unshift($(prev).text());
+                        }
+                        prev = prev.previousSibling;
                     }
 
-                    // Limpieza de metadatos administrativos repetitivos si los hubiera
-                    tituloLimpio = tituloLimpio
+                    let textoBloque = textParts.join(" ").replace(/\s+/g, " ").trim();
+
+                    // Limpieza de cabeceras técnicas y metadatos administrativos
+                    let tituloLimpio = textoBloque
                         .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
                         .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
                         .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
                         .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
+                        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
+                        .replace(/Junta de Andalucía/g, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
