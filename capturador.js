@@ -223,21 +223,17 @@ async function ejecutarCapturadorBoja() {
                         .trim();
 
                     if (textoBruto.length > 20) {
-                        // Extraer limpiamente las partes mediante patrones de texto
-                        const matchOrg = textoBruto.match(/Organismo:\s*(.*?)(?=Administración:|Sección:|$)/i);
-                        const matchSec = textoBruto.match(/Sección:\s*(.*)/i);
-                        const matchBoletin = textoBruto.match(/(Boletín:\s*BOJA[^O]+)/i);
+                        // Limpiar metadatos repetitivos para dejar la descripción real del anuncio
+                        let tituloLimpio = textoBruto
+                            .replace(/Boletín:\s*BOJA[^O]+/gi, "")
+                            .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
+                            .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
+                            .replace(/Sección:\s*[\d\.\s-]+/gi, "") // Elimina códigos de sección como "2.2."
+                            .trim();
 
-                        const boletinLim = matchBoletin ? matchBoletin[1].trim() : "BOJA";
-                        const organismoLim = matchOrg ? matchOrg[1].trim() : "";
-                        const seccionLim = matchSec ? matchSec[1].trim() : "";
-
-                        // Construir un título ordenado y legible
-                        let tituloLimpio = textoBruto;
-                        if (organismoLim && seccionLim) {
-                            tituloLimpio = `${organismoLim} — ${seccionLim}`;
-                        } else if (organismoLim) {
-                            tituloLimpio = `${organismoLim} (${boletinLim})`;
+                        // Si tras limpiar queda vacío o muy corto, usamos el texto original formateado
+                        if (!tituloLimpio || tituloLimpio.length < 10) {
+                            tituloLimpio = textoBruto;
                         }
 
                         const sectorEncontrado = clasificarTexto(textoBruto, "");
