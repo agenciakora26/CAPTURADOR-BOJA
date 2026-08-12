@@ -215,55 +215,58 @@ async function ejecutarCapturadorBoja() {
             const html = await respuesta.text();
             const $ = cheerio.load(html);
 
-            // Recopilamos todos los enlaces de PDF y sus URLs en orden
-            const pdfLinks = [];
             $("a").each((_, el) => {
                 const textoEnlace = $(el).text().trim();
                 const href = $(el).attr("href");
-                if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
+
+                if (href && (textoEnlace.includes("Descargar la disposición en PDF") || href.includes(".html"))) {
+                    // Evitar enlaces que no sean de disposiciones reales
+                    if (!href.includes("/boja/2026/")) return;
+
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
-                    pdfLinks.push(urlPdfFinal);
+
+                    // Recogemos todo el texto contenedor del bloque
+                    const textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
+
+                    // Intentar buscar palabras clave de inicio de anuncio oficial (Resolución, Orden, Decreto, Extracto, Acuerdo)
+                    let tituloLimpio = "";
+                    const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
+
+                    if (matchKeyword && matchKeyword.index !== undefined) {
+                        tituloLimpio = textoBloque.substring(matchKeyword.index).trim();
+                    } else {
+                        tituloLimpio = textoBloque
+                            .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
+                            .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
+                            .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
+                            .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
+                            .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
+                            .replace(/Junta de Andalucía/g, "")
+                            .replace(/Descargar la disposición en PDF/g, "")
+                            .replace(/http:\/\/.*$/, "")
+                            .replace(/\s+/g, " ")
+                            .trim();
+                    }
+
+                    // Limpieza final de la URL residual o texto sobrante al final del título
+                    tituloLimpio = tituloLimpio.replace(/http:\/\/.*$/, "").trim();
+
+                    if (!tituloLimpio || tituloLimpio.length < 15 || /^[\d\.\s-]+$/.test(tituloLimpio)) {
+                        tituloLimpio = textoBloque.replace(/http:\/\/.*$/, "").replace(/\s+/g, " ").trim();
+                    }
+
+                    if (tituloLimpio.length > 15) {
+                        const sectorEncontrado = clasificarTexto(textoBloque, "");
+                        if (sectorEncontrado) {
+                            documentosProcesados.push({
+                                titulo: tituloLimpio,
+                                url_pdf: urlPdfFinal,
+                                sector: sectorEncontrado
+                            });
+                        }
+                    }
                 }
             });
-
-            // Troceamos el contenido HTML de la página usando el enlace como separador
-            const bodyHtml = $('body').html() || html;
-            const chunks = bodyHtml.split(/<a[^>]*>Descargar la disposición en PDF<\/a>/i);
-
-            // Cada chunk corresponde exactamente a un anuncio individual
-            for (let i = 0; i < pdfLinks.length && i < chunks.length; i++) {
-                const urlPdfFinal = pdfLinks[i];
-                const chunkHtml = chunks[i];
-
-                const $chunk = cheerio.load(chunkHtml);
-                const textoBloque = $chunk.text().replace(/\s+/g, " ").trim();
-
-                if (textoBloque.length > 15) {
-                    let tituloLimpio = textoBloque
-                        .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
-                        .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
-                        .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
-                        .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
-                        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
-                        .replace(/Junta de Andalucía/g, "")
-                        .replace(/http:\/\/.*$/, "")
-                        .replace(/\s+/g, " ")
-                        .trim();
-
-                    if (!tituloLimpio || tituloLimpio.length < 10) {
-                        tituloLimpio = textoBloque;
-                    }
-
-                    const sectorEncontrado = clasificarTexto(textoBloque, "");
-                    if (sectorEncontrado) {
-                        documentosProcesados.push({
-                            titulo: tituloLimpio,
-                            url_pdf: urlPdfFinal,
-                            sector: sectorEncontrado
-                        });
-                    }
-                }
-            }
 
         } catch (error) {
             console.log(`↪️ Error procesando ${xmlFile}: ${error.message}`);
