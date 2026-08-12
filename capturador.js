@@ -166,6 +166,19 @@ function clasificarTexto(texto, seccion) {
   return mejorSector;
 }
 
+async function fetchWithRetry(url, opciones = {}, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const res = await fetch(url, opciones);
+            if (res.ok) return res;
+        } catch (err) {
+            if (i === retries - 1) throw err;
+            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+        }
+    }
+    throw new Error(`Failed after ${retries} retries`);
+}
+
 async function supabaseRequest(endpoint, opciones = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
     ...opciones,
@@ -194,17 +207,14 @@ async function ejecutarCapturadorBoja() {
     for (const xmlFile of xmlFiles) {
         const urlRss = `${urlBase}/boja/distribucion/${xmlFile}`;
         try {
-            const respuesta = await fetch(urlRss, {
+            const respuesta = await fetchWithRetry(urlRss, {
                 headers: { "User-Agent": USER_AGENT },
                 signal: AbortSignal.timeout(15000)
             });
 
-            if (!respuesta.ok) continue;
-
             const html = await respuesta.text();
             const $ = cheerio.load(html);
 
-            // Buscamos cada enlace de PDF de forma individual
             $("a").each((_, el) => {
                 const textoEnlace = $(el).text().trim();
                 const href = $(el).attr("href");
@@ -212,26 +222,30 @@ async function ejecutarCapturadorBoja() {
                 if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
 
-                    // Recorremos los nodos hacia atrás hasta encontrar el enlace anterior o el inicio,
-                    // extrayendo únicamente el texto específico de este anuncio.
-                    let textParts = [];
+                    // Recorremos hacia atrás (metadatos)
                     let prev = el.previousSibling;
+                    let prevTextParts = [];
                     while (prev) {
-                        // Si encontramos el enlace del PDF del anuncio anterior, paramos
                         if (prev.type === 'tag' && prev.name === 'a' && $(prev).text().includes("Descargar la disposición en PDF")) {
                             break;
                         }
-                        if (prev.type === 'text') {
-                            textParts.unshift($(prev).text());
-                        } else if (prev.type === 'tag') {
-                            textParts.unshift($(prev).text());
-                        }
+                        prevTextParts.unshift($(prev).text());
                         prev = prev.previousSibling;
                     }
 
-                    let textoBloque = textParts.join(" ").replace(/\s+/g, " ").trim();
+                    // Recorremos hacia adelante (título / descripción del anuncio)
+                    let next = el.nextSibling;
+                    let nextTextParts = [];
+                    while (next) {
+                        if (next.type === 'tag' && next.name === 'a' && $(next).text().includes("Descargar la disposición en PDF")) {
+                            break;
+                        }
+                        nextTextParts.push($(next).text());
+                        next = next.nextSibling;
+                    }
 
-                    // Limpieza de cabeceras técnicas y metadatos administrativos
+                    const textoBloque = (prevTextParts.join(" ") + " " + nextTextParts.join(" ")).replace(/\s+/g, " ").trim();
+
                     let tituloLimpio = textoBloque
                         .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
                         .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
@@ -239,6 +253,7 @@ async function ejecutarCapturadorBoja() {
                         .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
                         .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
                         .replace(/Junta de Andalucía/g, "")
+                        .replace(/http:\/\/.*$/, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
