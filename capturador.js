@@ -222,34 +222,20 @@ async function ejecutarCapturadorBoja() {
                         .replace(/\s+/g, " ")
                         .trim();
 
+                    // --- LIMPIEZA DE LA CABECERA PEGADA DEL PRIMER ANUNCIO ---
+                    // Corta y desecha todo lo que venga antes de la fecha y "Junta de Andalucía"
+                    const regexBasuraCabecera = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\s*Junta de Andalucía/i;
+                    if (regexBasuraCabecera.test(textoBruto)) {
+                        const partes = textoBruto.split(regexBasuraCabecera);
+                        textoBruto = partes[partes.length - 1].trim();
+                    }
+                    // ---------------------------------------------------------
+
                     if (textoBruto.length > 20) {
-                        // Extraer limpiamente el organismo y la sección del texto plano
-                        const matchOrg = textoBruto.match(/Organismo:\s*(.*?)(?=Administración:|Sección:|$)/i);
-                        const matchSec = textoBruto.match(/Sección:\s*(.*)/i);
-
-                        const organismoLim = matchOrg ? matchOrg[1].trim() : "";
-                        const seccionLim = matchSec ? matchSec[1].trim() : "";
-
-                        // Construir un título limpio y legible sin acumular código técnico
-                        let tituloLimpio = "";
-                        if (organismoLim && seccionLim) {
-                            tituloLimpio = `${organismoLim} — ${seccionLim}`;
-                        } else if (organismoLim) {
-                            tituloLimpio = organismoLim;
-                        } else {
-                            // Limpieza de respaldo si la estructura cambia
-                            tituloLimpio = textoBruto
-                                .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
-                                .replace(/Organismo:/gi, "")
-                                .replace(/Administración:/gi, "")
-                                .replace(/Sección:/gi, "")
-                                .trim();
-                        }
-
                         const sectorEncontrado = clasificarTexto(textoBruto, "");
                         if (sectorEncontrado) {
                             documentosProcesados.push({
-                                titulo: tituloLimpio,
+                                titulo: textoBruto, // Ahora textoBruto ya empieza limpio en el título real del anuncio
                                 url_pdf: urlPdfFinal,
                                 sector: sectorEncontrado
                             });
