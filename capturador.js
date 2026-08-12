@@ -212,13 +212,18 @@ async function ejecutarCapturadorBoja() {
                 if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
 
-                    // El texto del anuncio suele estar en el nodo de texto siguiente o en el párrafo contenedor
-                    const $padre = $(el).parent();
-                    let textoAnuncio = $padre.text()
-                        .replace("Descargar la disposición en PDF", "")
-                        .replace(/http:\/\/.*$/, "") // Limpia la URL residual pegada al texto
-                        .replace(/\s+/g, " ")
-                        .trim();
+                    // En lugar de usar $padre.text() completo, buscamos el bloque específico del título o limpiamos los metadatos:
+const $bloqueAnuncio = $(el).closest("p, div, tr"); // O el selector contenedor que envuelve el anuncio
+
+// Si el título real suele estar en un span específico o después de etiquetas concretas:
+// Podemos clonar el elemento, eliminar elementos sobrantes como enlaces o metadatos y quedarnos con el texto limpio:
+const $clon = $padre.clone();
+$clon.find("a, .metadatos, script").remove(); // Elimina enlaces y metadatos internos
+
+let textoAnuncio = $clon.text()
+    .replace(/Boletín:.*?(?=Organismo|$)/gis, "") // Opcional para limpiar la cabecera si viene estructurada
+    .replace(/\s+/g, " ")
+    .trim();
 
                     if (textoAnuncio.length > 20) {
                         const sectorEncontrado = clasificarTexto(textoAnuncio, "");
