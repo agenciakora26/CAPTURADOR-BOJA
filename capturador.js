@@ -222,20 +222,38 @@ async function ejecutarCapturadorBoja() {
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    // --- LIMPIEZA DE LA CABECERA PEGADA DEL PRIMER ANUNCIO ---
-                    // Corta y desecha todo lo que venga antes de la fecha y "Junta de Andalucía"
-                    const regexBasuraCabecera = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\s*Junta de Andalucía/i;
-                    if (regexBasuraCabecera.test(textoBruto)) {
-                        const partes = textoBruto.split(regexBasuraCabecera);
-                        textoBruto = partes[partes.length - 1].trim();
+                    // --- LIMPIEZA TOTAL DE CABECERAS Y METADATOS DEL BOJA ---
+                    // Buscamos si el texto contiene los bloques típicos del BOJA y nos quedamos con lo importante
+                    let tituloLimpio = textoBruto;
+                    
+                    // Si contiene la estructura con "Organismo:" y "Sección:", separamos y limpiamos
+                    if (tituloLimpio.includes("Organismo:") && tituloLimpio.includes("Sección:")) {
+                        // Intentamos extraer el organismo y la sección para armar un título legible y profesional
+                        const matchOrg = tituloLimpio.match(/Organismo:\s*(.*?)(?=Administración:|Sección:|$)/i);
+                        const matchSec = tituloLimpio.match(/Sección:\s*(.*)/i);
+                        
+                        const org = matchOrg ? matchOrg.trim() : "";
+                        const sec = matchSec ? matchSec.trim() : "";
+                        
+                        if (org) {
+                            tituloLimpio = sec ? `${org} — ${sec}` : org;
+                        }
                     }
-                    // ---------------------------------------------------------
 
-                    if (textoBruto.length > 20) {
+                    // Limpieza general de restos de boletines y fechas si hubieran quedado
+                    tituloLimpio = tituloLimpio
+                        .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
+                        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
+                        .replace(/Junta de Andalucía/g, "")
+                        .replace(/\s+/g, " ")
+                        .trim();
+                    // -----------------------------------------------------------------
+
+                    if (tituloLimpio.length > 15) {
                         const sectorEncontrado = clasificarTexto(textoBruto, "");
                         if (sectorEncontrado) {
                             documentosProcesados.push({
-                                titulo: textoBruto, // Ahora textoBruto ya empieza limpio en el título real del anuncio
+                                titulo: tituloLimpio,
                                 url_pdf: urlPdfFinal,
                                 sector: sectorEncontrado
                             });
