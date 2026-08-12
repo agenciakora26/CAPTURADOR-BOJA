@@ -222,32 +222,30 @@ async function ejecutarCapturadorBoja() {
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    // --- LIMPIEZA TOTAL DE CABECERAS Y METADATOS DEL BOJA ---
-                    // Buscamos si el texto contiene los bloques típicos del BOJA y nos quedamos con lo importante
                     let tituloLimpio = textoBruto;
                     
-                    // Si contiene la estructura con "Organismo:" y "Sección:", separamos y limpiamos
                     if (tituloLimpio.includes("Organismo:") && tituloLimpio.includes("Sección:")) {
-                        // Intentamos extraer el organismo y la sección para armar un título legible y profesional
                         const matchOrg = tituloLimpio.match(/Organismo:\s*(.*?)(?=Administración:|Sección:|$)/i);
                         const matchSec = tituloLimpio.match(/Sección:\s*(.*)/i);
                         
-                        const org = matchOrg ? matchOrg.trim() : "";
-                        const sec = matchSec ? matchSec.trim() : "";
+                        const org = (matchOrg && matchOrg[1]) ? matchOrg[1].trim() : "";
+                        const sec = (matchSec && matchSec[1]) ? matchSec[1].trim() : "";
                         
                         if (org) {
                             tituloLimpio = sec ? `${org} — ${sec}` : org;
                         }
                     }
 
-                    // Limpieza general de restos de boletines y fechas si hubieran quedado
                     tituloLimpio = tituloLimpio
                         .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
                         .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
                         .replace(/Junta de Andalucía/g, "")
                         .replace(/\s+/g, " ")
                         .trim();
-                    // -----------------------------------------------------------------
+
+                    if (!tituloLimpio || tituloLimpio.length < 10) {
+                        tituloLimpio = textoBruto;
+                    }
 
                     if (tituloLimpio.length > 15) {
                         const sectorEncontrado = clasificarTexto(textoBruto, "");
