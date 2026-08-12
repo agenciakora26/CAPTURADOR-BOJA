@@ -204,7 +204,7 @@ async function ejecutarCapturadorBoja() {
             const html = await respuesta.text();
             const $ = cheerio.load(html);
 
-            // Buscamos los enlaces de "Descargar la disposición en PDF"
+            // Buscamos de forma independiente cada enlace de descarga de PDF
             $("a").each((_, el) => {
                 const textoEnlace = $(el).text().trim();
                 const href = $(el).attr("href");
@@ -212,43 +212,44 @@ async function ejecutarCapturadorBoja() {
                 if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
 
-                    const $padre = $(el).parent();
-                    const $clon = $padre.clone();
+                    // Subimos hasta un contenedor estable o cogemos el bloque de texto previo al enlace
+                    // Como vienen encadenados, extraemos el texto que hay justo antes del enlace de este PDF específico
+                    const $container = $(el).closest("div, p, td, body");
+                    
+                    // Clonamos para manipular sin romper el DOM
+                    const $clon = $(el).parent().clone();
                     $clon.find("a, script").remove();
 
-                    let textoBruto = $clon.text()
+                    let textoBloque = $clon.text()
                         .replace("Descargar la disposición en PDF", "")
                         .replace(/http:\/\/.*$/, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    let tituloLimpio = textoBruto;
-                    
-                    if (tituloLimpio.includes("Organismo:") && tituloLimpio.includes("Sección:")) {
-                        const matchOrg = tituloLimpio.match(/Organismo:\s*(.*?)(?=Administración:|Sección:|$)/i);
-                        const matchSec = tituloLimpio.match(/Sección:\s*(.*)/i);
-                        
-                        const org = (matchOrg && matchOrg[1]) ? matchOrg[1].trim() : "";
-                        const sec = (matchSec && matchSec[1]) ? matchSec[1].trim() : "";
-                        
-                        if (org) {
-                            tituloLimpio = sec ? `${org} — ${sec}` : org;
-                        }
+                    // Limpieza específica para extraer el título real del anuncio ignorando ruidos de otros bloques
+                    let tituloLimpio = textoBloque;
+
+                    // Si el bloque arrastra texto del final del anuncio anterior, cortamos a partir de la última fecha o "Junta de Andalucía"
+                    const indiceCorte = tituloLimpio.lastIndexOf("Junta de Andalucía");
+                    if (indiceCorte !== -1) {
+                        tituloLimpio = tituloLimpio.substring(indiceCorte + "Junta de Andalucía".length).trim();
                     }
 
+                    // Limpieza de metadatos administrativos repetitivos si los hubiera
                     tituloLimpio = tituloLimpio
                         .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
-                        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
-                        .replace(/Junta de Andalucía/g, "")
+                        .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
+                        .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
+                        .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
                     if (!tituloLimpio || tituloLimpio.length < 10) {
-                        tituloLimpio = textoBruto;
+                        tituloLimpio = textoBloque.replace(/\s+/g, " ").trim();
                     }
 
                     if (tituloLimpio.length > 15) {
-                        const sectorEncontrado = clasificarTexto(textoBruto, "");
+                        const sectorEncontrado = clasificarTexto(textoBloque, "");
                         if (sectorEncontrado) {
                             documentosProcesados.push({
                                 titulo: tituloLimpio,
