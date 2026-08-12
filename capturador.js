@@ -212,22 +212,38 @@ async function ejecutarCapturadorBoja() {
                 if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
 
-                    // Definimos el padre y limpiamos enlaces internos para evitar texto basura
                     const $padre = $(el).parent();
                     const $clon = $padre.clone();
                     $clon.find("a, script").remove();
 
-                    let textoAnuncio = $clon.text()
+                    let textoBruto = $clon.text()
                         .replace("Descargar la disposición en PDF", "")
-                        .replace(/http:\/\/.*$/, "") // Limpia la URL residual pegada al texto
+                        .replace(/http:\/\/.*$/, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    if (textoAnuncio.length > 20) {
-                        const sectorEncontrado = clasificarTexto(textoAnuncio, "");
+                    if (textoBruto.length > 20) {
+                        // Extraer limpiamente las partes mediante patrones de texto
+                        const matchOrg = textoBruto.match(/Organismo:\s*(.*?)(?=Administración:|Sección:|$)/i);
+                        const matchSec = textoBruto.match(/Sección:\s*(.*)/i);
+                        const matchBoletin = textoBruto.match(/(Boletín:\s*BOJA[^O]+)/i);
+
+                        const boletinLim = matchBoletin ? matchBoletin[1].trim() : "BOJA";
+                        const organismoLim = matchOrg ? matchOrg[1].trim() : "";
+                        const seccionLim = matchSec ? matchSec[1].trim() : "";
+
+                        // Construir un título ordenado y legible
+                        let tituloLimpio = textoBruto;
+                        if (organismoLim && seccionLim) {
+                            tituloLimpio = `${organismoLim} — ${seccionLim}`;
+                        } else if (organismoLim) {
+                            tituloLimpio = `${organismoLim} (${boletinLim})`;
+                        }
+
+                        const sectorEncontrado = clasificarTexto(textoBruto, "");
                         if (sectorEncontrado) {
                             documentosProcesados.push({
-                                titulo: textoAnuncio,
+                                titulo: tituloLimpio,
                                 url_pdf: urlPdfFinal,
                                 sector: sectorEncontrado
                             });
