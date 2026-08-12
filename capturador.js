@@ -235,46 +235,42 @@ async function ejecutarCapturadorBoja() {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
                     const textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
 
-                    // Buscar directamente el inicio real del título oficial del anuncio (Resolución, Orden, Decreto, Extracto, Acuerdo, Edicto, Anuncio, Corrección)
                     let tituloLimpio = "";
+
+                    // 1. Intentar buscar mediante palabra clave oficial de inicio de anuncio
                     const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
 
                     if (matchKeyword && matchKeyword.index !== undefined) {
                         tituloLimpio = textoBloque.substring(matchKeyword.index).trim();
                     } else {
-                        // Si no encuentra palabra clave clara, intentamos extraer el texto posterior al enlace
-                        let nextNodesText = [];
-                        let next = el.nextSibling;
-                        while (next) {
-                            if (next.type === 'tag' && next.name === 'a' && $(next).text().includes("Descargar la disposición en PDF")) {
-                                break;
-                            }
-                            const txt = next.type === 'text' ? next.data : $(next).text();
-                            if (txt) nextNodesText.push(txt);
-                            next = next.nextSibling;
+                        // 2. Si no hay palabra clave, cortar por la sección para eliminar toda la cabecera técnica previa
+                        const partesSeccion = textoBloque.split(/Sección:\s*[\d\.\s-\w,]+/i);
+                        if (partesSeccion.length > 1 && partesSeccion[1].trim().length > 10) {
+                            tituloLimpio = partesSeccion[1].trim();
+                        } else {
+                            tituloLimpio = textoBloque;
                         }
-                        tituloLimpio = nextNodesText.join(" ").replace(/\s+/g, " ").trim();
                     }
 
-                    // Limpieza profunda y definitiva para eliminar URLs, fechas, cabeceras técnicas y metadatos de distribución
+                    // Limpieza profunda y definitiva de URLs, fechas, menciones institucionales y restos técnicos
                     tituloLimpio = tituloLimpio
-                        .replace(/https?:\/\/[^\s]+?\/boja\/[^\s]+/gi, "")
+                        .replace(/https?:\/\/[^\s]+/g, "")
                         .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
                         .replace(/Junta de Andalucía/gi, "")
                         .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
                         .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
                         .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
                         .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
-                        .replace(/Descargar la disposición en PDF/g, "")
+                        .replace(/Descargar la disposición en PDF/gi, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    // Respaldo por si quedara vacío tras la limpieza
-                    if (!tituloLimpio || tituloLimpio.length < 10 || tituloLimpio.toLowerCase().includes("boletín: boja")) {
+                    if (!tituloLimpio || tituloLimpio.length < 10) {
                         tituloLimpio = textoBloque
                             .replace(/https?:\/\/[^\s]+/g, "")
                             .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
                             .replace(/Junta de Andalucía/gi, "")
+                            .replace(/Descargar la disposición en PDF/gi, "")
                             .replace(/\s+/g, " ")
                             .trim();
                     }
