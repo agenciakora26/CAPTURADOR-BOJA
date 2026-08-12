@@ -219,44 +219,63 @@ async function ejecutarCapturadorBoja() {
                 const textoEnlace = $(el).text().trim();
                 const href = $(el).attr("href");
 
-                if (href && (textoEnlace.includes("Descargar la disposición en PDF") || href.includes(".html"))) {
-                    // Evitar enlaces que no sean de disposiciones reales
-                    if (!href.includes("/boja/2026/")) return;
-
+                if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
 
-                    // Recogemos todo el texto contenedor del bloque
-                    const textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
+                    // 1. Extraer el texto DESPUÉS del enlace (donde está realmente el título del anuncio)
+                    let nextNodesText = [];
+                    let next = el.nextSibling;
+                    while (next) {
+                        if (next.type === 'tag' && next.name === 'a' && $(next).text().includes("Descargar la disposición en PDF")) {
+                            break;
+                        }
+                        const txt = next.type === 'text' ? next.data : $(next).text();
+                        if (txt) nextNodesText.push(txt);
+                        next = next.nextSibling;
+                    }
+                    let textoDespues = nextNodesText.join(" ").replace(/\s+/g, " ").trim();
 
-                    // Intentar buscar palabras clave de inicio de anuncio oficial (Resolución, Orden, Decreto, Extracto, Acuerdo)
-                    let tituloLimpio = "";
-                    const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
+                    // Cortar si aparece el siguiente "Boletín:"
+                    if (textoDespues.includes("Boletín:")) {
+                        textoDespues = textoDespues.split(/Boletín:/i)[0].trim();
+                    }
 
-                    if (matchKeyword && matchKeyword.index !== undefined) {
-                        tituloLimpio = textoBloque.substring(matchKeyword.index).trim();
-                    } else {
-                        tituloLimpio = textoBloque
+                    // 2. Extraer el texto ANTES del enlace (para contexto de clasificación)
+                    let prevNodesText = [];
+                    let prev = el.previousSibling;
+                    while (prev) {
+                        if (prev.type === 'tag' && prev.name === 'a' && $(prev).text().includes("Descargar la disposición en PDF")) {
+                            break;
+                        }
+                        const txt = prev.type === 'text' ? prev.data : $(prev).text();
+                        if (txt) prevNodesText.unshift(txt);
+                        prev = prev.previousSibling;
+                    }
+                    let textoAntes = prevNodesText.join(" ").replace(/\s+/g, " ").trim();
+
+                    const textoCompleto = textoAntes + " " + textoDespues;
+
+                    // El título limpio es estrictamente el texto posterior
+                    let tituloLimpio = textoDespues
+                        .replace(/http:\/\/.*$/, "")
+                        .replace(/\s+/g, " ")
+                        .trim();
+
+                    // Respaldo por si el texto posterior está vacío
+                    if (!tituloLimpio || tituloLimpio.length < 10) {
+                        tituloLimpio = textoAntes
                             .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
                             .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
                             .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
                             .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
                             .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
                             .replace(/Junta de Andalucía/g, "")
-                            .replace(/Descargar la disposición en PDF/g, "")
-                            .replace(/http:\/\/.*$/, "")
                             .replace(/\s+/g, " ")
                             .trim();
                     }
 
-                    // Limpieza final de la URL residual o texto sobrante al final del título
-                    tituloLimpio = tituloLimpio.replace(/http:\/\/.*$/, "").trim();
-
-                    if (!tituloLimpio || tituloLimpio.length < 15 || /^[\d\.\s-]+$/.test(tituloLimpio)) {
-                        tituloLimpio = textoBloque.replace(/http:\/\/.*$/, "").replace(/\s+/g, " ").trim();
-                    }
-
                     if (tituloLimpio.length > 15) {
-                        const sectorEncontrado = clasificarTexto(textoBloque, "");
+                        const sectorEncontrado = clasificarTexto(textoCompleto, "");
                         if (sectorEncontrado) {
                             documentosProcesados.push({
                                 titulo: tituloLimpio,
