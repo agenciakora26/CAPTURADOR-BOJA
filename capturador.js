@@ -189,7 +189,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
       ...(opciones.headers || {})
     }
   });
-  if (!res.ok) throw new Error(`Supabase error: ${res.status} - ${await res.text()}`);
+  if (!res.ok) throw new Error(`Supabase error: {res.status} - ${await res.text()}`);
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
@@ -222,47 +222,32 @@ async function ejecutarCapturadorBoja() {
                 if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
 
-                    // Recorremos hacia atrás (metadatos)
-                    let prev = el.previousSibling;
-                    let prevTextParts = [];
-                    while (prev) {
-                        if (prev.type === 'tag' && prev.name === 'a' && $(prev).text().includes("Descargar la disposición en PDF")) {
-                            break;
-                        }
-                        prevTextParts.unshift($(prev).text());
-                        prev = prev.previousSibling;
-                    }
+                    // Extraemos todo el texto circundante del elemento padre contenedor
+                    const $parent = $(el).parent();
+                    const textoCompleto = $parent.text() || $(el).closest("body").text();
 
-                    // Recorremos hacia adelante (título / descripción del anuncio)
-                    let next = el.nextSibling;
-                    let nextTextParts = [];
-                    while (next) {
-                        if (next.type === 'tag' && next.name === 'a' && $(next).text().includes("Descargar la disposición en PDF")) {
-                            break;
-                        }
-                        nextTextParts.push($(next).text());
-                        next = next.nextSibling;
-                    }
+                    // Buscamos la URL del PDF dentro del texto para trocear y aislar este anuncio exacto
+                    const partesTexto = textoCompleto.split(href);
+                    let textoAnuncio = partesTexto.length > 0 ? partesTexto[0] : "";
 
-                    const textoBloque = (prevTextParts.join(" ") + " " + nextTextParts.join(" ")).replace(/\s+/g, " ").trim();
-
-                    let tituloLimpio = textoBloque
+                    // Limpiamos ruidos técnicos y dejamos el título real limpio
+                    let tituloLimpio = textoAnuncio
                         .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
                         .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
                         .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
                         .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
                         .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
                         .replace(/Junta de Andalucía/g, "")
-                        .replace(/http:\/\/.*$/, "")
+                        .replace(/Descargar la disposición en PDF/g, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
                     if (!tituloLimpio || tituloLimpio.length < 10) {
-                        tituloLimpio = textoBloque.replace(/\s+/g, " ").trim();
+                        tituloLimpio = textoAnuncio.replace(/\s+/g, " ").trim();
                     }
 
                     if (tituloLimpio.length > 15) {
-                        const sectorEncontrado = clasificarTexto(textoBloque, "");
+                        const sectorEncontrado = clasificarTexto(textoAnuncio, "");
                         if (sectorEncontrado) {
                             documentosProcesados.push({
                                 titulo: tituloLimpio,
