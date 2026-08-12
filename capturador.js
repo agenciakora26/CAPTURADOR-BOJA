@@ -223,15 +223,24 @@ async function ejecutarCapturadorBoja() {
                         .trim();
 
                     if (textoBruto.length > 20) {
-                        // Limpiar metadatos repetitivos para dejar la descripción real del anuncio
-                        let tituloLimpio = textoBruto
-                            .replace(/Boletín:\s*BOJA[^O]+/gi, "")
-                            .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
-                            .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
-                            .replace(/Sección:\s*[\d\.\s-]+/gi, "") // Elimina códigos de sección como "2.2."
-                            .trim();
+                        // Buscar el inicio real del título del anuncio (Resolución, Orden, Decreto, Extracto, Acuerdo, etc.)
+                        let tituloLimpio = "";
+                        const matchKeyword = textoBruto.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
 
-                        // Si tras limpiar queda vacío o muy corto, usamos el texto original formateado
+                        if (matchKeyword) {
+                            // Si encuentra la palabra clave, extrae el texto desde ahí en adelante
+                            tituloLimpio = textoBruto.substring(matchKeyword.index).trim();
+                        } else {
+                            // Fallback de limpieza si no encuentra la palabra clave exacta
+                            tituloLimpio = textoBruto
+                                .replace(/Boletín:\s*BOJA[^O]+/gi, "")
+                                .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
+                                .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
+                                .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
+                                .trim();
+                        }
+
+                        // Si por cualquier motivo queda vacío o demasiado corto, usamos el texto bruto
                         if (!tituloLimpio || tituloLimpio.length < 10) {
                             tituloLimpio = textoBruto;
                         }
