@@ -9,16 +9,16 @@ const SECTORES = {
   "Oposiciones y Empleo": {
     threshold: 3,
     fuertes: [
-      { texto: "oposicion", puntos: 5 },
-      { texto: "concurso-oposicion", puntos: 5 },
-      { texto: "bolsa de trabajo", puntos: 5 },
-      { texto: "bolsa de empleo", puntos: 5 },
-      { texto: "oferta de empleo publico", puntos: 5 },
-      { texto: "proceso selectivo", puntos: 4 },
-      { texto: "pruebas selectivas", puntos: 4 },
-      { texto: "personal funcionario", puntos: 4 },
-      { texto: "personal laboral", puntos: 4 },
-      { texto: "convocatoria", puntos: 3 },
+      { texto: "oposicion", points: 5 },
+      { texto: "concurso-oposicion", points: 5 },
+      { texto: "bolsa de trabajo", points: 5 },
+      { texto: "bolsa de empleo", points: 5 },
+      { texto: "oferta de empleo publico", points: 5 },
+      { texto: "proceso selectivo", points: 4 },
+      { texto: "pruebas selectivas", points: 4 },
+      { texto: "personal funcionario", points: 4 },
+      { texto: "personal laboral", points: 4 },
+      { texto: "convocatoria", points: 3 },
       { texto: "plazas", points: 3 }
     ],
     medias: [
@@ -148,16 +148,21 @@ function clasificarTexto(texto, seccion) {
 
   for (const [sector, reglas] of Object.entries(SECTORES)) {
     let puntuacion = 0;
+    
     for (const fuerte of (reglas.fuertes || [])) {
+      const valor = fuerte.points !== undefined ? fuerte.points : (fuerte.puntos || 3);
       if (textoAnalizar.includes(fuerte.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-        puntuacion += fuerte.puntos;
+        puntuacion += valor;
       }
     }
+    
     for (const media of (reglas.medias || [])) {
+      const valor = media.points !== undefined ? media.points : (media.puntos || 2);
       if (textoAnalizar.includes(media.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-        puntuacion += media.points;
+        puntuacion += valor;
       }
     }
+
     if (puntuacion >= reglas.threshold && puntuacion > maxPuntuacion) {
       maxPuntuacion = puntuacion;
       mejorSector = sector;
@@ -199,13 +204,15 @@ async function ejecutarCapturadorBoja() {
 
     const documentosProcesados = [];
     const urlBase = "https://www.juntadeandalucia.es";
+    const xmlFiles = ["s51.xml", "s52.xml", "s53.xml", "s54.xml", "s55.xml", "s56.xml", "s57.xml"];
 
-    const xmlFiles = [
-        "s51.xml", "s52.xml", "s53.xml", "s54.xml", "s55.xml", "s56.xml", "s57.xml"
-    ];
+    let totalPdfsEncontrados = 0;
 
     for (const xmlFile of xmlFiles) {
         const urlRss = `${urlBase}/boja/distribucion/${xmlFile}`;
+        let pdfsEnXml = 0;
+        let relevantesEnXml = 0;
+
         try {
             const respuesta = await fetchWithRetry(urlRss, {
                 headers: { "User-Agent": USER_AGENT },
@@ -219,10 +226,15 @@ async function ejecutarCapturadorBoja() {
                 const textoEnlace = $(el).text().trim();
                 const href = $(el).attr("href");
 
-                if (href && textoEnlace.includes("Descargar la disposición en PDF")) {
-                    const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
+                if (href && (textoEnlace.includes("Descargar la disposición en PDF") || href.includes("/boja/2026/"))) {
+                    if (!href.includes("/boja/2026/")) return;
 
-                    // 1. Extraer el texto DESPUÉS del enlace (donde está realmente el título del anuncio)
+                    pdfsEnXml++;
+                    totalPdfsEncontrados++;
+
+                    const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
+                    const textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
+
                     let nextNodesText = [];
                     let next = el.nextSibling;
                     while (next) {
@@ -233,50 +245,38 @@ async function ejecutarCapturadorBoja() {
                         if (txt) nextNodesText.push(txt);
                         next = next.nextSibling;
                     }
-                    let textoDespues = nextNodesText.join(" ").replace(/\s+/g, " ").trim();
 
-                    // Cortar si aparece el siguiente "Boletín:"
-                    if (textoDespues.includes("Boletín:")) {
-                        textoDespues = textoDespues.split(/Boletín:/i)[0].trim();
-                    }
+                    let tituloLimpio = nextNodesText.join(" ").replace(/\s+/g, " ").trim();
 
-                    // 2. Extraer el texto ANTES del enlace (para contexto de clasificación)
-                    let prevNodesText = [];
-                    let prev = el.previousSibling;
-                    while (prev) {
-                        if (prev.type === 'tag' && prev.name === 'a' && $(prev).text().includes("Descargar la disposición en PDF")) {
-                            break;
+                    if (!tituloLimpio || tituloLimpio.length < 15 || /^\d+\./.test(tituloLimpio)) {
+                        const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
+                        if (matchKeyword && matchKeyword.index !== undefined) {
+                            tituloLimpio = textoBloque.substring(matchKeyword.index).trim();
+                        } else {
+                            tituloLimpio = textoBloque;
                         }
-                        const txt = prev.type === 'text' ? prev.data : $(prev).text();
-                        if (txt) prevNodesText.unshift(txt);
-                        prev = prev.previousSibling;
                     }
-                    let textoAntes = prevNodesText.join(" ").replace(/\s+/g, " ").trim();
 
-                    const textoCompleto = textoAntes + " " + textoDespues;
-
-                    // El título limpio es estrictamente el texto posterior
-                    let tituloLimpio = textoDespues
+                    tituloLimpio = tituloLimpio
                         .replace(/http:\/\/.*$/, "")
+                        .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
+                        .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
+                        .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
+                        .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
+                        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
+                        .replace(/Junta de Andalucía/g, "")
+                        .replace(/Descargar la disposición en PDF/g, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    // Respaldo por si el texto posterior está vacío
-                    if (!tituloLimpio || tituloLimpio.length < 10) {
-                        tituloLimpio = textoAntes
-                            .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
-                            .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
-                            .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
-                            .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
-                            .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
-                            .replace(/Junta de Andalucía/g, "")
-                            .replace(/\s+/g, " ")
-                            .trim();
+                    if (!tituloLimpio || tituloLino < 10) {
+                        tituloLimpio = textoBloque.replace(/http:\/\/.*$/, "").replace(/\s+/g, " ").trim();
                     }
 
                     if (tituloLimpio.length > 15) {
-                        const sectorEncontrado = clasificarTexto(textoCompleto, "");
+                        const sectorEncontrado = clasificarTexto(textoBloque, "");
                         if (sectorEncontrado) {
+                            relevantesEnXml++;
                             documentosProcesados.push({
                                 titulo: tituloLimpio,
                                 url_pdf: urlPdfFinal,
@@ -286,6 +286,8 @@ async function ejecutarCapturadorBoja() {
                     }
                 }
             });
+
+            console.log(`📄 ${xmlFile} ──> ${pdfsEnXml} PDFs encontrados | ${relevantesEnXml} relevantes`);
 
         } catch (error) {
             console.log(`↪️ Error procesando ${xmlFile}: ${error.message}`);
@@ -297,7 +299,8 @@ async function ejecutarCapturadorBoja() {
     );
 
     console.log("======================================");
-    console.log(`🎯 ANUNCIOS RELEVANTES ENCONTRADOS EN BOJA: ${unicos.length}`);
+    console.log(`🎯 TOTAL PDFs ANALIZADOS: ${totalPdfsEncontrados}`);
+    console.log(`📢 ANUNCIOS RELEVANTES ENCONTRADOS EN BOJA: ${unicos.length}`);
     console.log("======================================");
 
     for (const d of unicos) {
