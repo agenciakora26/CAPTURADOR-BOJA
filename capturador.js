@@ -235,42 +235,48 @@ async function ejecutarCapturadorBoja() {
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
                     const textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
 
-                    let nextNodesText = [];
-                    let next = el.nextSibling;
-                    while (next) {
-                        if (next.type === 'tag' && next.name === 'a' && $(next).text().includes("Descargar la disposición en PDF")) {
-                            break;
+                    // Buscar directamente el inicio real del título oficial del anuncio (Resolución, Orden, Decreto, Extracto, Acuerdo, Edicto, Anuncio, Corrección)
+                    let tituloLimpio = "";
+                    const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
+
+                    if (matchKeyword && matchKeyword.index !== undefined) {
+                        tituloLimpio = textoBloque.substring(matchKeyword.index).trim();
+                    } else {
+                        // Si no encuentra palabra clave clara, intentamos extraer el texto posterior al enlace
+                        let nextNodesText = [];
+                        let next = el.nextSibling;
+                        while (next) {
+                            if (next.type === 'tag' && next.name === 'a' && $(next).text().includes("Descargar la disposición en PDF")) {
+                                break;
+                            }
+                            const txt = next.type === 'text' ? next.data : $(next).text();
+                            if (txt) nextNodesText.push(txt);
+                            next = next.nextSibling;
                         }
-                        const txt = next.type === 'text' ? next.data : $(next).text();
-                        if (txt) nextNodesText.push(txt);
-                        next = next.nextSibling;
+                        tituloLimpio = nextNodesText.join(" ").replace(/\s+/g, " ").trim();
                     }
 
-                    let tituloLimpio = nextNodesText.join(" ").replace(/\s+/g, " ").trim();
-
-                    if (!tituloLimpio || tituloLimpio.length < 15 || /^\d+\./.test(tituloLimpio)) {
-                        const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
-                        if (matchKeyword && matchKeyword.index !== undefined) {
-                            tituloLimpio = textoBloque.substring(matchKeyword.index).trim();
-                        } else {
-                            tituloLimpio = textoBloque;
-                        }
-                    }
-
+                    // Limpieza profunda y definitiva para eliminar URLs, fechas, cabeceras técnicas y metadatos de distribución
                     tituloLimpio = tituloLimpio
-                        .replace(/http:\/\/.*$/, "")
+                        .replace(/https?:\/\/[^\s]+?\/boja\/[^\s]+/gi, "")
+                        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
+                        .replace(/Junta de Andalucía/gi, "")
                         .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
                         .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
                         .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
                         .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
-                        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
-                        .replace(/Junta de Andalucía/g, "")
                         .replace(/Descargar la disposición en PDF/g, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    if (!tituloLimpio || tituloLimpio.length < 10) {
-                        tituloLimpio = textoBloque.replace(/http:\/\/.*$/, "").replace(/\s+/g, " ").trim();
+                    // Respaldo por si quedara vacío tras la limpieza
+                    if (!tituloLimpio || tituloLimpio.length < 10 || tituloLimpio.toLowerCase().includes("boletín: boja")) {
+                        tituloLimpio = textoBloque
+                            .replace(/https?:\/\/[^\s]+/g, "")
+                            .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
+                            .replace(/Junta de Andalucía/gi, "")
+                            .replace(/\s+/g, " ")
+                            .trim();
                     }
 
                     if (tituloLimpio.length > 15) {
