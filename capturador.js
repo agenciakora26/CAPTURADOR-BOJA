@@ -269,7 +269,7 @@ async function ejecutarCapturadorBoja() {
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    if (!tituloLimpio || tituloLino < 10) {
+                    if (!tituloLimpio || tituloLimpio.length < 10) {
                         tituloLimpio = textoBloque.replace(/http:\/\/.*$/, "").replace(/\s+/g, " ").trim();
                     }
 
