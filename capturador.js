@@ -223,26 +223,27 @@ async function ejecutarCapturadorBoja() {
                         .trim();
 
                     if (textoBruto.length > 20) {
-                        // Buscar el inicio real del título del anuncio (Resolución, Orden, Decreto, Extracto, Acuerdo, etc.)
+                        // Extraer limpiamente el organismo y la sección del texto plano
+                        const matchOrg = textoBruto.match(/Organismo:\s*(.*?)(?=Administración:|Sección:|$)/i);
+                        const matchSec = textoBruto.match(/Sección:\s*(.*)/i);
+
+                        const organismoLim = matchOrg ? matchOrg[1].trim() : "";
+                        const seccionLim = matchSec ? matchSec[1].trim() : "";
+
+                        // Construir un título limpio y legible sin acumular código técnico
                         let tituloLimpio = "";
-                        const matchKeyword = textoBruto.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
-
-                        if (matchKeyword) {
-                            // Si encuentra la palabra clave, extrae el texto desde ahí en adelante
-                            tituloLimpio = textoBruto.substring(matchKeyword.index).trim();
+                        if (organismoLim && seccionLim) {
+                            tituloLimpio = `${organismoLim} — ${seccionLim}`;
+                        } else if (organismoLim) {
+                            tituloLimpio = organismoLim;
                         } else {
-                            // Fallback de limpieza si no encuentra la palabra clave exacta
+                            // Limpieza de respaldo si la estructura cambia
                             tituloLimpio = textoBruto
-                                .replace(/Boletín:\s*BOJA[^O]+/gi, "")
-                                .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
-                                .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
-                                .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
+                                .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
+                                .replace(/Organismo:/gi, "")
+                                .replace(/Administración:/gi, "")
+                                .replace(/Sección:/gi, "")
                                 .trim();
-                        }
-
-                        // Si por cualquier motivo queda vacío o demasiado corto, usamos el texto bruto
-                        if (!tituloLimpio || tituloLimpio.length < 10) {
-                            tituloLimpio = textoBruto;
                         }
 
                         const sectorEncontrado = clasificarTexto(textoBruto, "");
