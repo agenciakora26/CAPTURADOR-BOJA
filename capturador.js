@@ -233,32 +233,18 @@ async function ejecutarCapturadorBoja() {
                     totalPdfsEncontrados++;
 
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
+                    
+                    // Extraemos el texto completo del bloque contenedor
+                    const textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
 
-                    // Recopilamos el texto de los hermanos anteriores donde reside el título real del anuncio
-                    let rawText = "";
-                    let prev = el.previousSibling;
-                    while (prev) {
-                        const txt = prev.type === 'text' ? prev.data : $(prev).text();
-                        if (txt) rawText = txt + " " + rawText;
-                        prev = prev.previousSibling;
-                    }
-
-                    if (rawText.trim().length < 15) {
-                        rawText = $(el).parent().text() || "";
-                    }
-
+                    // Buscamos la palabra clave oficial donde empieza el título del anuncio
                     let tituloLimpio = "";
-
-                    // Buscamos estrictamente la palabra clave oficial donde comienza el anuncio
-                    const matchKeyword = rawText.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
+                    const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección|Bases)\b/i);
 
                     if (matchKeyword && matchKeyword.index !== undefined) {
-                        tituloLimpio = rawText.substring(matchKeyword.index);
-                    } else if (rawText.includes("Junta de Andalucía")) {
-                        const partes = rawText.split(/Junta de Andalucía/i);
-                        if (partes.length > 1) {
-                            tituloLimpio = partes[1];
-                        }
+                        tituloLimpio = textoBloque.substring(matchKeyword.index);
+                    } else {
+                        tituloLimpio = textoBloque;
                     }
 
                     // Cortar exactamente al llegar a cualquier URL
@@ -266,19 +252,14 @@ async function ejecutarCapturadorBoja() {
                         tituloLimpio = tituloLimpio.split(/https?:\/\//)[0];
                     }
 
-                    // Limpieza profunda de metadatos técnicos e institucionales
+                    // Limpieza final de marcas de tiempo y espacios
                     tituloLimpio = tituloLimpio
                         .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
                         .replace(/Descargar la disposición en PDF/gi, "")
-                        .replace(/Boletín:.*/gi, "")
-                        .replace(/Organismo:.*/gi, "")
-                        .replace(/Administración:.*/gi, "")
-                        .replace(/Sección:.*/gi, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    // Validamos que sea un título real y oficial (descartando cualquier cosa que empiece por Boletín o sea muy corto)
-                    if (tituloLimpio.length > 15 && !tituloLimpio.toLowerCase().includes("boletín:")) {
+                    if (tituloLimpio.length > 15) {
                         const sectorEncontrado = clasificarTexto(tituloLimpio, "");
                         if (sectorEncontrado) {
                             relevantesEnXml++;
