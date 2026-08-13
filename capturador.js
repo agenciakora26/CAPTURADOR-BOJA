@@ -226,33 +226,31 @@ async function ejecutarCapturadorBoja() {
                 headers: { "User-Agent": USER_AGENT }
             });
 
-            const xmlContent = await respuesta.text();
+            let xmlContent = await respuesta.text();
             
-            // 🔥 CLAVE: Usar xmlMode: true para que Cheerio entienda bien los tags <entry> y <content>
+            // 🔥 Neutralizar los namespaces para que Cheerio procese los nodos <entry> correctamente
+            xmlContent = xmlContent.replace(/xmlns[^ >"]+("[^"]*")?/g, '');
+
             const $ = cheerio.load(xmlContent, { xmlMode: true, decodeEntities: true });
 
             $('entry').each((_, el) => {
                 const entry = $(el);
                 
-                // Extraer link y limpiar URL
                 const linkHref = entry.find('link').attr('href');
-                if (!linkHref) return;
+                if (!linkHref || !linkHref.includes('/boja/2026/')) return;
                 
-                const urlHtml = linkHref.replace(/&amp;/g, '&');
+                const urlHtml = linkHref.startsWith('http') ? linkHref : new URL(linkHref, urlBase).href;
                 const urlPdf = urlHtml.replace('.html', '.pdf');
                 
-                // Extraer el texto del tag <content>
-                let contentText = entry.find('content').text();
+                const contentText = entry.find('content').text() || entry.text();
                 
-                // Limpieza del título: extraer solo hasta que aparece "Boletín:" o el salto de línea
-                let titulo = contentText.split(/Boletín:|Organismo:|Administración:/i)[0];
+                let titulo = contentText.split(/Boletín:|Organismo:|Administración:|Sección:/i)[0];
                 titulo = limpiarYEspaciar(titulo);
 
                 if (titulo.length > 10) {
                     entradasEnXml++;
                     totalPdfsEncontrados++;
 
-                    // Clasificar
                     const sector = clasificarTexto(titulo, "");
                     if (sector) {
                         relevantesEnXml++;
@@ -272,7 +270,6 @@ async function ejecutarCapturadorBoja() {
         }
     }
 
-    // Filtrar duplicados (por si acaso)
     const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
 
     console.log("======================================");
@@ -280,7 +277,6 @@ async function ejecutarCapturadorBoja() {
     console.log(`📢 ANUNCIOS RELEVANTES ENCONTRADOS EN BOJA: ${unicos.length}`);
     console.log("======================================");
 
-    // Guardado en Supabase
     for (const d of unicos) {
         try {
             const existentes = await supabaseRequest(`anuncios_boja?url_pdf=eq.${encodeURIComponent(d.url_pdf)}`, { method: "GET" });
