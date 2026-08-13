@@ -144,8 +144,6 @@ const SECTORES = {
 function limpiarYEspaciar(texto) {
   if (!texto) return "";
   return texto
-    .replace(/([a-z0-9áéíóúñ])/g, (match, p1) => p1)
-    // Inserta espacio entre minúscula/número y mayúscula contigua (ej: 2026Organismo -> 2026 Organismo)
     .replace(/([a-z0-9áéíóúñ])([A-ZÁÉÍÓÚÑ])/g, '$1 $2')
     .replace(/\s+/g, " ")
     .trim();
@@ -244,39 +242,25 @@ async function ejecutarCapturadorBoja() {
 
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
                     
-                    // Extraer y formatear el texto del bloque contenedor corrigiendo palabras juntas
                     let textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
                     textoBloque = limpiarYEspaciar(textoBloque);
 
-                    let tituloLimpio = "";
-
-                    // Buscar la palabra clave oficial donde empieza el título del anuncio
-                    const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección|Bases)\b/i);
-
-                    if (matchKeyword && matchKeyword.index !== undefined) {
-                        tituloLimpio = textoBloque.substring(matchKeyword.index);
-                    } else if (textoBloque.includes("Junta de Andalucía")) {
+                    // Si es el primer anuncio del XML y viene pegado a "Junta de Andalucía", separamos esa unión
+                    if (/Junta de Andalucía/i.test(textoBloque)) {
                         const partes = textoBloque.split(/Junta de Andalucía/i);
-                        tituloLimpio = partes.length > 1 ? partes[1] : textoBloque;
-                    } else {
-                        tituloLimpio = textoBloque;
+                        if (partes.length > 1 && partes[1].trim().length > 10) {
+                            textoBloque = partes[1];
+                        }
                     }
 
-                    // Cortar si aparece alguna URL en el texto
-                    if (tituloLimpio.includes("http://") || tituloLimpio.includes("https://")) {
-                        tituloLimpio = tituloLimpio.split(/https?:\/\//)[0];
+                    // Como el texto real del anuncio está al principio, cortamos justo donde empieza la URL o la palabra "Boletín:"
+                    if (/https?:\/\//.test(textoBloque)) {
+                        textoBloque = textoBloque.split(/https?:\/\//)[0];
+                    } else if (/Boletín:/i.test(textoBloque)) {
+                        textoBloque = textoBloque.split(/Boletín:/i)[0];
                     }
 
-                    // Limpieza final de metadatos técnicos y marcas de tiempo
-                    tituloLimpio = limpiarYEspaciar(
-                        tituloLimpio
-                            .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
-                            .replace(/Descargar la disposición en PDF/gi, "")
-                            .replace(/Boletín:.*/gi, "")
-                            .replace(/Organismo:.*/gi, "")
-                            .replace(/Administración:.*/gi, "")
-                            .replace(/Sección:.*/gi, "")
-                    );
+                    let tituloLimpio = limpiarYEspaciar(textoBloque);
 
                     if (tituloLimpio.length > 15) {
                         const sectorEncontrado = clasificarTexto(tituloLimpio, "");
