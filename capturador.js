@@ -233,17 +233,21 @@ async function ejecutarCapturadorBoja() {
                     totalPdfsEncontrados++;
 
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
-                    const textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
+
+                    // Clonamos el nodo padre y eliminamos todas las etiquetas 'a' para evitar contaminación con enlaces o textos de descarga
+                    const $clone = $(el).parent().clone();
+                    $clone.find("a").remove();
+                    const textoBloque = $clone.text().replace(/\s+/g, " ").trim();
 
                     let tituloLimpio = "";
 
-                    // 1. Intentar buscar mediante palabra clave oficial de inicio de anuncio
+                    // Buscar mediante palabra clave oficial de inicio de anuncio
                     const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
 
                     if (matchKeyword && matchKeyword.index !== undefined) {
                         tituloLimpio = textoBloque.substring(matchKeyword.index).trim();
                     } else {
-                        // 2. Si no hay palabra clave, cortar por la sección para eliminar toda la cabecera técnica previa
+                        // Cortar por la sección si no hay palabra clave directa
                         const partesSeccion = textoBloque.split(/Sección:\s*[\d\.\s-\w,]+/i);
                         if (partesSeccion.length > 1 && partesSeccion[1].trim().length > 10) {
                             tituloLimpio = partesSeccion[1].trim();
@@ -252,7 +256,7 @@ async function ejecutarCapturadorBoja() {
                         }
                     }
 
-                    // Limpieza profunda y definitiva de URLs, fechas, menciones institucionales y restos técnicos
+                    // Limpieza profunda de metadatos técnicos e institucionales
                     tituloLimpio = tituloLimpio
                         .replace(/https?:\/\/[^\s]+/g, "")
                         .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
@@ -261,7 +265,6 @@ async function ejecutarCapturadorBoja() {
                         .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
                         .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
                         .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
-                        .replace(/Descargar la disposición en PDF/gi, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
@@ -270,7 +273,6 @@ async function ejecutarCapturadorBoja() {
                             .replace(/https?:\/\/[^\s]+/g, "")
                             .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
                             .replace(/Junta de Andalucía/gi, "")
-                            .replace(/Descargar la disposición en PDF/gi, "")
                             .replace(/\s+/g, " ")
                             .trim();
                     }
