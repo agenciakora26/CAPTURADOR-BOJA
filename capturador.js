@@ -230,37 +230,41 @@ async function ejecutarCapturadorBoja() {
             const html = await respuesta.text();
             const $ = cheerio.load(html);
 
+            // Buscamos los enlaces HTML de cada anuncio (ej: /boja/2026/156/2.html)
             $("a").each((_, el) => {
                 const href = $(el).attr("href");
-                const textoEnlace = $(el).text().trim();
 
-                if (href && (textoEnlace.includes("Descargar la disposición en PDF") || href.includes("/boja/2026/"))) {
-                    if (!href.includes("/boja/2026/")) return;
-
+                if (href && href.includes("/boja/2026/") && href.endsWith(".html")) {
                     pdfsEnXml++;
                     totalPdfsEncontrados++;
 
-                    const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
-                    
-                    let textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
-                    textoBloque = limpiarYEspaciar(textoBloque);
+                    const urlHtmlFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
+                    const urlPdfFinal = urlHtmlFinal.replace(".html", ".pdf");
 
-                    // Si es el primer anuncio del XML y viene pegado a "Junta de Andalucía", separamos esa unión
-                    if (/Junta de Andalucía/i.test(textoBloque)) {
-                        const partes = textoBloque.split(/Junta de Andalucía/i);
-                        if (partes.length > 1 && partes[1].trim().length > 10) {
-                            textoBloque = partes[1];
+                    // Extraemos el texto anterior al enlace dentro de su contenedor
+                    let parentHtml = $(el).parent().html() || "";
+                    let parts = parentHtml.split($(el).toString());
+                    let textBefore = cheerio.load(parts[0] || "").text();
+
+                    if (textBefore.trim().length < 10) {
+                        textBefore = $(el).parent().text() || "";
+                    }
+
+                    // Manejo del primer anuncio pegado a "Junta de Andalucía"
+                    if (/Junta de Andalucía/i.test(textBefore)) {
+                        const subparts = textBefore.split(/Junta de Andalucía/i);
+                        if (subparts.length > 1) {
+                            textBefore = subparts[subparts.length - 1];
                         }
                     }
 
-                    // Como el texto real del anuncio está al principio, cortamos justo donde empieza la URL o la palabra "Boletín:"
-                    if (/https?:\/\//.test(textoBloque)) {
-                        textoBloque = textoBloque.split(/https?:\/\//)[0];
-                    } else if (/Boletín:/i.test(textoBloque)) {
-                        textoBloque = textoBloque.split(/Boletín:/i)[0];
-                    }
+                    let tituloLimpio = limpiarYEspaciar(textBefore);
 
-                    let tituloLimpio = limpiarYEspaciar(textoBloque);
+                    // Cortamos cualquier residuo de metadatos si apareciera
+                    if (tituloLimpio.includes("Boletín:")) tituloLimpio = tituloLimpio.split("Boletín:")[0];
+                    if (tituloLimpio.includes("Organismo:")) tituloLimpio = tituloLimpio.split("Organismo:")[0];
+
+                    tituloLimpio = limpiarYEspaciar(tituloLimpio);
 
                     if (tituloLimpio.length > 15) {
                         const sectorEncontrado = clasificarTexto(tituloLimpio, "");
