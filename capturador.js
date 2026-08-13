@@ -199,7 +199,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-    console.log("🚀 [BOJA] Capturando mediante la API oficial JSON...");
+    console.log("🚀 [BOJA] Capturando disposiciones de hoy mediante la API oficial JSON...");
 
     const documentosProcesados = [];
     const anioActual = new Date().getFullYear();
@@ -218,9 +218,20 @@ async function ejecutarCapturadorBoja() {
             throw new Error("El formato de la respuesta JSON no es un array válido.");
         }
 
-        console.log(`📥 JSON descargado correctamente. Total de registros en ${anioActual}: ${data.length}`);
+        // Obtener la fecha actual en formato YYYY-MM-DD para comparar con dateUTC
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const todayStr = `${year}-${month}-${day}`;
 
-        for (const item of data) {
+        console.log(`📥 JSON descargado. Filtrando registros correspondientes a hoy: ${todayStr}`);
+
+        // Filtrar exclusivamente los elementos publicados en el día actual
+        const registrosHoy = data.filter(item => item.dateUTC && item.dateUTC.startsWith(todayStr));
+        console.log(`📊 Disposiciones encontradas para la fecha de hoy: ${registrosHoy.length}`);
+
+        for (const item of registrosHoy) {
             if (!item.hasPdf || !item.pdf || !item.pdf[0] || !item.pdf[0].publicUrl) continue;
 
             totalPdfsEncontrados++;
@@ -241,7 +252,7 @@ async function ejecutarCapturadorBoja() {
             }
         }
 
-        console.log(`📄 Analizados ${totalPdfsEncontrados} disposiciones | ${relevantesEnJson} relevantes encontrados`);
+        console.log(`📄 Analizados ${totalPdfsEncontrados} registros de hoy | ${relevantesEnJson} relevantes encontrados`);
 
     } catch (error) {
         console.log(`↪️ Error procesando la API JSON del BOJA: ${error.message}`);
@@ -252,7 +263,7 @@ async function ejecutarCapturadorBoja() {
     );
 
     console.log("======================================");
-    console.log(`🎯 TOTAL DISPOSICIONES ANALIZADAS: ${totalPdfsEncontrados}`);
+    console.log(`🎯 TOTAL DISPOSICIONES DE HOY ANALIZADAS: ${totalPdfsEncontrados}`);
     console.log(`📢 ANUNCIOS RELEVANTES ENCONTRADOS EN BOJA: ${unicos.length}`);
     console.log("======================================");
 
