@@ -208,7 +208,7 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-    console.log("🚀 [BOJA] Capturando mediante lectura directa de canales de distribución...");
+    console.log("🚀 [BOJA] Capturando mediante lectura estructurada de XML...");
 
     const documentosProcesados = [];
     const urlBase = "https://www.juntadeandalucia.es";
@@ -218,110 +218,87 @@ async function ejecutarCapturadorBoja() {
 
     for (const xmlFile of xmlFiles) {
         const urlRss = `${urlBase}/boja/distribucion/${xmlFile}`;
-        let pdfsEnXml = 0;
+        let entradasEnXml = 0;
         let relevantesEnXml = 0;
 
         try {
             const respuesta = await fetchWithRetry(urlRss, {
-                headers: { "User-Agent": USER_AGENT },
-                signal: AbortSignal.timeout(15000)
+                headers: { "User-Agent": USER_AGENT }
             });
 
-            const html = await respuesta.text();
-            const $ = cheerio.load(html);
+            const xmlContent = await respuesta.text();
+            
+            // 🔥 CLAVE: Usar xmlMode: true para que Cheerio entienda bien los tags <entry> y <content>
+            const $ = cheerio.load(xmlContent, { xmlMode: true, decodeEntities: true });
 
-            // Buscamos los enlaces HTML de cada anuncio (ej: /boja/2026/156/2.html)
-            $("a").each((_, el) => {
-                const href = $(el).attr("href");
+            $('entry').each((_, el) => {
+                const entry = $(el);
+                
+                // Extraer link y limpiar URL
+                const linkHref = entry.find('link').attr('href');
+                if (!linkHref) return;
+                
+                const urlHtml = linkHref.replace(/&amp;/g, '&');
+                const urlPdf = urlHtml.replace('.html', '.pdf');
+                
+                // Extraer el texto del tag <content>
+                let contentText = entry.find('content').text();
+                
+                // Limpieza del título: extraer solo hasta que aparece "Boletín:" o el salto de línea
+                let titulo = contentText.split(/Boletín:|Organismo:|Administración:/i)[0];
+                titulo = limpiarYEspaciar(titulo);
 
-                if (href && href.includes("/boja/2026/") && href.endsWith(".html")) {
-                    pdfsEnXml++;
+                if (titulo.length > 10) {
+                    entradasEnXml++;
                     totalPdfsEncontrados++;
 
-                    const urlHtmlFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
-                    const urlPdfFinal = urlHtmlFinal.replace(".html", ".pdf");
-
-                    // Extraemos el texto anterior al enlace dentro de su contenedor
-                    let parentHtml = $(el).parent().html() || "";
-                    let parts = parentHtml.split($(el).toString());
-                    let textBefore = cheerio.load(parts[0] || "").text();
-
-                    if (textBefore.trim().length < 10) {
-                        textBefore = $(el).parent().text() || "";
-                    }
-
-                    // Manejo del primer anuncio pegado a "Junta de Andalucía"
-                    if (/Junta de Andalucía/i.test(textBefore)) {
-                        const subparts = textBefore.split(/Junta de Andalucía/i);
-                        if (subparts.length > 1) {
-                            textBefore = subparts[subparts.length - 1];
-                        }
-                    }
-
-                    let tituloLimpio = limpiarYEspaciar(textBefore);
-
-                    // Cortamos cualquier residuo de metadatos si apareciera
-                    if (tituloLimpio.includes("Boletín:")) tituloLimpio = tituloLimpio.split("Boletín:")[0];
-                    if (tituloLimpio.includes("Organismo:")) tituloLimpio = tituloLimpio.split("Organismo:")[0];
-
-                    tituloLimpio = limpiarYEspaciar(tituloLimpio);
-
-                    if (tituloLimpio.length > 15) {
-                        const sectorEncontrado = clasificarTexto(tituloLimpio, "");
-                        if (sectorEncontrado) {
-                            relevantesEnXml++;
-                            documentosProcesados.push({
-                                titulo: tituloLimpio,
-                                url_pdf: urlPdfFinal,
-                                sector: sectorEncontrado
-                            });
-                        }
+                    // Clasificar
+                    const sector = clasificarTexto(titulo, "");
+                    if (sector) {
+                        relevantesEnXml++;
+                        documentosProcesados.push({
+                            titulo: titulo,
+                            url_pdf: urlPdf,
+                            sector: sector
+                        });
                     }
                 }
             });
 
-            console.log(`📄 ${xmlFile} ──> ${pdfsEnXml} PDFs encontrados | ${relevantesEnXml} relevantes`);
+            console.log(`📄 ${xmlFile} ──> ${entradasEnXml} anuncios procesados | ${relevantesEnXml} relevantes`);
 
         } catch (error) {
             console.log(`↪️ Error procesando ${xmlFile}: ${error.message}`);
         }
     }
 
-    const unicos = Array.from(
-        new Map(documentosProcesados.map(d => [d.url_pdf, d])).values()
-    );
+    // Filtrar duplicados (por si acaso)
+    const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
 
     console.log("======================================");
-    console.log(`🎯 TOTAL PDFs ANALIZADOS: ${totalPdfsEncontrados}`);
+    console.log(`🎯 TOTAL ANUNCIOS ANALIZADOS: ${totalPdfsEncontrados}`);
     console.log(`📢 ANUNCIOS RELEVANTES ENCONTRADOS EN BOJA: ${unicos.length}`);
     console.log("======================================");
 
+    // Guardado en Supabase
     for (const d of unicos) {
         try {
-            const existentes = await supabaseRequest(`anuncios_boja?url_pdf=eq.${encodeURIComponent(d.url_pdf)}`, {
-                method: "GET"
-            });
-
+            const existentes = await supabaseRequest(`anuncios_boja?url_pdf=eq.${encodeURIComponent(d.url_pdf)}`, { method: "GET" });
             if (existentes && existentes.length > 0) continue;
 
-            await supabaseRequest(
-                "anuncios_boja",
-                {
-                    method: "POST",
-                    body: JSON.stringify({
-                        titulo: d.titulo,
-                        url_pdf: d.url_pdf,
-                        categoria: d.sector,
-                        origen: "BOJA",
-                        enviado: false
-                    })
-                }
-            );
-
-            console.log(`✅ Guardado en Supabase (BOJA): ${d.titulo.substring(0, 40)}...`);
-
+            await supabaseRequest("anuncios_boja", {
+                method: "POST",
+                body: JSON.stringify({
+                    titulo: d.titulo,
+                    url_pdf: d.url_pdf,
+                    categoria: d.sector,
+                    origen: "BOJA",
+                    enviado: false
+                })
+            });
+            console.log(`✅ Guardado: ${d.titulo.substring(0, 40)}...`);
         } catch (err) {
-            console.log(`⚠️ Aviso al guardar en Supabase (BOJA): ${err.message}`);
+            console.log(`⚠️ Error al guardar: ${err.message}`);
         }
     }
 
