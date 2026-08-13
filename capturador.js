@@ -1,4 +1,3 @@
-import * as cheerio from "cheerio";
 import fetch from "node-fetch";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
@@ -141,14 +140,6 @@ const SECTORES = {
   }
 };
 
-function limpiarYEspaciar(texto) {
-  if (!texto) return "";
-  return texto
-    .replace(/([a-z0-9áéíóúñ])([A-ZÁÉÍÓÚÑ])/g, '$1 $2')
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function clasificarTexto(texto, seccion) {
   const textoAnalizar = (seccion + " " + texto).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   let mejorSector = null;
@@ -208,93 +199,89 @@ async function supabaseRequest(endpoint, opciones = {}) {
 }
 
 async function ejecutarCapturadorBoja() {
-    console.log("🚀 [BOJA] Capturando mediante lectura estructurada de XML...");
+    console.log("🚀 [BOJA] Capturando mediante la API oficial JSON...");
 
     const documentosProcesados = [];
-    const urlBase = "https://www.juntadeandalucia.es";
-    const xmlFiles = ["s51.xml", "s52.xml", "s53.xml", "s54.xml", "s55.xml", "s56.xml", "s57.xml"];
+    const anioActual = new Date().getFullYear();
+    const urlJson = `https://datos.juntadeandalucia.es/api/v0/boja/all?year=${anioActual}&format=json`;
 
     let totalPdfsEncontrados = 0;
+    let relevantesEnJson = 0;
 
-    for (const xmlFile of xmlFiles) {
-        const urlRss = `${urlBase}/boja/distribucion/${xmlFile}`;
-        let entradasEnXml = 0;
-        let relevantesEnXml = 0;
+    try {
+        const respuesta = await fetchWithRetry(urlJson, {
+            headers: { "User-Agent": USER_AGENT }
+        });
 
-        try {
-            const respuesta = await fetchWithRetry(urlRss, {
-                headers: { "User-Agent": USER_AGENT }
-            });
-
-            let xmlContent = await respuesta.text();
-            
-            // 🔥 Neutralizar los namespaces para que Cheerio procese los nodos <entry> correctamente
-            xmlContent = xmlContent.replace(/xmlns[^ >"]+("[^"]*")?/g, '');
-
-            const $ = cheerio.load(xmlContent, { xmlMode: true, decodeEntities: true });
-
-            $('entry').each((_, el) => {
-                const entry = $(el);
-                
-                const linkHref = entry.find('link').attr('href');
-                if (!linkHref || !linkHref.includes('/boja/2026/')) return;
-                
-                const urlHtml = linkHref.startsWith('http') ? linkHref : new URL(linkHref, urlBase).href;
-                const urlPdf = urlHtml.replace('.html', '.pdf');
-                
-                const contentText = entry.find('content').text() || entry.text();
-                
-                let titulo = contentText.split(/Boletín:|Organismo:|Administración:|Sección:/i)[0];
-                titulo = limpiarYEspaciar(titulo);
-
-                if (titulo.length > 10) {
-                    entradasEnXml++;
-                    totalPdfsEncontrados++;
-
-                    const sector = clasificarTexto(titulo, "");
-                    if (sector) {
-                        relevantesEnXml++;
-                        documentosProcesados.push({
-                            titulo: titulo,
-                            url_pdf: urlPdf,
-                            sector: sector
-                        });
-                    }
-                }
-            });
-
-            console.log(`📄 ${xmlFile} ──> ${entradasEnXml} anuncios procesados | ${relevantesEnXml} relevantes`);
-
-        } catch (error) {
-            console.log(`↪️ Error procesando ${xmlFile}: ${error.message}`);
+        const data = await respuesta.json();
+        if (!Array.isArray(data)) {
+            throw new Error("El formato de la respuesta JSON no es un array válido.");
         }
+
+        console.log(`📥 JSON descargado correctamente. Total de registros en ${anioActual}: ${data.length}`);
+
+        for (const item of data) {
+            if (!item.hasPdf || !item.pdf || !item.pdf[0] || !item.pdf[0].publicUrl) continue;
+
+            totalPdfsEncontrados++;
+            const urlPdfFinal = item.pdf[0].publicUrl;
+            const titulo = item.summaryNoHtml || item.title || "";
+            const organizacion = item.organisation || "";
+
+            if (titulo.length > 10) {
+                const sectorEncontrado = clasificarTexto(titulo, organizacion);
+                if (sectorEncontrado) {
+                    relevantesEnJson++;
+                    documentosProcesados.push({
+                        titulo: titulo,
+                        url_pdf: urlPdfFinal,
+                        sector: sectorEncontrado
+                    });
+                }
+            }
+        }
+
+        console.log(`📄 Analizados ${totalPdfsEncontrados} disposiciones | ${relevantesEnJson} relevantes encontrados`);
+
+    } catch (error) {
+        console.log(`↪️ Error procesando la API JSON del BOJA: ${error.message}`);
     }
 
-    const unicos = Array.from(new Map(documentosProcesados.map(d => [d.url_pdf, d])).values());
+    const unicos = Array.from(
+        new Map(documentosProcesados.map(d => [d.url_pdf, d])).values()
+    );
 
     console.log("======================================");
-    console.log(`🎯 TOTAL ANUNCIOS ANALIZADOS: ${totalPdfsEncontrados}`);
+    console.log(`🎯 TOTAL DISPOSICIONES ANALIZADAS: ${totalPdfsEncontrados}`);
     console.log(`📢 ANUNCIOS RELEVANTES ENCONTRADOS EN BOJA: ${unicos.length}`);
     console.log("======================================");
 
     for (const d of unicos) {
         try {
-            const existentes = await supabaseRequest(`anuncios_boja?url_pdf=eq.${encodeURIComponent(d.url_pdf)}`, { method: "GET" });
+            const existentes = await supabaseRequest(`anuncios_boja?url_pdf=eq.${encodeURIComponent(d.url_pdf)}`, {
+                method: "GET"
+            });
+
             if (existentes && existentes.length > 0) continue;
 
-            await supabaseRequest("anuncios_boja", {
-                method: "POST",
-                body: JSON.stringify({
-                    titulo: d.titulo,
-                    url_pdf: d.url_pdf,
-                    categoria: d.sector,
-                    origen: "BOJA",
-                    enviado: false
-                })
-            });
-            console.log(`✅ Guardado: ${d.titulo.substring(0, 40)}...`);
+            await supabaseRequest(
+                "anuncios_boja",
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        titulo: d.titulo,
+                        url_pdf: d.url_pdf,
+                        categoria: d.sector,
+                        origen: "BOJA",
+                        enviado: false
+                    })
+                }
+            );
+
+            console.log(`✅ Guardado en Supabase (BOJA): ${d.titulo.substring(0, 40)}...`);
+
         } catch (err) {
-            console.log(`⚠️ Error al guardar: ${err.message}`);
+            console.log(`⚠️ Aviso al guardar en Supabase (BOJA): ${err.message}`);
         }
     }
 
