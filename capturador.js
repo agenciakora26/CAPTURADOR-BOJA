@@ -224,40 +224,61 @@ async function ejecutarCapturadorBoja() {
 
             $("a").each((_, el) => {
                 const href = $(el).attr("href");
+                const textoEnlace = $(el).text().trim();
 
-                if (href && href.includes("/boja/2026/")) {
+                if (href && (textoEnlace.includes("Descargar la disposición en PDF") || href.includes("/boja/2026/"))) {
+                    if (!href.includes("/boja/2026/")) return;
+
                     pdfsEnXml++;
                     totalPdfsEncontrados++;
 
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
-                    
-                    // Extraer el texto completo del contenedor que rodea al enlace
-                    const textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
+
+                    // Recopilamos el texto de los hermanos anteriores donde reside el título real del anuncio
+                    let rawText = "";
+                    let prev = el.previousSibling;
+                    while (prev) {
+                        const txt = prev.type === 'text' ? prev.data : $(prev).text();
+                        if (txt) rawText = txt + " " + rawText;
+                        prev = prev.previousSibling;
+                    }
+
+                    if (rawText.trim().length < 15) {
+                        rawText = $(el).parent().text() || "";
+                    }
 
                     let tituloLimpio = "";
 
-                    // Buscar la palabra clave oficial donde empieza el título del anuncio (Resolución, Orden, Decreto, etc.)
-                    const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
+                    // Buscamos estrictamente la palabra clave oficial donde comienza el anuncio
+                    const matchKeyword = rawText.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
 
                     if (matchKeyword && matchKeyword.index !== undefined) {
-                        tituloLimpio = textoBloque.substring(matchKeyword.index);
-                    } else {
-                        tituloLimpio = textoBloque;
+                        tituloLimpio = rawText.substring(matchKeyword.index);
+                    } else if (rawText.includes("Junta de Andalucía")) {
+                        const partes = rawText.split(/Junta de Andalucía/i);
+                        if (partes.length > 1) {
+                            tituloLimpio = partes[1];
+                        }
                     }
 
-                    // Cortar exactamente donde empieza la URL del anuncio para eliminarla del título
+                    // Cortar exactamente al llegar a cualquier URL
                     if (tituloLimpio.includes("http://") || tituloLimpio.includes("https://")) {
                         tituloLimpio = tituloLimpio.split(/https?:\/\//)[0];
                     }
 
-                    // Limpieza final de fechas y espacios sobrantes
+                    // Limpieza profunda de metadatos técnicos e institucionales
                     tituloLimpio = tituloLimpio
                         .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
                         .replace(/Descargar la disposición en PDF/gi, "")
+                        .replace(/Boletín:.*/gi, "")
+                        .replace(/Organismo:.*/gi, "")
+                        .replace(/Administración:.*/gi, "")
+                        .replace(/Sección:.*/gi, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    if (tituloLimpio.length > 15) {
+                    // Validamos que sea un título real y oficial (descartando cualquier cosa que empiece por Boletín o sea muy corto)
+                    if (tituloLimpio.length > 15 && !tituloLimpio.toLowerCase().includes("boletín:")) {
                         const sectorEncontrado = clasificarTexto(tituloLimpio, "");
                         if (sectorEncontrado) {
                             relevantesEnXml++;
