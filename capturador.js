@@ -233,52 +233,58 @@ async function ejecutarCapturadorBoja() {
                     totalPdfsEncontrados++;
 
                     const urlPdfFinal = href.startsWith("http") ? href : new URL(href, urlBase).href;
+                    const textoBloque = $(el).parent().text() || $(el).closest("div, p, body").text();
 
-                    // Clonamos el nodo padre y eliminamos todas las etiquetas 'a' para evitar contaminación con enlaces o textos de descarga
-                    const $clone = $(el).parent().clone();
-                    $clone.find("a").remove();
-                    const textoBloque = $clone.text().replace(/\s+/g, " ").trim();
+                    let nextNodesText = [];
+                    let next = el.nextSibling;
+                    while (next) {
+                        if (next.type === 'tag' && next.name === 'a' && $(next).text().includes("Descargar la disposición en PDF")) {
+                            break;
+                        }
+                        const txt = next.type === 'text' ? next.data : $(next).text();
+                        if (txt) nextNodesText.push(txt);
+                        next = next.nextSibling;
+                    }
+
+                    let textoDespues = nextNodesText.join(" ").replace(/\s+/g, " ").trim();
+                    let textoCompleto = textoBloque + " " + textoDespues;
 
                     let tituloLimpio = "";
 
-                    // Buscar mediante palabra clave oficial de inicio de anuncio
-                    const matchKeyword = textoBloque.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
+                    // 1. Manejo específico para el primer anuncio del XML que viene pegado a "Junta de Andalucía"
+                    if (/Junta de Andalucía/i.test(textoCompleto)) {
+                        const partes = textoCompleto.split(/Junta de Andalucía/i);
+                        if (partes.length > 1 && partes[1].trim().length > 10) {
+                            tituloLimpio = partes[1].trim();
+                        }
+                    }
 
-                    if (matchKeyword && matchKeyword.index !== undefined) {
-                        tituloLimpio = textoBloque.substring(matchKeyword.index).trim();
-                    } else {
-                        // Cortar por la sección si no hay palabra clave directa
-                        const partesSeccion = textoBloque.split(/Sección:\s*[\d\.\s-\w,]+/i);
-                        if (partesSeccion.length > 1 && partesSeccion[1].trim().length > 10) {
-                            tituloLimpio = partesSeccion[1].trim();
+                    // 2. Si no viene del primer anuncio o falló, buscar directamente la palabra clave oficial de inicio (Resolución, Orden, etc.)
+                    if (!tituloLimpio || tituloLimpio.length < 15 || tituloLimpio.toLowerCase().includes("boletín:")) {
+                        const matchKeyword = textoCompleto.match(/(Resolución|Orden|Decreto|Extracto|Acuerdo|Edicto|Anuncio|Convenio|Corrección)\b/i);
+                        if (matchKeyword && matchKeyword.index !== undefined) {
+                            tituloLimpio = textoCompleto.substring(matchKeyword.index).trim();
+                        } else if (textoDespues.length > 15) {
+                            tituloLimpio = textoDespues;
                         } else {
                             tituloLimpio = textoBloque;
                         }
                     }
 
-                    // Limpieza profunda de metadatos técnicos e institucionales
+                    // 3. Limpieza rigurosa para eliminar URLs residuales, fechas y esquemas de boletín
                     tituloLimpio = tituloLimpio
                         .replace(/https?:\/\/[^\s]+/g, "")
                         .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
-                        .replace(/Junta de Andalucía/gi, "")
                         .replace(/Boletín:\s*BOJA[^\s]+/gi, "")
                         .replace(/Organismo:\s*.*?(?=Administración:|Sección:|$)/gi, "")
                         .replace(/Administración:\s*.*?(?=Sección:|$)/gi, "")
                         .replace(/Sección:\s*[\d\.\s-\w,]+/gi, "")
+                        .replace(/Descargar la disposición en PDF/gi, "")
                         .replace(/\s+/g, " ")
                         .trim();
 
-                    if (!tituloLimpio || tituloLimpio.length < 10) {
-                        tituloLimpio = textoBloque
-                            .replace(/https?:\/\/[^\s]+/g, "")
-                            .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "")
-                            .replace(/Junta de Andalucía/gi, "")
-                            .replace(/\s+/g, " ")
-                            .trim();
-                    }
-
                     if (tituloLimpio.length > 15) {
-                        const sectorEncontrado = clasificarTexto(textoBloque, "");
+                        const sectorEncontrado = clasificarTexto(textoCompleto, "");
                         if (sectorEncontrado) {
                             relevantesEnXml++;
                             documentosProcesados.push({
