@@ -110,18 +110,15 @@ function obtenerSectoresUsuario(usuario) {
 }
 
 // ============================================================
-// 6. ANALIZAR PDF REAL MEDIANTE EXTRACCIÓN DE TEXTO Y GROQ
+// ANALISIS DE PDF REAL Y ENRIQUECIMIENTO CON IA (GROQ)
 // ============================================================
 
-async function analizarPDFConGroq(anuncio, intento = 1) {
+const MODELO_GROQ = "llama-3.3-70b-versatile";
 
+async function analizarPDFConGroq(anuncio, intento = 1) {
     const titulo = String(anuncio.titulo || "").trim();
     const urlPdf = String(anuncio.url_pdf || "").trim();
-    const categoria = String(
-        anuncio.categoria ||
-        anuncio.sector ||
-        ""
-    ).trim();
+    const categoria = String(anuncio.categoria || anuncio.sector || "").trim();
 
     if (!urlPdf) {
         return {
@@ -163,7 +160,7 @@ async function analizarPDFConGroq(anuncio, intento = 1) {
 
         const prompt = `
 Eres el analista experto y redactor jefe de BoletínHoy. 
-Tu trabajo es leer el texto extraído de un documento oficial (BOJA o BOE) y redactar un **resumen ejecutivo de alto valor real** para el usuario.
+Tu trabajo es leer el texto extraído de un documento oficial (BOJA o BOE) y redactar un análisis ejecutivo de alto valor real para el usuario.
 
 DATOS DEL DOCUMENTO:
 - Título oficial: ${titulo}
@@ -181,28 +178,32 @@ INSTRUCCIONES CLAVE:
 - Si es una licitación: explica el objeto del contrato, importe o entidad contratante.
 - Si es una notificación o acto administrativo: detalla qué se está notificando y qué implicaciones tiene.
 - NUNCA digas frases vacías como "es una publicación oficial" o "consulte el documento". Ve directo a la información útil.
-- Extensión: Entre 90 y 160 palabras.
 
-RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO con esta estructura:
+RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO (sin texto adicional ni marcas de markdown tipo \`\`\`json) con esta estructura exacta:
 {
-    "resumen": "Aquí tu resumen ejecutivo redactado con rigor, datos concretos y utilidad práctica."
+  "resumen": "Resumen claro y directo de 2 o 3 frases enfocado en lo que importa",
+  "impacto": "A quién afecta o qué impacto tiene",
+  "plazo": "Plazos indicados o 'No especificado'",
+  "requisitos": "Requisitos principales o 'No aplicable'",
+  "accion": "Qué acción se debe realizar o 'Informativo'",
+  "valor_profesional": "Por qué es relevante para este sector"
 }
 `;
 
         const resGroq = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
             headers: {
-                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "qwen/qwen3.6-27b",
+                model: MODELO_GROQ,
                 messages: [
                     { role: "system", content: "Devuelves exclusivamente respuestas en JSON estricto." },
                     { role: "user", content: prompt }
                 ],
-                response_format: { type: "json_object" },
-                temperature: 0.2
+                temperature: 0.1
+                // ⚠️ Eliminado "response_format" para evitar el error HTTP 400 de Groq
             })
         });
 
@@ -227,42 +228,46 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO con esta estructura:
 
         let resultado;
         try {
-            resultado = JSON.parse(textoRespuesta);
-        } catch (jsonError) {
-            const limpio = textoRespuesta
-                .replace(/^```json/i, "")
-                .replace(/^```/i, "")
-                .replace(/```$/i, "")
-                .trim();
+            const limpio = textoRespuesta.replace(/```json/gi, "").replace(/```/g, "").trim();
             resultado = JSON.parse(limpio);
+        } catch (jsonError) {
+            console.warn("⚠️ Error parseando JSON de Groq, aplicando fallback de texto...");
+            resultado = {
+                resumen: textoRespuesta.substring(0, 300),
+                impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: ""
+            };
         }
 
         console.log(`✅ Resumen generado con éxito para: ${titulo.substring(0, 40)}...`);
 
         return {
             resumen: String(resultado.resumen || "").trim(),
-            impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: ""
+            impacto: String(resultado.impacto || "").trim(),
+            plazo: String(resultado.plazo || "").trim(),
+            requisitos: String(resultado.requisitos || "").trim(),
+            accion: String(resultado.accion || "").trim(),
+            valor_profesional: String(resultado.valor_profesional || "").trim()
         };
 
     } catch (error) {
         console.error(`❌ Error analizando el PDF: ${error.message}`);
         return {
             resumen: `Publicación oficial correspondiente a ${categoria}. ${titulo}.`,
-            impacto: "", plazo: "", requisitos: "", accion: "", valor_profesional: ""
+            impacto: "No disponible por error de análisis",
+            plazo: "",
+            requisitos: "",
+            accion: "",
+            valor_profesional: ""
         };
     }
 }
-
-// ============================================================
-// 7. ENRIQUECER ANUNCIOS CON IA
-// ============================================================
 
 async function enriquecerTitulosConIA(anuncios) {
     if (!anuncios || anuncios.length === 0) {
         return anuncios;
     }
 
-    console.log(`🤖 Analizando ${anuncios.length} anuncios mediante Groq...`);
+    console.log(`🤖 Analizando ${anuncios.length} anuncios mediante Groq (${MODELO_GROQ})...`);
     const analisisPorURL = new Map();
 
     for (const anuncio of anuncios) {
@@ -289,7 +294,7 @@ async function enriquecerTitulosConIA(anuncios) {
         anuncio.analisisIA = analisis;
         anuncio.resumenIA = analisis.resumen;
 
-        // Pausa de 3 segundos entre peticiones para respetar la cuota gratuita de Groq
+        // Pausa de 3 segundos entre peticiones para respetar la cuota gratuita
         await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
