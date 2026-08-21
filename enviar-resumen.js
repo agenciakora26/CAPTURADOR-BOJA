@@ -196,7 +196,7 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO con esta estructura:
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "llama-3.1-70b-versatile",
+                model: "qwen/qwen3.6-27b",
                 messages: [
                     { role: "system", content: "Devuelves exclusivamente respuestas en JSON estricto." },
                     { role: "user", content: prompt }
