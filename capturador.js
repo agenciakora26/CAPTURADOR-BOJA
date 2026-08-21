@@ -198,64 +198,85 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+// Parser XML/Atom nativo para extraer las entradas del BOJA
+function parsearAtomBoja(xml) {
+    const items = [];
+    const entryRegex = /<entry\b[^>]*>([\s\S]*?)<\/entry>/gi;
+    let match;
+
+    while ((match = entryRegex.exec(xml)) !== null) {
+        const entryContent = match[1];
+
+        const getTag = (tag) => {
+            const regex = new RegExp(`<(?:[a-zA-Z0-9_]+[:.])?${tag}[^>]*>([\\s\\S]*?)<\/(?:[a-zA-Z0-9_]+[:.])?${tag}>`, 'i');
+            const m = entryContent.match(regex);
+            if (!m) return '';
+            let val = m[1].trim();
+            val = val.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+            return val;
+        };
+
+        const getLink = () => {
+            const linkMatch = entryContent.match(/<link[^>]+href=["']([^"']+)["']/i);
+            return linkMatch ? linkMatch[1] : '';
+        };
+
+        const titulo = getTag('t_asumarioNoHtml') || getTag('title') || getTag('summary');
+        const organizacion = getTag('t_organisation') || getTag('organisation') || '';
+        let urlPdf = getLink();
+
+        if (titulo) {
+            items.push({
+                titulo: titulo.replace(/<[^>]*>/g, '').trim(),
+                organizacion: organizacion.replace(/<[^>]*>/g, '').trim(),
+                url_pdf: urlPdf
+            });
+        }
+    }
+    return items;
+}
+
 async function ejecutarCapturadorBoja() {
-    console.log("🚀 [BOJA] Capturando disposiciones de hoy mediante la API oficial JSON...");
+    console.log("🚀 [BOJA] Capturando disposiciones mediante feed XML/Atom oficial...");
 
     const documentosProcesados = [];
     const anioActual = new Date().getFullYear();
-    const urlJson = `https://datos.juntadeandalucia.es/api/v0/boja/all?year=${anioActual}&format=json`;
+    const urlAtom = `https://www.juntadeandalucia.es/ssdigitales/datasets/contentapi/search/boja.atom?q=data.t_year%3A${anioActual}&_source=data.t_year%2Cdata.t_sectionN1%2Cdata.t_sectionN2%2Cdata.t_lawDisposition%2Cdata.t_typeDisposition%2Cdata.t_number%2Cdata.d_date%2Cdata.t_asumarioNoHtml%2Cdata.t_organisation%2Cdata.t_bodyNoHtml&sort=data.d_dateUTC%3Adesc%2Cdata.t_number%2Cdata.d_size%2Csize=50`;
 
-    let totalPdfsEncontrados = 0;
+    let totalAnalizados = 0;
     let relevantesEnJson = 0;
 
     try {
-        const respuesta = await fetchWithRetry(urlJson, {
+        const respuesta = await fetchWithRetry(urlAtom, {
             headers: { "User-Agent": USER_AGENT }
         });
 
-        const data = await respuesta.json();
-        if (!Array.isArray(data)) {
-            throw new Error("El formato de la respuesta JSON no es un array válido.");
-        }
+        const xmlText = await respuesta.text();
+        const registros = parsearAtomBoja(xmlText);
 
-        // Obtener la fecha actual en formato YYYY-MM-DD para comparar con dateUTC
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        const todayStr = `${year}-${month}-${day}`;
+        totalAnalizados = registros.length;
+        console.log(`📊 Disposiciones encontradas en el Atom: ${totalAnalizados}`);
 
-        console.log(`📥 JSON descargado. Filtrando registros correspondientes a hoy: ${todayStr}`);
+        for (const item of registros) {
+            if (!item.url_pdf || !item.titulo) continue;
 
-        // Filtrar exclusivamente los elementos publicados en el día actual
-        const registrosHoy = data.filter(item => item.dateUTC && item.dateUTC.startsWith(todayStr));
-        console.log(`📊 Disposiciones encontradas para la fecha de hoy: ${registrosHoy.length}`);
-
-        for (const item of registrosHoy) {
-            if (!item.hasPdf || !item.pdf || !item.pdf[0] || !item.pdf[0].publicUrl) continue;
-
-            totalPdfsEncontrados++;
-            const urlPdfFinal = item.pdf[0].publicUrl;
-            const titulo = item.summaryNoHtml || item.title || "";
-            const organizacion = item.organisation || "";
-
-            if (titulo.length > 10) {
-                const sectorEncontrado = clasificarTexto(titulo, organizacion);
+            if (item.titulo.length > 10) {
+                const sectorEncontrado = clasificarTexto(item.titulo, item.organizacion);
                 if (sectorEncontrado) {
                     relevantesEnJson++;
                     documentosProcesados.push({
-                        titulo: titulo,
-                        url_pdf: urlPdfFinal,
+                        titulo: item.titulo,
+                        url_pdf: item.url_pdf,
                         sector: sectorEncontrado
                     });
                 }
             }
         }
 
-        console.log(`📄 Analizados ${totalPdfsEncontrados} registros de hoy | ${relevantesEnJson} relevantes encontrados`);
+        console.log(`📄 Analizados ${totalAnalizados} registros | ${relevantesEnJson} relevantes encontrados`);
 
     } catch (error) {
-        console.log(`↪️ Error procesando la API JSON del BOJA: ${error.message}`);
+        console.log(`↪️ Error procesando el feed Atom del BOJA: ${error.message}`);
     }
 
     const unicos = Array.from(
@@ -263,7 +284,7 @@ async function ejecutarCapturadorBoja() {
     );
 
     console.log("======================================");
-    console.log(`🎯 TOTAL DISPOSICIONES DE HOY ANALIZADAS: ${totalPdfsEncontrados}`);
+    console.log(`🎯 TOTAL DISPOSICIONES ANALIZADAS: ${totalAnalizados}`);
     console.log(`📢 ANUNCIOS RELEVANTES ENCONTRADOS EN BOJA: ${unicos.length}`);
     console.log("======================================");
 
