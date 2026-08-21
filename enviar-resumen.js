@@ -113,7 +113,11 @@ function obtenerSectoresUsuario(usuario) {
 // ANALISIS DE PDF REAL Y ENRIQUECIMIENTO CON IA (GROQ)
 // ============================================================
 
-const MODELO_GROQ = "llama-3.3-70b-versatile";
+// ============================================================
+// ANALISIS DE PDF REAL Y ENRIQUECIMIENTO CON IA (GROQ)
+// ============================================================
+
+const MODELO_GROQ = "openai/gpt-oss-120b";
 
 async function analizarPDFConGroq(anuncio, intento = 1) {
     const titulo = String(anuncio.titulo || "").trim();
@@ -203,7 +207,6 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO (sin texto adicional ni marca
                     { role: "user", content: prompt }
                 ],
                 temperature: 0.1
-                // ⚠️ Eliminado "response_format" para evitar el error HTTP 400 de Groq
             })
         });
 
