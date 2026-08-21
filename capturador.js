@@ -198,85 +198,64 @@ async function supabaseRequest(endpoint, opciones = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-// Parser XML/Atom nativo para extraer las entradas del BOJA
-function parsearAtomBoja(xml) {
-    const items = [];
-    const entryRegex = /<entry\b[^>]*>([\s\S]*?)<\/entry>/gi;
-    let match;
-
-    while ((match = entryRegex.exec(xml)) !== null) {
-        const entryContent = match[1];
-
-        const getTag = (tag) => {
-            const regex = new RegExp(`<(?:[a-zA-Z0-9_]+[:.])?${tag}[^>]*>([\\s\\S]*?)<\/(?:[a-zA-Z0-9_]+[:.])?${tag}>`, 'i');
-            const m = entryContent.match(regex);
-            if (!m) return '';
-            let val = m[1].trim();
-            val = val.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
-            return val;
-        };
-
-        const getLink = () => {
-            const linkMatch = entryContent.match(/<link[^>]+href=["']([^"']+)["']/i);
-            return linkMatch ? linkMatch[1] : '';
-        };
-
-        const titulo = getTag('t_asumarioNoHtml') || getTag('title') || getTag('summary');
-        const organizacion = getTag('t_organisation') || getTag('organisation') || '';
-        let urlPdf = getLink();
-
-        if (titulo) {
-            items.push({
-                titulo: titulo.replace(/<[^>]*>/g, '').trim(),
-                organizacion: organizacion.replace(/<[^>]*>/g, '').trim(),
-                url_pdf: urlPdf
-            });
-        }
-    }
-    return items;
-}
-
 async function ejecutarCapturadorBoja() {
-    console.log("🚀 [BOJA] Capturando disposiciones mediante feed XML/Atom oficial...");
+    console.log("🚀 [BOJA] Capturando disposiciones mediante API JSON oficial (ventana deslizante reciente)...");
 
     const documentosProcesados = [];
     const anioActual = new Date().getFullYear();
-    const urlAtom = `https://www.juntadeandalucia.es/ssdigitales/datasets/contentapi/search/boja.atom?q=data.t_year%3A${anioActual}&_source=data.t_year%2Cdata.t_sectionN1%2Cdata.t_sectionN2%2Cdata.t_lawDisposition%2Cdata.t_typeDisposition%2Cdata.t_number%2Cdata.d_date%2Cdata.t_asumarioNoHtml%2Cdata.t_organisation%2Cdata.t_bodyNoHtml&sort=data.d_dateUTC%3Adesc%2Cdata.t_number%3Adesc&size=50`;
+    const urlJson = `https://datos.juntadeandalucia.es/api/v0/boja/all?year=${anioActual}&format=json`;
 
-    let totalAnalizados = 0;
+    let totalPdfsEncontrados = 0;
     let relevantesEnJson = 0;
 
     try {
-        const respuesta = await fetchWithRetry(urlAtom, {
+        const respuesta = await fetchWithRetry(urlJson, {
             headers: { "User-Agent": USER_AGENT }
         });
 
-        const xmlText = await respuesta.text();
-        const registros = parsearAtomBoja(xmlText);
+        const data = await respuesta.json();
+        if (!Array.isArray(data)) {
+            throw new Error("El formato de la respuesta JSON no es un array válido.");
+        }
 
-        totalAnalizados = registros.length;
-        console.log(`📊 Disposiciones encontradas en el Atom: ${totalAnalizados}`);
+        // Ordenar de más reciente a más antigua por fecha UTC y número de disposición descendente
+        data.sort((a, b) => {
+            const dateA = new Date(a.dateUTC || 0);
+            const dateB = new Date(b.dateUTC || 0);
+            if (dateB - dateA !== 0) return dateB - dateA;
+            return (b.number || 0) - (a.number || 0);
+        });
 
-        for (const item of registros) {
-            if (!item.url_pdf || !item.titulo) continue;
+        // Tomar los últimos 150 registros para asegurar que capturamos todo lo reciente, ordinarios y extraordinarios
+        const registrosRecientes = data.slice(0, 150);
 
-            if (item.titulo.length > 10) {
-                const sectorEncontrado = clasificarTexto(item.titulo, item.organizacion);
+        console.log(`📊 Registros recientes analizados del JSON: ${registrosRecientes.length}`);
+
+        for (const item of registrosRecientes) {
+            if (!item.hasPdf || !item.pdf || !item.pdf[0] || !item.pdf[0].publicUrl) continue;
+
+            totalPdfsEncontrados++;
+            const urlPdfFinal = item.pdf[0].publicUrl;
+            const titulo = item.summaryNoHtml || item.title || "";
+            const organizacion = item.organisation || "";
+
+            if (titulo.length > 10) {
+                const sectorEncontrado = clasificarTexto(titulo, organizacion);
                 if (sectorEncontrado) {
                     relevantesEnJson++;
                     documentosProcesados.push({
-                        titulo: item.titulo,
-                        url_pdf: item.url_pdf,
+                        titulo: titulo,
+                        url_pdf: urlPdfFinal,
                         sector: sectorEncontrado
                     });
                 }
             }
         }
 
-        console.log(`📄 Analizados ${totalAnalizados} registros | ${relevantesEnJson} relevantes encontrados`);
+        console.log(`📄 Analizados ${totalPdfsEncontrados} PDFs | ${relevantesEnJson} relevantes encontrados`);
 
     } catch (error) {
-        console.log(`↪️ Error procesando el feed Atom del BOJA: ${error.message}`);
+        console.log(`↪️ Error procesando la API JSON del BOJA: ${error.message}`);
     }
 
     const unicos = Array.from(
@@ -284,7 +263,7 @@ async function ejecutarCapturadorBoja() {
     );
 
     console.log("======================================");
-    console.log(`🎯 TOTAL DISPOSICIONES ANALIZADAS: ${totalAnalizados}`);
+    console.log(`🎯 TOTAL DISPOSICIONES RECIENTES ANALIZADAS: ${totalPdfsEncontrados}`);
     console.log(`📢 ANUNCIOS RELEVANTES ENCONTRADOS EN BOJA: ${unicos.length}`);
     console.log("======================================");
 
