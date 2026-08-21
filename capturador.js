@@ -241,7 +241,7 @@ async function ejecutarCapturadorBoja() {
 
     const documentosProcesados = [];
     const anioActual = new Date().getFullYear();
-    const urlAtom = `https://www.juntadeandalucia.es/ssdigitales/datasets/contentapi/search/boja.atom?q=data.t_year%3A${anioActual}&_source=data.t_year%2Cdata.t_sectionN1%2Cdata.t_sectionN2%2Cdata.t_lawDisposition%2Cdata.t_typeDisposition%2Cdata.t_number%2Cdata.d_date%2Cdata.t_asumarioNoHtml%2Cdata.t_organisation%2Cdata.t_bodyNoHtml&sort=data.d_dateUTC%3Adesc%2Cdata.t_number%2Cdata.d_size%2Csize=50`;
+    const urlAtom = `https://www.juntadeandalucia.es/ssdigitales/datasets/contentapi/search/boja.atom?q=data.t_year%3A${anioActual}&_source=data.t_year%2Cdata.t_sectionN1%2Cdata.t_sectionN2%2Cdata.t_lawDisposition%2Cdata.t_typeDisposition%2Cdata.t_number%2Cdata.d_date%2Cdata.t_asumarioNoHtml%2Cdata.t_organisation%2Cdata.t_bodyNoHtml&sort=data.d_dateUTC%3Adesc%2Cdata.t_number%3Adesc&size=50`;
 
     let totalAnalizados = 0;
     let relevantesEnJson = 0;
