@@ -2,6 +2,8 @@ name: Importar empresas PLACSP
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "15 7 * * *"
 
 permissions:
   contents: read
