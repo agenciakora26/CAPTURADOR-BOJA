@@ -46,14 +46,11 @@ const PLACSP_START_FEED =
 
 
 const PLACSP_MAX_PAGES =
-  Math.min(
-    Math.max(
-      Number(
-        process.env.PLACSP_MAX_PAGES || 1
-      ),
-      1
+  Math.max(
+    Number(
+      process.env.PLACSP_MAX_PAGES || 1
     ),
-    100
+    1
   );
 
 
