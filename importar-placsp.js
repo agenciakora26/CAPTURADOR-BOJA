@@ -2171,24 +2171,15 @@ async function procesarPagina(
 
   const previousUrl =
 
-    getFeedLink(
-      feed,
-      "prev",
-      url
-    )
+  getFeedLink(
+    feed,
+    "next",
+    url
+  )
 
-    ||
+  ||
 
-    getFeedLink(
-      feed,
-      "previous",
-      url
-    )
-
-    ||
-
-    null;
-
+  null;
 
   return {
 
