@@ -30,13 +30,10 @@ jobs:
       - name: Importar adjudicaciones PLACSP
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           PLACSP_START_FEED: "https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom"
-
           PLACSP_MAX_PAGES: "1"
           PLACSP_DELAY_MS: "750"
           TZ: Europe/Madrid
-
         run: |
           node importar-placsp.js
