@@ -15,7 +15,7 @@ concurrency:
 jobs:
   importar-empresas:
     runs-on: ubuntu-latest
-    timeout-minutes: 600
+    timeout-minutes: 0
 
     steps:
       - name: Clonar repositorio
