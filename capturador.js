@@ -1,7 +1,7 @@
 import fetch from "node-fetch";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_KEY;
+const supabaseKey = process.env.SUPABASE_SECRET_KEY;
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 const SECTORES = {
@@ -187,8 +187,8 @@ async function supabaseRequest(endpoint, opciones = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
     ...opciones,
     headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
+      apikey: SUPABASE_SECRET_KEY,
+      Authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
       "Content-Type": "application/json",
       ...(opciones.headers || {})
     }
