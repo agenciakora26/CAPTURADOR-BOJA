@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_KEY;
+const supabaseKey = process.env.SUPABASE_SECRET_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
@@ -461,8 +461,8 @@ async function supabaseRequest(endpoint, opciones = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
     ...opciones,
     headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
+      apikey: SUPABASE_SECRET_KEY,
+      Authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
       "Content-Type": "application/json",
       ...(opciones.headers || {})
     }
