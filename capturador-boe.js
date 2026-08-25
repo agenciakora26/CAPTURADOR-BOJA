@@ -49,10 +49,10 @@ const SECTORES = {
       { texto: "bases de la convocatoria", puntos: 4 },
       { texto: "plazo de presentacion de solicitudes", puntos: 4 },
       { texto: "acceso libre", puntos: 4 },
-      { texto: "promocion interna", points: 2 },
-      { texto: "personal funcionario", points: 2 },
-      { texto: "personal laboral", points: 2 },
-      { texto: "personal estatutario", points: 2 },
+      { texto: "promocion interna", puntos: 2 },
+      { texto: "personal funcionario", puntos: 2 },
+      { texto: "personal laboral", puntos: 2 },
+      { texto: "personal estatutario", puntos: 2 },
       { texto: "plazas vacantes", puntos: 2 },
       { texto: "presentacion de solicitudes", puntos: 3 },
       { texto: "tasa de examen", puntos: 3 }
@@ -380,13 +380,13 @@ const SECTORES = {
       { texto: "transicion ecologica", puntos: 9 }
     ],
     medias: [
-      { texto: "territorio", points: 4 },
-      { texto: "ambiental", points: 4 },
-      { texto: "energia", points: 3 },
-      { texto: "residuos", points: 4 }
+      { texto: "territorio", puntos: 4 },
+      { texto: "ambiental", puntos: 4 },
+      { texto: "energia", puntos: 3 },
+      { texto: "residuos", puntos: 4 }
     ],
     combinaciones: [
-      { todos: ["evaluacion", "impacto", "ambiental"], points: 9 }
+      { todos: ["evaluacion", "impacto", "ambiental"], puntos: 9 }
     ],
     negativas: [],
     excluirSiContiene: []
