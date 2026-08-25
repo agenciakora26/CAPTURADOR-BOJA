@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SUPABASE_KEY = process.env.SUPABASE_KEY || "";
+const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_ANON_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const USER_AGENT = "Mozilla/5.0 (compatible; BoletinHoy/1.0)";
 
