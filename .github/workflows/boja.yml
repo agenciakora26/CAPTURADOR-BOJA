@@ -1,13 +1,5 @@
 name: Automatizador BOJA
 
-on:
-  workflow_dispatch:
-  schedule:
-      # Cada 9 minutos de 8:00 a 15:54 CEST (6:00 a 13:54 UTC), de lunes a domingo
-      - cron: "*/9 6-13 * * *"
-      # Cada 9 minutos de 16:00 a 16:27 CEST (14:00 a 14:27 UTC), de lunes a domingo
-      - cron: "0-30/9 14 * * *"
-
 permissions:
   contents: read
 
