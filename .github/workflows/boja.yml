@@ -1,5 +1,8 @@
 name: Automatizador BOJA
 
+on:
+  workflow_dispatch:
+
 permissions:
   contents: read
 
@@ -41,5 +44,4 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TZ: Europe/Madrid
-        run: |
-          node enviar-resumen.js
+        run: node enviar-resumen.js
